@@ -1,1 +1,12 @@
 .vscode/
+# Environments
+.venv/
+venv/
+env/
+
+# Python Cache
+__pycache__/
+*.pyc
+
+# Mac Junk Files
+.DS_Store
