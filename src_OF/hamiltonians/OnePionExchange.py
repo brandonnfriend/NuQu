@@ -1,5 +1,5 @@
 
-from src_OF.hamiltonians.operators import rho, rho_S, rho_I, Create, Annihilate, Number
+from src_OF.hamiltonians.Operators import rho, rho_S, rho_I, Create, Annihilate, Number
 from openfermion import normal_ordered
 from src_OF.utils import nearest_neighbor as NN
 from src_OF.utils.utils import site_to_qubit_1D
