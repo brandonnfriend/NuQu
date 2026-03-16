@@ -7,6 +7,8 @@ env/
 # Python Cache
 __pycache__/
 *.pyc
+*.py[cod]
+.ipynb_checkpoints/
 
 # Mac Junk Files
 .DS_Store
