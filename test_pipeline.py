@@ -38,17 +38,17 @@ if __name__ == "__main__":
 
 from src_PI.hamiltonians.core.EFTParameters import get_physical_parameters, calculate_dynamic_cutoffs
 
-def verify_paper_nb():
-    print("\n--- Verifying n_b Calculation vs. Paper (10x10x10 Lattice) ---")
-    params = get_physical_parameters()
-    L = 10
-    dim = 3
+# def verify_paper_nb():
+#     print("\n--- Verifying n_b Calculation vs. Paper (10x10x10 Lattice) ---")
+#     params = get_physical_parameters()
+#     L = 10
+#     dim = 3
     
-    # The paper notes n_b varies with nucleon number (eta/A)
-    # Testing for A = 2 (Deuteron-like) up to A = 20
-    for A in [2, 4, 8, 16, 20]:
-        n_b, pi_max, Pi_max = calculate_dynamic_cutoffs(L, dim, A, params, epsilon_cut=0.1, E_bound=140.0)
-        print(f"Nucleons A={A:2}:  n_b={n_b:2} | pi_max={pi_max:8.2f} | Pi_max={Pi_max:8.2f}")
+#     # The paper notes n_b varies with nucleon number (eta/A)
+#     # Testing for A = 2 (Deuteron-like) up to A = 20
+#     for A in [2, 4, 8, 16, 20]:
+#         n_b, pi_max, Pi_max = calculate_dynamic_cutoffs(L, dim, A, params, epsilon_cut=0.1, E_bound=140.0)
+#         print(f"Nucleons A={A:2}:  n_b={n_b:2} | pi_max={pi_max:8.2f} | Pi_max={Pi_max:8.2f}")
 
-if __name__ == "__main__":
-    verify_paper_nb()
+# if __name__ == "__main__":
+#     verify_paper_nb()

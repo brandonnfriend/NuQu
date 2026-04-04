@@ -56,7 +56,10 @@ def run_qubitization_analysis(pos_ham, mom_ham, n_sites, n_qubits_per_site):
     
     for key, value in combined_results.items():
         label = key.replace('_', ' ').title()
-        print(f"{label:25}: {value}")
+        if isinstance(value, (int, float)) and value > 10000:
+            print(f"{label:25}: {value:.4e}")
+        else:
+            print(f"{label:25}: {value}")
     print("="*50 + "\n")
     
     return combined_results
