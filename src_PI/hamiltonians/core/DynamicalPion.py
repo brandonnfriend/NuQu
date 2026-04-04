@@ -4,7 +4,13 @@ from src_PI.utils.LatticeGeometry import site_to_pion_qubit, get_total_sites, in
 from src_PI.utils.utils import calculate_chiral_coeff, get_P_Q, get_Pp_Qp 
 
 def H_pion_free(L, dim, n_b, pi_max, m_pi, a_L):
-    """Returns H_pos_free and H_mom_free for D-dimensions."""
+    """Returns H_pos_free and H_mom_free for D-dimensions.
+    L: lattice size in each dimension
+    dim: number of dimensions (1,2 or 3)
+    nb: number of quibits used to encode the field strength
+    pi_max: upper bound for coupling strength
+    m_pi: pion mass
+    a_L: lattice spacing """
     num_sites = get_total_sites(L, dim)
     P, Q = get_P_Q(pi_max, n_b)
     Pp, Qp = get_Pp_Qp(pi_max, n_b, a_L)
@@ -30,7 +36,15 @@ def H_pion_free(L, dim, n_b, pi_max, m_pi, a_L):
     return H_pos_free, H_mom_free
 
 def H_axial_vector(L, dim, n_b, pi_max, g_A, f_pi, a_L):
-    """Implements H_AV with N-dimensional spin-momentum coupling."""
+    """Implements the Axial-Vecotr term H_AV with N-dimensional spin-momentum coupling.
+    L: lattice size in each dimension
+    dim: number of dimensions (1,2 or 3)
+    nb: number of quibits used to encode the field strength
+    pi_max: upper bound for coupling strength
+    g_A: nuclear axial charge
+    f_pi: pion decay constant
+    a_L: lattice spacing 
+    """
     num_sites = get_total_sites(L, dim)
     P, Q = get_P_Q(pi_max, n_b)
     H_AV = QubitOperator()
@@ -67,7 +81,13 @@ def H_axial_vector(L, dim, n_b, pi_max, g_A, f_pi, a_L):
     return H_AV
 
 def H_WT_Logic(L, dim, n_b, pi_max, f_pi, a_L):
-    """Implements H_WT (Eq. 70/74) with full algebraic expansion of pi * Pi."""
+    """Implements the Weinberg-Tomozawa term H_WT (Eq. 70/74) with full algebraic expansion of pi * Pi.
+    L: lattice size in each dimension
+    dim: number of dimensions (1,2 or 3)
+    nb: number of quibits used to encode the field strength
+    pi_max: upper bound for coupling strength
+    f_pi: pion decay constant
+    a_L: lattice spacing"""
     num_sites = get_total_sites(L, dim)
     Pp, Qp = get_Pp_Qp(pi_max, n_b, a_L)
     P, Q = get_P_Q(pi_max, n_b)
