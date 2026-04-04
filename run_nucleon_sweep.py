@@ -1,3 +1,4 @@
+import time
 import numpy as np
 from src_PI.hamiltonians.core.EFTParameters import get_physical_parameters, calculate_dynamic_cutoffs
 from src_PI.estimation.EstimateResources import evaluate_resources
@@ -16,7 +17,7 @@ def get_L_for_A(A):
     Currently returns a fixed L, but perfectly set up for future L(A) functions.
     """
     # WARNING: Keep this at 2 for local testing! Crank to 10 for paper-grade HPC runs.
-    return 2
+    return 3
 
 def run_sweep():
     print("========================================================")
@@ -32,21 +33,32 @@ def run_sweep():
     for A in A_values:
         L = get_L_for_A(A)
         print(f"\n{'-'*50}\n Starting Simulation for A = {A} (L={L} in {dim}D)\n{'-'*50}")
-        
+        E_max = A*10 # Rough estimate of max energy based on nucleon count (10 MeV per nucleon)
+
         try:
             # 1. Calculate dynamic bounds
             n_b, pi_max, Pi_max = calculate_dynamic_cutoffs(
-                L, dim, A, params, epsilon_cut=0.1, E_bound=140.0
+                L, dim, A, params, epsilon_cut=0.1, E_bound=E_max
             )
             
+            # --- START TIMING ---
+            start_time = time.time()
+
             # 2. Run resource estimation
             norm_data = evaluate_resources(L, dim, n_b, pi_max, params)
             
+            end_time = time.time()
+            duration_seconds = end_time - start_time
+            # --- END TIMING ---
+
             # 3. Package the data for this iteration
             if 'Total_T_Count' in norm_data:
                 result_entry = {
                     'A': int(A),
+                    'L': L,
+                    'dim': dim,
                     'n_b': n_b,
+                    'Runtime_Seconds': round(duration_seconds, 2),
                     'Physical_Lambda': norm_data['Physical_Lambda'],
                     'Logical_Qubits_Per_Walk': norm_data['Logical_Qubits_Per_Walk'],
                     'Walk_Clifford_Count': norm_data['Walk_Clifford_Count'],
@@ -55,6 +67,7 @@ def run_sweep():
                     'Total_T_Count': norm_data['Total_T_Count']
                 }
                 sweep_results.append(result_entry)
+                print(f"Iteration completed in {duration_seconds:.2f} seconds.")
             else:
                 print(f"Warning: T-count not found in norm_data for A={A}. Data not recorded.")
                 
