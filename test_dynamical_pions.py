@@ -1,9 +1,4 @@
 # test_dynamical_pions.py
-from openfermion import jordan_wigner
-from src_PI.hamiltonians.DynamicalPion import Full_Dynamical_Pion_Hamiltonian
-from src_PI.hamiltonians.StaticTerms import Static_Nucleon_Hamiltonian_1D
-from src_PI.utils.utils import total_qubits_1D
-from src_PI.estimation.estimators import run_qubitization_analysis
 
 """
 TODO: RESOURCE ESTIMATION & BENCHMARKING
@@ -16,61 +11,133 @@ TODO: RESOURCE ESTIMATION & BENCHMARKING
    mappings to reduce hardware requirements.
 """
 
+from openfermion import jordan_wigner
+from src_PI.hamiltonians.Lattice1D.DynamicalPion1D import Full_Dynamical_Pion_Hamiltonian_1D
+from src_PI.hamiltonians.Lattice1D.StaticTerms1D import Static_Nucleon_Hamiltonian_1D
+from src_PI.utils.utils import total_qubits_1D
+from src_PI.estimation.estimators import run_qubitization_analysis
+from src_PI.estimation.NormalizeHamiltonians import normalize_for_qpe
+
 def evaluate_resources(num_sites, n_b, pi_max, params):
     """Calculates and prints hardware requirements for the EFT."""
     print(f"--- Resource Evaluation: {num_sites} Sites, {n_b} Bits/Species ---")
     
-    # 1. Total Qubit Count
     q_count = total_qubits_1D(num_sites, n_b)
     print(f"Total Qubits:      {q_count}")
     
-    # 2. Static Nucleon Sector (H_free, H_C, H_CI)
-    # Built as FermionOperators natively aware of the pion gaps
+    # 1. Build Static Nucleon Sector
     print("Building Static Nucleon Sector...")
     H_static_f = Static_Nucleon_Hamiltonian_1D(
         params['h'], params['C'], params['CI'], num_sites, n_b
     )
     H_static_q = jordan_wigner(H_static_f)
     
-    # 3. Dynamical Pion Sector (H_pi, H_AV, H_WT)
-    # Built directly as QubitOperators (Pauli strings)
+    # 2. Build Dynamical Pion Sector
     print("Building Dynamical Pion Sector...")
-    H_dyn_q = Full_Dynamical_Pion_Hamiltonian(num_sites, n_b, pi_max, params)
+    H_pos_dyn, H_mom = Full_Dynamical_Pion_Hamiltonian_1D(num_sites, n_b, pi_max, params)
     
-    # 4. Final Hamiltonian
-    H_total = H_static_q + H_dyn_q
+    # Combine all position-basis terms
+    H_pos = H_static_q + H_pos_dyn
     
-    # 5. Extract Metrics
-    num_terms = len(H_total.terms)
-    weights = [len(term) for term in H_total.terms]
+    # 3. Normalize Hamiltonians
+    print("Normalizing Hamiltonians for QPE...")
+    norm_data = normalize_for_qpe(H_pos, H_mom, safety_factor=2.5)
+    
+    print(f"-> Extracted classical energy shift: {norm_data['identity_shift'].real:.4f}")
+    print(f"-> Physical Lambda:                  {norm_data['physical_lambda']:.4f}")
+    print(f"-> Spectral Delta (Scaling factor):  {norm_data['delta']:.4f}")
+
+    H_total_norm = norm_data['H_pos_norm'] + norm_data['H_mom_norm']
+    num_terms = len(H_total_norm.terms)
+    weights = [len(term) for term in H_total_norm.terms]
     max_w = max(weights) if weights else 0
     w5_count = sum(1 for w in weights if w == 5)
     
-    print("="*45)
-    print(f"Total Pauli Strings:      {num_terms}")
-    print(f"Maximum Pauli Weight:     {max_w}")
-    print(f"Weight-5 Strings:         {w5_count}")
+    print("\n" + "="*45)
+    print(f"Total Pauli Strings (Non-Identity): {num_terms}")
+    print(f"Maximum Pauli Weight:               {max_w}")
+    print(f"Weight-5 Strings:                   {w5_count}")
     print("="*45)
 
-    # 6. Resource Estimation via pyLIQTR
-    print("Starting pyLIQTR analysis...")
-    run_qubitization_analysis(H_total)
+    # 4. Resource Estimation via pyLIQTR
+    print("Starting pyLIQTR analysis with split-oracle...")
+    run_qubitization_analysis(
+        norm_data['H_pos_norm'], 
+        norm_data['H_mom_norm'], 
+        num_sites, 
+        n_b
+    )
     
-    return H_total
+    return norm_data
 
 if __name__ == "__main__":
-    # Physical Constants (Watson et al. 2025)
     test_params = {
         'h': 13.29, 'C': -3.41, 'CI': 1.2, 
         'g_A': 1.27, 'f_pi': 92.4, 'm_pi': 138.0, 'a_L': 1.0
     }
     
-    # Evaluation: 2 sites, 2-bit field digitization
-    # This should yield 20 qubits and strings with max weight 5.
     try:
         evaluate_resources(num_sites=2, n_b=2, pi_max=5.0, params=test_params)
     except Exception as e:
         print(f"\nResource evaluation failed: {e}")
         import traceback
         traceback.print_exc()
+
+# def evaluate_resources(num_sites, n_b, pi_max, params):
+#     """Calculates and prints hardware requirements for the EFT."""
+#     print(f"--- Resource Evaluation: {num_sites} Sites, {n_b} Bits/Species ---")
+    
+#     # 1. Total Qubit Count
+#     q_count = total_qubits_1D(num_sites, n_b)
+#     print(f"Total Qubits:      {q_count}")
+    
+#     # 2. Static Nucleon Sector (H_free, H_C, H_CI)
+#     # Built as FermionOperators natively aware of the pion gaps
+#     print("Building Static Nucleon Sector...")
+#     H_static_f = Static_Nucleon_Hamiltonian_1D(
+#         params['h'], params['C'], params['CI'], num_sites, n_b
+#     )
+#     H_static_q = jordan_wigner(H_static_f)
+    
+#     # 3. Dynamical Pion Sector (H_pi, H_AV, H_WT)
+#     # Built directly as QubitOperators (Pauli strings)
+#     print("Building Dynamical Pion Sector...")
+#     H_dyn_q = Full_Dynamical_Pion_Hamiltonian(num_sites, n_b, pi_max, params)
+    
+#     # 4. Final Hamiltonian
+#     H_total = H_static_q + H_dyn_q
+    
+#     # 5. Extract Metrics
+#     num_terms = len(H_total.terms)
+#     weights = [len(term) for term in H_total.terms]
+#     max_w = max(weights) if weights else 0
+#     w5_count = sum(1 for w in weights if w == 5)
+    
+#     print("="*45)
+#     print(f"Total Pauli Strings:      {num_terms}")
+#     print(f"Maximum Pauli Weight:     {max_w}")
+#     print(f"Weight-5 Strings:         {w5_count}")
+#     print("="*45)
+
+#     # 6. Resource Estimation via pyLIQTR
+#     print("Starting pyLIQTR analysis...")
+#     run_qubitization_analysis(H_total)
+    
+#     return H_total
+
+# if __name__ == "__main__":
+#     # Physical Constants (Watson et al. 2025)
+#     test_params = {
+#         'h': 13.29, 'C': -3.41, 'CI': 1.2, 
+#         'g_A': 1.27, 'f_pi': 92.4, 'm_pi': 138.0, 'a_L': 1.0
+#     }
+    
+#     # Evaluation: 2 sites, 2-bit field digitization
+#     # This should yield 20 qubits and strings with max weight 5.
+#     try:
+#         evaluate_resources(num_sites=2, n_b=2, pi_max=5.0, params=test_params)
+#     except Exception as e:
+#         print(f"\nResource evaluation failed: {e}")
+#         import traceback
+#         traceback.print_exc()
 
