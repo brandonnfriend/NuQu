@@ -1,12 +1,12 @@
 import numpy as np
-import matplotlib.pyplot as plt
 from src_PI.hamiltonians.core.EFTParameters import get_physical_parameters, calculate_dynamic_cutoffs
 from src_PI.estimation.EstimateResources import evaluate_resources
+from src_PI.utils.DataIO import save_sweep_data
 
 def get_A_sweep_values():
-    """Generates 15 values for A: dense from 1-10, spreading out up to 50."""
+    """Generates values for A: dense from 1-10, spreading out up to 50."""
     A_dense = np.arange(1, 11)                  # [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-    A_sparse = np.linspace(20, 30, 5)           # [20, 27.5, 35, 42.5, 50]
+    A_sparse = np.linspace(20, 50, 5)           # [20, 27.5, 35, 42.5, 50]
     A_values = np.concatenate([A_dense, np.round(A_sparse)]).astype(int)
     return np.unique(A_values)
 
@@ -15,8 +15,8 @@ def get_L_for_A(A):
     Hook to dynamically change L based on A. 
     Currently returns a fixed L, but perfectly set up for future L(A) functions.
     """
-    # WARNING: Keep this at 2 for local testing! Crank to 10 for paper-grade runs.
-    return 2 
+    # WARNING: Keep this at 2 for local testing! Crank to 10 for paper-grade HPC runs.
+    return 2
 
 def run_sweep():
     print("========================================================")
@@ -27,8 +27,7 @@ def run_sweep():
     A_values = get_A_sweep_values()
     dim = 3  # Forcing 3D simulation
     
-    t_counts = []
-    actual_A_plotted = []
+    sweep_results = []
     
     for A in A_values:
         L = get_L_for_A(A)
@@ -43,37 +42,33 @@ def run_sweep():
             # 2. Run resource estimation
             norm_data = evaluate_resources(L, dim, n_b, pi_max, params)
             
-            # 3. Extract Total T-count (Ensure EstimateResources.py is passing this!)
-            if 'total_t_count' in norm_data and norm_data['total_t_count'] > 0:
-                t_counts.append(norm_data['total_t_count'])
-                actual_A_plotted.append(A)
+            # 3. Package the data for this iteration
+            if 'Total_T_Count' in norm_data:
+                result_entry = {
+                    'A': int(A),
+                    'n_b': n_b,
+                    'Physical_Lambda': norm_data['Physical_Lambda'],
+                    'Logical_Qubits_Per_Walk': norm_data['Logical_Qubits_Per_Walk'],
+                    'Walk_Clifford_Count': norm_data['Walk_Clifford_Count'],
+                    'Walk_T_Count': norm_data['Walk_T_Count'],
+                    'QFT_T_Count': norm_data['QFT_T_Count'],
+                    'Total_T_Count': norm_data['Total_T_Count']
+                }
+                sweep_results.append(result_entry)
             else:
-                print(f"Warning: T-count not found in norm_data for A={A}. Did pyLIQTR return it?")
+                print(f"Warning: T-count not found in norm_data for A={A}. Data not recorded.")
                 
         except Exception as e:
             print(f"FAILED for A={A}. Error: {e}")
             continue
 
-    # 4. Generate Plot
-    if t_counts:
-        plt.figure(figsize=(10, 6))
-        plt.plot(actual_A_plotted, t_counts, marker='o', linestyle='-', color='#d62728', linewidth=2)
-        plt.title('T-Gate Cost vs. Nucleon Number (A) for 3D Dynamical Pion EFT', fontsize=14)
-        plt.xlabel('Number of Nucleons (A)', fontsize=12)
-        plt.ylabel('T-Gates per Trotter Step', fontsize=12)
-        
-        # Using log scale because T-counts scale rapidly with A
-        plt.yscale('log') 
-        plt.grid(True, which="both", ls="--", alpha=0.6)
-        
-        plt.tight_layout()
-        plot_filename = 'T_count_vs_A_Sweep.png'
-        plt.savefig(plot_filename, dpi=300)
-        print(f"\n========================================================")
-        print(f" Sweep Complete! Plot saved successfully as '{plot_filename}'")
-        print(f"========================================================")
+    # 4. Save the gathered data to a JSON file
+    if sweep_results:
+        saved_filepath = save_sweep_data(L, dim, params, sweep_results)
+        print(f"\nSweep completed successfully. You can now plot this data using plot_sweep_data.py")
+        print(f"Saved data file: {saved_filepath}")
     else:
-        print("\nSweep finished, but no T-counts were successfully recorded to plot.")
+        print("\nSweep finished, but no data was successfully recorded.")
 
 if __name__ == '__main__':
     run_sweep()
