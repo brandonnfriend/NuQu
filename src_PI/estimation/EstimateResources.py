@@ -34,9 +34,9 @@ def evaluate_resources(L, dim, n_b, pi_max, params):
     print("Normalizing Hamiltonians for QPE...")
     norm_data = normalize_for_qpe(H_pos, H_mom, safety_factor=2.5)
     
-    print(f"-> Extracted classical energy shift: {norm_data['identity_shift'].real:.4f}")
-    print(f"-> Physical Lambda:                  {norm_data['physical_lambda']:.4f}")
-    print(f"-> Spectral Delta (Scaling factor):  {norm_data['delta']:.4f}")
+    print(f"-> Extracted classical energy shift: {norm_data['identity_shift'].real:.4e}")
+    print(f"-> Physical Lambda:                  {norm_data['physical_lambda']:.4e}")
+    print(f"-> Spectral Delta (Scaling factor):  {norm_data['delta']:.4e}")
 
     H_total_norm = norm_data['H_pos_norm'] + norm_data['H_mom_norm']
     num_terms = len(H_total_norm.terms)
@@ -68,12 +68,25 @@ def evaluate_resources(L, dim, n_b, pi_max, params):
     print("       SPLIT-ORACLE BASIS TRANSFORMATION COST")
     print("-"*50)
     print(f"Pion Registers per QFT:      {3 * (L**dim)}")
-    print(f"T-gates per QFT/IQFT module: {qft_overhead}")
-    print(f"Total T-gates per walk step: {total_qft_step_cost}")
+    print(f"T-gates per QFT/IQFT module: {qft_overhead: .4e}")
+    print(f"Total T-gates per walk step: {total_qft_step_cost: .4e}")
     print("-"*50)
     
-    # Add QFT costs to the returned dictionary so they can be logged during sweeps
+    # 6. Package Data for the Sweep Logger
     base_t_count = liqtr_results.get('T', 0) if isinstance(liqtr_results, dict) else 0
-    norm_data['total_t_count'] = base_t_count + total_qft_step_cost
+    base_clifford = liqtr_results.get('Clifford', 0) if isinstance(liqtr_results, dict) else 0
+    
+    # PyLIQTR combined the pos and mom walk qubits, but they happen sequentially on the same hardware.
+    # Therefore, the actual logical qubits needed is just half of the combined total.
+    combined_qubits = liqtr_results.get('Logicalqubits', 0) if isinstance(liqtr_results, dict) else 0
+    walk_logical_qubits = combined_qubits // 2 
+
+    # Save exactly the fields requested for the JSON output
+    norm_data['Walk_T_Count'] = base_t_count
+    norm_data['QFT_T_Count'] = total_qft_step_cost
+    norm_data['Total_T_Count'] = base_t_count + total_qft_step_cost
+    norm_data['Walk_Clifford_Count'] = base_clifford
+    norm_data['Logical_Qubits_Per_Walk'] = walk_logical_qubits
+    norm_data['Physical_Lambda'] = norm_data['physical_lambda'] # The non-normalized Lambda
     
     return norm_data
