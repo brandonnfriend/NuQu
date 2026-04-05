@@ -85,3 +85,9 @@ def site_to_pion_qubit_1D(site_id, pion_species, bit_id, n_b):
 
 def total_qubits_1D(num_sites, n_b):
     return num_sites * (4 + 3 * n_b)
+
+def fm_to_mev(fm):
+    return fm * 197.327
+
+def mev_to_fm(mev):
+    return mev / 197.327
