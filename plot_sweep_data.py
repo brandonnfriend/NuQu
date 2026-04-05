@@ -79,7 +79,7 @@ if __name__ == "__main__":
     # You can change this path to point to whichever JSON file you want to plot!
     # Example: target_file = "data/2026-04-04/sweep_L2_3D_143000.json"
     
-    target_file = "data/2026-04-04/sweep_L2_3D_172410.json" # <-- UPDATE THIS PATH TO YOUR JSON FILE
+    target_file = "data/2026-04-04/sweep_L3_3D_203524.json" # <-- UPDATE THIS PATH TO YOUR JSON FILE
     
     if target_file == "INSERT_FILEPATH_HERE.json":
         print("Please update 'target_file' at the bottom of the script with the path to your JSON data.")

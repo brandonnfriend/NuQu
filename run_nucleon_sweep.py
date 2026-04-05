@@ -5,9 +5,9 @@ from src_PI.estimation.EstimateResources import evaluate_resources
 from src_PI.utils.DataIO import save_sweep_data
 
 def get_A_sweep_values():
-    """Generates values for A: dense from 1-10, spreading out up to 50."""
+    """Generates values for A: dense from 1-10, spreading out up to 100."""
     A_dense = np.arange(1, 11)                  # [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-    A_sparse = np.linspace(20, 50, 5)           # [20, 27.5, 35, 42.5, 50]
+    A_sparse = np.linspace(20, 100, 15)           # 15 values from 20 to 100, spaced out
     A_values = np.concatenate([A_dense, np.round(A_sparse)]).astype(int)
     return np.unique(A_values)
 
@@ -21,7 +21,7 @@ def get_L_for_A(A):
 
 def run_sweep():
     print("========================================================")
-    print(" INITIATING NUCLEON SWEEP (A=1 to 50)")
+    print(" INITIATING NUCLEON SWEEP (A=1 to 100)")
     print("========================================================")
     
     params = get_physical_parameters()
