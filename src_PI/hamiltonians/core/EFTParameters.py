@@ -1,4 +1,4 @@
-import math
+import numpy as np
 
 def get_physical_parameters():
     """
@@ -61,7 +61,7 @@ def calculate_dynamic_cutoffs(L, dim, A_nucleons, params, epsilon_cut=0.1, E_bou
     # Equation 75 & 76: Field Cutoffs
     # -----------------------------------------------------------------
     # Common prefactor for both pi_max and Pi_max: (\sqrt{3L^3 / \epsilon_cut} + 1)
-    prefactor = math.sqrt(3.0 * L_vol / epsilon_cut) + 1.0
+    prefactor = np.sqrt(3.0 * L_vol / epsilon_cut) + 1.0
     
     # Common Energy + Contact term: E + 8 \eta |C| + 4 \eta |C_{I^2}|
     energy_contact_sum = E_bound + 8.0 * eta * abs(C) + 4.0 * eta * abs(CI)
@@ -76,23 +76,27 @@ def calculate_dynamic_cutoffs(L, dim, A_nucleons, params, epsilon_cut=0.1, E_bou
                     (3.0 * eta * (gA_fpi_aL_A**2)) + \
                     ((9.0 * eta * (m_pi**2) * (a_L**3) / A_coeff) * (mass_term**2))
     
-    pi_max = prefactor * (gA_fpi_aL_A + math.sqrt(sqrt_inner_pi))
+    pi_max = prefactor * (gA_fpi_aL_A + np.sqrt(sqrt_inner_pi))
     
     # Pi_max calculation (Eq 76)
     sqrt_inner_Pi = (energy_contact_sum / B_coeff) + \
                     ((3.0 * eta / (A_coeff * B_coeff)) * (gA_fpi_aL**2)) + \
                     ((9.0 * eta * (m_pi**2) * (a_L**3) / B_coeff) * (mass_term**2))
                     
-    Pi_max = prefactor * math.sqrt(sqrt_inner_Pi)
+    Pi_max = prefactor * np.sqrt(sqrt_inner_Pi)
     
     # -----------------------------------------------------------------
     # Equation 78: Qubit Requirement (n_b)
     # -----------------------------------------------------------------
     # n_b = log_2( (2 a_L^3 / \pi) * Pi_max * pi_max + 1 )
-    inner_term = (2.0 * (a_L**3) / math.pi) * Pi_max * pi_max + 1.0
-    n_b_float = math.log2(inner_term)
+    inner_term = (2.0 * (a_L**3) / np.pi) * Pi_max * pi_max + 1.0
+    n_b_float = np.log2(inner_term)
     
     # "we choose the nearest cutoffs above these bounds to ensure n_b is an integer"
-    n_b = math.ceil(n_b_float)
+    n_b = np.ceil(n_b_float)
     
     return n_b, pi_max, Pi_max
+
+def T_cross_MeV(a_L_MeV, L, E_kin, M_N=938.0):
+    """Calculates the crossing time T_cross in MeV^-1 for a given kinetic energy E_kin (in MeV) and lattice parameters."""
+    return a_L_MeV * L * np.sqrt(M_N/ (2 * E_kin))
