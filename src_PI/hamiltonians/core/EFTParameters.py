@@ -94,7 +94,7 @@ def calculate_dynamic_cutoffs(L, dim, A_nucleons, params, epsilon_cut=0.1, E_bou
     
     # "we choose the nearest cutoffs above these bounds to ensure n_b is an integer"
     n_b = np.ceil(n_b_float)
-    
+    n_b = int(n_b)  # Convert to integer for later use
     return n_b, pi_max, Pi_max
 
 def T_cross_MeV(a_L_MeV, L, E_kin, M_N=938.0):
