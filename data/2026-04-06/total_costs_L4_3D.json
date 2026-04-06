@@ -1,0 +1,494 @@
+{
+    "metadata": {
+        "L": 4,
+        "dim": 3,
+        "delta_E": 1.0,
+        "epsilon_trotter": 0.1,
+        "E_kin": 10,
+        "Cp": 0.001,
+        "source_file": "data/2026-04-06/L4_3D.json",
+        "timestamp": "2026-04-06T12:56:57.155831"
+    },
+    "qubitization_results": [
+        {
+            "A": 1,
+            "Physical_Lambda": 290320000000.0,
+            "QPE_Step_T_Count": 17305530,
+            "QPE_Total_T_Count": 2.232167241417974e+19
+        },
+        {
+            "A": 2,
+            "Physical_Lambda": 606630000000.0,
+            "QPE_Step_T_Count": 17283740,
+            "QPE_Total_T_Count": 4.658289540259931e+19
+        },
+        {
+            "A": 5,
+            "Physical_Lambda": 1170000000000.0,
+            "QPE_Step_T_Count": 17293960,
+            "QPE_Total_T_Count": 8.98969965861161e+19
+        },
+        {
+            "A": 10,
+            "Physical_Lambda": 2390900000000.0,
+            "QPE_Step_T_Count": 17294180,
+            "QPE_Total_T_Count": 1.8370723364646706e+20
+        },
+        {
+            "A": 20,
+            "Physical_Lambda": 4868000000000.0,
+            "QPE_Step_T_Count": 17296580,
+            "QPE_Total_T_Count": 3.740896390699513e+20
+        },
+        {
+            "A": 30,
+            "Physical_Lambda": 11441000000000.0,
+            "QPE_Step_T_Count": 17301180,
+            "QPE_Total_T_Count": 8.794366905395894e+20
+        },
+        {
+            "A": 40,
+            "Physical_Lambda": 9873400000000.0,
+            "QPE_Step_T_Count": 17306180,
+            "QPE_Total_T_Count": 7.591591290551836e+20
+        },
+        {
+            "A": 50,
+            "Physical_Lambda": 9177100000000.0,
+            "QPE_Step_T_Count": 17329180,
+            "QPE_Total_T_Count": 7.065588612535989e+20
+        },
+        {
+            "A": 60,
+            "Physical_Lambda": 23286000000000.0,
+            "QPE_Step_T_Count": 17310590,
+            "QPE_Total_T_Count": 1.7909012266291513e+21
+        },
+        {
+            "A": 70,
+            "Physical_Lambda": 21298000000000.0,
+            "QPE_Step_T_Count": 17312590,
+            "QPE_Total_T_Count": 1.6381955328494008e+21
+        },
+        {
+            "A": 80,
+            "Physical_Lambda": 19958000000000.0,
+            "QPE_Step_T_Count": 17315590,
+            "QPE_Total_T_Count": 1.5353916796491564e+21
+        },
+        {
+            "A": 90,
+            "Physical_Lambda": 19053000000000.0,
+            "QPE_Step_T_Count": 17315590,
+            "QPE_Total_T_Count": 1.4657689985146495e+21
+        },
+        {
+            "A": 100,
+            "Physical_Lambda": 18455000000000.0,
+            "QPE_Step_T_Count": 17338590,
+            "QPE_Total_T_Count": 1.421650025474658e+21
+        }
+    ],
+    "trotter_results": [
+        {
+            "A": 1,
+            "Trotter_Total_T_Count": 1.4263889308751996e+32
+        },
+        {
+            "A": 2,
+            "Trotter_Total_T_Count": 1.1160480180562251e+33
+        },
+        {
+            "A": 3,
+            "Trotter_Total_T_Count": 3.5925187283814103e+33
+        },
+        {
+            "A": 4,
+            "Trotter_Total_T_Count": 8.98681546120211e+33
+        },
+        {
+            "A": 5,
+            "Trotter_Total_T_Count": 1.7230085333042325e+34
+        },
+        {
+            "A": 6,
+            "Trotter_Total_T_Count": 2.937798070612731e+34
+        },
+        {
+            "A": 7,
+            "Trotter_Total_T_Count": 4.994610923787479e+34
+        },
+        {
+            "A": 8,
+            "Trotter_Total_T_Count": 7.396054641519002e+34
+        },
+        {
+            "A": 9,
+            "Trotter_Total_T_Count": 1.0462672466662498e+35
+        },
+        {
+            "A": 10,
+            "Trotter_Total_T_Count": 1.427537180244114e+35
+        },
+        {
+            "A": 11,
+            "Trotter_Total_T_Count": 1.8915067516910076e+35
+        },
+        {
+            "A": 12,
+            "Trotter_Total_T_Count": 2.446269168026895e+35
+        },
+        {
+            "A": 13,
+            "Trotter_Total_T_Count": 3.099920018920284e+35
+        },
+        {
+            "A": 14,
+            "Trotter_Total_T_Count": 4.163159379630403e+35
+        },
+        {
+            "A": 15,
+            "Trotter_Total_T_Count": 5.107519856897067e+35
+        },
+        {
+            "A": 16,
+            "Trotter_Total_T_Count": 6.184727390112143e+35
+        },
+        {
+            "A": 17,
+            "Trotter_Total_T_Count": 7.403525650772947e+35
+        },
+        {
+            "A": 18,
+            "Trotter_Total_T_Count": 8.77266219137617e+35
+        },
+        {
+            "A": 19,
+            "Trotter_Total_T_Count": 1.0300888507614487e+36
+        },
+        {
+            "A": 20,
+            "Trotter_Total_T_Count": 1.1996960070710865e+36
+        },
+        {
+            "A": 21,
+            "Trotter_Total_T_Count": 1.3869636337507597e+36
+        },
+        {
+            "A": 22,
+            "Trotter_Total_T_Count": 1.59276807439114e+36
+        },
+        {
+            "A": 23,
+            "Trotter_Total_T_Count": 1.8179860685863407e+36
+        },
+        {
+            "A": 24,
+            "Trotter_Total_T_Count": 2.0634947490968298e+36
+        },
+        {
+            "A": 25,
+            "Trotter_Total_T_Count": 2.330171638316105e+36
+        },
+        {
+            "A": 26,
+            "Trotter_Total_T_Count": 2.618894644222804e+36
+        },
+        {
+            "A": 27,
+            "Trotter_Total_T_Count": 2.930542055958116e+36
+        },
+        {
+            "A": 28,
+            "Trotter_Total_T_Count": 3.512379858736054e+36
+        },
+        {
+            "A": 29,
+            "Trotter_Total_T_Count": 3.899678189664431e+36
+        },
+        {
+            "A": 30,
+            "Trotter_Total_T_Count": 4.3144659222341015e+36
+        },
+        {
+            "A": 31,
+            "Trotter_Total_T_Count": 4.7576891566561437e+36
+        },
+        {
+            "A": 32,
+            "Trotter_Total_T_Count": 5.230294375927284e+36
+        },
+        {
+            "A": 33,
+            "Trotter_Total_T_Count": 5.733228440387429e+36
+        },
+        {
+            "A": 34,
+            "Trotter_Total_T_Count": 6.267438582306512e+36
+        },
+        {
+            "A": 35,
+            "Trotter_Total_T_Count": 6.833872400520856e+36
+        },
+        {
+            "A": 36,
+            "Trotter_Total_T_Count": 7.433477855134544e+36
+        },
+        {
+            "A": 37,
+            "Trotter_Total_T_Count": 8.067203262297512e+36
+        },
+        {
+            "A": 38,
+            "Trotter_Total_T_Count": 8.735997289069345e+36
+        },
+        {
+            "A": 39,
+            "Trotter_Total_T_Count": 9.440808948375112e+36
+        },
+        {
+            "A": 40,
+            "Trotter_Total_T_Count": 1.0182587594057838e+37
+        },
+        {
+            "A": 41,
+            "Trotter_Total_T_Count": 1.0962282916030847e+37
+        },
+        {
+            "A": 42,
+            "Trotter_Total_T_Count": 1.1780844935531627e+37
+        },
+        {
+            "A": 43,
+            "Trotter_Total_T_Count": 1.2639224000478254e+37
+        },
+        {
+            "A": 44,
+            "Trotter_Total_T_Count": 1.353837078092854e+37
+        },
+        {
+            "A": 45,
+            "Trotter_Total_T_Count": 1.4479236264641341e+37
+        },
+        {
+            "A": 46,
+            "Trotter_Total_T_Count": 1.5462771752739205e+37
+        },
+        {
+            "A": 47,
+            "Trotter_Total_T_Count": 1.6489928855470943e+37
+        },
+        {
+            "A": 48,
+            "Trotter_Total_T_Count": 1.756165948807248e+37
+        },
+        {
+            "A": 49,
+            "Trotter_Total_T_Count": 1.86789158667244e+37
+        },
+        {
+            "A": 50,
+            "Trotter_Total_T_Count": 1.984265050460389e+37
+        },
+        {
+            "A": 51,
+            "Trotter_Total_T_Count": 2.1053816208029163e+37
+        },
+        {
+            "A": 52,
+            "Trotter_Total_T_Count": 2.231336607269402e+37
+        },
+        {
+            "A": 53,
+            "Trotter_Total_T_Count": 2.3622253479990588e+37
+        },
+        {
+            "A": 54,
+            "Trotter_Total_T_Count": 2.498143209341747e+37
+        },
+        {
+            "A": 55,
+            "Trotter_Total_T_Count": 2.63918558550716e+37
+        },
+        {
+            "A": 56,
+            "Trotter_Total_T_Count": 2.7854478982221055e+37
+        },
+        {
+            "A": 57,
+            "Trotter_Total_T_Count": 3.1505756426243126e+37
+        },
+        {
+            "A": 58,
+            "Trotter_Total_T_Count": 3.318977700369895e+37
+        },
+        {
+            "A": 59,
+            "Trotter_Total_T_Count": 3.493286394112346e+37
+        },
+        {
+            "A": 60,
+            "Trotter_Total_T_Count": 3.673604194767772e+37
+        },
+        {
+            "A": 61,
+            "Trotter_Total_T_Count": 3.860033601024085e+37
+        },
+        {
+            "A": 62,
+            "Trotter_Total_T_Count": 4.052677139021087e+37
+        },
+        {
+            "A": 63,
+            "Trotter_Total_T_Count": 4.2516373620377366e+37
+        },
+        {
+            "A": 64,
+            "Trotter_Total_T_Count": 4.457016850186183e+37
+        },
+        {
+            "A": 65,
+            "Trotter_Total_T_Count": 4.668918210112548e+37
+        },
+        {
+            "A": 66,
+            "Trotter_Total_T_Count": 4.887444074704123e+37
+        },
+        {
+            "A": 67,
+            "Trotter_Total_T_Count": 5.112697102802894e+37
+        },
+        {
+            "A": 68,
+            "Trotter_Total_T_Count": 5.344779978925111e+37
+        },
+        {
+            "A": 69,
+            "Trotter_Total_T_Count": 5.583795412986824e+37
+        },
+        {
+            "A": 70,
+            "Trotter_Total_T_Count": 5.82984614003513e+37
+        },
+        {
+            "A": 71,
+            "Trotter_Total_T_Count": 6.08303491998502e+37
+        },
+        {
+            "A": 72,
+            "Trotter_Total_T_Count": 6.3434645373616245e+37
+        },
+        {
+            "A": 73,
+            "Trotter_Total_T_Count": 6.611237801047736e+37
+        },
+        {
+            "A": 74,
+            "Trotter_Total_T_Count": 6.886457544036423e+37
+        },
+        {
+            "A": 75,
+            "Trotter_Total_T_Count": 7.169226623188609e+37
+        },
+        {
+            "A": 76,
+            "Trotter_Total_T_Count": 7.459647918995493e+37
+        },
+        {
+            "A": 77,
+            "Trotter_Total_T_Count": 7.757824335345628e+37
+        },
+        {
+            "A": 78,
+            "Trotter_Total_T_Count": 8.063858799296561e+37
+        },
+        {
+            "A": 79,
+            "Trotter_Total_T_Count": 8.377854260850928e+37
+        },
+        {
+            "A": 80,
+            "Trotter_Total_T_Count": 8.699913692736784e+37
+        },
+        {
+            "A": 81,
+            "Trotter_Total_T_Count": 9.030140090192195e+37
+        },
+        {
+            "A": 82,
+            "Trotter_Total_T_Count": 9.368636470753842e+37
+        },
+        {
+            "A": 83,
+            "Trotter_Total_T_Count": 9.71550587404963e+37
+        },
+        {
+            "A": 84,
+            "Trotter_Total_T_Count": 1.0070851361595085e+38
+        },
+        {
+            "A": 85,
+            "Trotter_Total_T_Count": 1.0434776016593568e+38
+        },
+        {
+            "A": 86,
+            "Trotter_Total_T_Count": 1.0807382943740091e+38
+        },
+        {
+            "A": 87,
+            "Trotter_Total_T_Count": 1.118877526902872e+38
+        },
+        {
+            "A": 88,
+            "Trotter_Total_T_Count": 1.157905613956339e+38
+        },
+        {
+            "A": 89,
+            "Trotter_Total_T_Count": 1.1978328723372115e+38
+        },
+        {
+            "A": 90,
+            "Trotter_Total_T_Count": 1.2386696209224466e+38
+        },
+        {
+            "A": 91,
+            "Trotter_Total_T_Count": 1.2804261806452292e+38
+        },
+        {
+            "A": 92,
+            "Trotter_Total_T_Count": 1.3231128744773454e+38
+        },
+        {
+            "A": 93,
+            "Trotter_Total_T_Count": 1.3667400274118716e+38
+        },
+        {
+            "A": 94,
+            "Trotter_Total_T_Count": 1.4113179664461464e+38
+        },
+        {
+            "A": 95,
+            "Trotter_Total_T_Count": 1.456857020565044e+38
+        },
+        {
+            "A": 96,
+            "Trotter_Total_T_Count": 1.5033675207245157e+38
+        },
+        {
+            "A": 97,
+            "Trotter_Total_T_Count": 1.5508597998354185e+38
+        },
+        {
+            "A": 98,
+            "Trotter_Total_T_Count": 1.599344192747601e+38
+        },
+        {
+            "A": 99,
+            "Trotter_Total_T_Count": 1.6488310362342534e+38
+        },
+        {
+            "A": 100,
+            "Trotter_Total_T_Count": 1.6993306689765154e+38
+        }
+    ]
+}
