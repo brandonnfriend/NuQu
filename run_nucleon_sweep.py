@@ -17,7 +17,7 @@ def get_L_for_A(A):
     Currently returns a fixed L, but perfectly set up for future L(A) functions.
     """
     # WARNING: Keep this at 2 for local testing! Crank to 10 for paper-grade HPC runs.
-    return 3
+    return 2
 
 def run_sweep():
     print("========================================================")
