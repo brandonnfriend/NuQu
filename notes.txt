@@ -1,0 +1,659 @@
+========================================================
+ INITIATING NUCLEON SWEEP (A=1 to 100)
+========================================================
+
+--------------------------------------------------
+ Starting Simulation for A = 1 (L=4 in 3D)
+--------------------------------------------------
+--- Resource Evaluation: 4^3 Lattice, 22 Bits/Species ---
+Constructing Full EFT Hamiltonian...
+Total Qubits:      4480
+Total Sites:       64
+Normalizing Hamiltonians for QPE...
+-> Extracted classical energy shift: 1.1923e+11
+-> Physical Lambda:                  2.9032e+11
+-> Spectral Delta (Scaling factor):  7.2579e+11
+
+=============================================
+Total Pauli Strings (Non-Identity): 58896
+Maximum Pauli Weight:               5
+Weight-5 Strings:                   1152
+=============================================
+Starting pyLIQTR analysis with split-oracle...
+
+==================================================
+      SPLIT ORACLE RESOURCE ESTIMATION
+==================================================
+Total Qubits (Pos Walk):     4480
+Total Qubits (Mom Walk):     4480
+Lambda (Pos Normalization):  0.1428
+Lambda (Mom Normalization):  0.2571
+Total Lambda (Alpha_pos + Alpha_mom): 0.3999
+--------------------------------------------------
+Clifford                 : 3.5141e+07
+Logicalqubits            : 8992
+T                        : 1.7155e+07
+==================================================
+
+
+--------------------------------------------------
+       SPLIT-ORACLE BASIS TRANSFORMATION COST
+--------------------------------------------------
+Pion Registers per QFT:      192
+T-gates per QFT/IQFT module:  1.5053e+05
+Total T-gates per walk step:  3.0106e+05
+--------------------------------------------------
+Iteration completed in 1045.91 seconds.
+
+--------------------------------------------------
+ Starting Simulation for A = 2 (L=4 in 3D)
+--------------------------------------------------
+--- Resource Evaluation: 4^3 Lattice, 23 Bits/Species ---
+Constructing Full EFT Hamiltonian...
+Total Qubits:      4672
+Total Sites:       64
+Normalizing Hamiltonians for QPE...
+-> Extracted classical energy shift: 2.5771e+11
+-> Physical Lambda:                  6.0663e+11
+-> Spectral Delta (Scaling factor):  1.5166e+12
+
+=============================================
+Total Pauli Strings (Non-Identity): 51360
+Maximum Pauli Weight:               5
+Weight-5 Strings:                   768
+=============================================
+Starting pyLIQTR analysis with split-oracle...
+
+==================================================
+      SPLIT ORACLE RESOURCE ESTIMATION
+==================================================
+Total Qubits (Pos Walk):     4672
+Total Qubits (Mom Walk):     4672
+Lambda (Pos Normalization):  0.1202
+Lambda (Mom Normalization):  0.2797
+Total Lambda (Alpha_pos + Alpha_mom): 0.3998
+--------------------------------------------------
+Clifford                 : 3.4992e+07
+Logicalqubits            : 9376
+T                        : 1.7124e+07
+==================================================
+
+
+--------------------------------------------------
+       SPLIT-ORACLE BASIS TRANSFORMATION COST
+--------------------------------------------------
+Pion Registers per QFT:      192
+T-gates per QFT/IQFT module:  1.5974e+05
+Total T-gates per walk step:  3.1949e+05
+--------------------------------------------------
+Iteration completed in 979.25 seconds.
+
+--------------------------------------------------
+ Starting Simulation for A = 5 (L=4 in 3D)
+--------------------------------------------------
+--- Resource Evaluation: 4^3 Lattice, 24 Bits/Species ---
+Constructing Full EFT Hamiltonian...
+Total Qubits:      4864
+Total Sites:       64
+Normalizing Hamiltonians for QPE...
+-> Extracted classical energy shift: 4.8404e+11
+-> Physical Lambda:                  1.1700e+12
+-> Spectral Delta (Scaling factor):  2.9250e+12
+
+=============================================
+Total Pauli Strings (Non-Identity): 51360
+Maximum Pauli Weight:               5
+Weight-5 Strings:                   768
+=============================================
+Starting pyLIQTR analysis with split-oracle...
+
+==================================================
+      SPLIT ORACLE RESOURCE ESTIMATION
+==================================================
+Total Qubits (Pos Walk):     4864
+Total Qubits (Mom Walk):     4864
+Lambda (Pos Normalization):  0.1380
+Lambda (Mom Normalization):  0.2618
+Total Lambda (Alpha_pos + Alpha_mom): 0.3998
+--------------------------------------------------
+Clifford                 : 3.4996e+07
+Logicalqubits            : 9760
+T                        : 1.7125e+07
+==================================================
+
+
+--------------------------------------------------
+       SPLIT-ORACLE BASIS TRANSFORMATION COST
+--------------------------------------------------
+Pion Registers per QFT:      192
+T-gates per QFT/IQFT module:  1.6896e+05
+Total T-gates per walk step:  3.3792e+05
+--------------------------------------------------
+Iteration completed in 1019.28 seconds.
+
+--------------------------------------------------
+ Starting Simulation for A = 10 (L=4 in 3D)
+--------------------------------------------------
+--- Resource Evaluation: 4^3 Lattice, 25 Bits/Species ---
+Constructing Full EFT Hamiltonian...
+Total Qubits:      5056
+Total Sites:       64
+Normalizing Hamiltonians for QPE...
+-> Extracted classical energy shift: 1.0061e+12
+-> Physical Lambda:                  2.3909e+12
+-> Spectral Delta (Scaling factor):  5.9772e+12
+
+=============================================
+Total Pauli Strings (Non-Identity): 49440
+Maximum Pauli Weight:               5
+Weight-5 Strings:                   384
+=============================================
+Starting pyLIQTR analysis with split-oracle...
+
+==================================================
+      SPLIT ORACLE RESOURCE ESTIMATION
+==================================================
+Total Qubits (Pos Walk):     5056
+Total Qubits (Mom Walk):     5056
+Lambda (Pos Normalization):  0.1267
+Lambda (Mom Normalization):  0.2731
+Total Lambda (Alpha_pos + Alpha_mom): 0.3998
+--------------------------------------------------
+Clifford                 : 3.4954e+07
+Logicalqubits            : 1.0144e+04
+T                        : 1.7116e+07
+==================================================
+
+
+--------------------------------------------------
+       SPLIT-ORACLE BASIS TRANSFORMATION COST
+--------------------------------------------------
+Pion Registers per QFT:      192
+T-gates per QFT/IQFT module:  1.7818e+05
+Total T-gates per walk step:  3.5635e+05
+--------------------------------------------------
+Iteration completed in 1092.26 seconds.
+
+--------------------------------------------------
+ Starting Simulation for A = 20 (L=4 in 3D)
+--------------------------------------------------
+--- Resource Evaluation: 4^3 Lattice, 26 Bits/Species ---
+Constructing Full EFT Hamiltonian...
+Total Qubits:      5248
+Total Sites:       64
+Normalizing Hamiltonians for QPE...
+-> Extracted classical energy shift: 2.0725e+12
+-> Physical Lambda:                  4.8680e+12
+-> Spectral Delta (Scaling factor):  1.2170e+13
+
+=============================================
+Total Pauli Strings (Non-Identity): 47520
+Maximum Pauli Weight:               2
+Weight-5 Strings:                   0
+=============================================
+Starting pyLIQTR analysis with split-oracle...
+
+==================================================
+      SPLIT ORACLE RESOURCE ESTIMATION
+==================================================
+Total Qubits (Pos Walk):     5248
+Total Qubits (Mom Walk):     5248
+Lambda (Pos Normalization):  0.1188
+Lambda (Mom Normalization):  0.2811
+Total Lambda (Alpha_pos + Alpha_mom): 0.3998
+--------------------------------------------------
+Clifford                 : 3.4916e+07
+Logicalqubits            : 1.0528e+04
+T                        : 1.7109e+07
+==================================================
+
+
+--------------------------------------------------
+       SPLIT-ORACLE BASIS TRANSFORMATION COST
+--------------------------------------------------
+Pion Registers per QFT:      192
+T-gates per QFT/IQFT module:  1.8758e+05
+Total T-gates per walk step:  3.7517e+05
+--------------------------------------------------
+Iteration completed in 23593.43 seconds.
+
+--------------------------------------------------
+ Starting Simulation for A = 30 (L=4 in 3D)
+--------------------------------------------------
+--- Resource Evaluation: 4^3 Lattice, 27 Bits/Species ---
+Constructing Full EFT Hamiltonian...
+Total Qubits:      5440
+Total Sites:       64
+Normalizing Hamiltonians for QPE...
+-> Extracted classical energy shift: 5.1894e+12
+-> Physical Lambda:                  1.1441e+13
+-> Spectral Delta (Scaling factor):  2.8602e+13
+
+=============================================
+Total Pauli Strings (Non-Identity): 47520
+Maximum Pauli Weight:               2
+Weight-5 Strings:                   0
+=============================================
+Starting pyLIQTR analysis with split-oracle...
+
+==================================================
+      SPLIT ORACLE RESOURCE ESTIMATION
+==================================================
+Total Qubits (Pos Walk):     5440
+Total Qubits (Mom Walk):     5440
+Lambda (Pos Normalization):  0.0742
+Lambda (Mom Normalization):  0.3256
+Total Lambda (Alpha_pos + Alpha_mom): 0.3999
+--------------------------------------------------
+Clifford                 : 3.4895e+07
+Logicalqubits            : 1.0912e+04
+T                        : 1.7104e+07
+==================================================
+
+
+--------------------------------------------------
+       SPLIT-ORACLE BASIS TRANSFORMATION COST
+--------------------------------------------------
+Pion Registers per QFT:      192
+T-gates per QFT/IQFT module:  1.9718e+05
+Total T-gates per walk step:  3.9437e+05
+--------------------------------------------------
+Iteration completed in 1117.03 seconds.
+
+--------------------------------------------------
+ Starting Simulation for A = 40 (L=4 in 3D)
+--------------------------------------------------
+--- Resource Evaluation: 4^3 Lattice, 27 Bits/Species ---
+Constructing Full EFT Hamiltonian...
+Total Qubits:      5440
+Total Sites:       64
+Normalizing Hamiltonians for QPE...
+-> Extracted classical energy shift: 4.2376e+12
+-> Physical Lambda:                  9.8734e+12
+-> Spectral Delta (Scaling factor):  2.4683e+13
+
+=============================================
+Total Pauli Strings (Non-Identity): 47520
+Maximum Pauli Weight:               2
+Weight-5 Strings:                   0
+=============================================
+Starting pyLIQTR analysis with split-oracle...
+
+==================================================
+      SPLIT ORACLE RESOURCE ESTIMATION
+==================================================
+Total Qubits (Pos Walk):     5440
+Total Qubits (Mom Walk):     5440
+Lambda (Pos Normalization):  0.1132
+Lambda (Mom Normalization):  0.2866
+Total Lambda (Alpha_pos + Alpha_mom): 0.3998
+--------------------------------------------------
+Clifford                 : 3.4916e+07
+Logicalqubits            : 1.0912e+04
+T                        : 1.7109e+07
+==================================================
+
+
+--------------------------------------------------
+       SPLIT-ORACLE BASIS TRANSFORMATION COST
+--------------------------------------------------
+Pion Registers per QFT:      192
+T-gates per QFT/IQFT module:  1.9718e+05
+Total T-gates per walk step:  3.9437e+05
+--------------------------------------------------
+Iteration completed in 1148.69 seconds.
+
+--------------------------------------------------
+ Starting Simulation for A = 50 (L=4 in 3D)
+--------------------------------------------------
+--- Resource Evaluation: 4^3 Lattice, 27 Bits/Species ---
+Constructing Full EFT Hamiltonian...
+Total Qubits:      5440
+Total Sites:       64
+Normalizing Hamiltonians for QPE...
+-> Extracted classical energy shift: 3.7223e+12
+-> Physical Lambda:                  9.1771e+12
+-> Spectral Delta (Scaling factor):  2.2943e+13
+
+=============================================
+Total Pauli Strings (Non-Identity): 53136
+Maximum Pauli Weight:               2
+Weight-5 Strings:                   0
+=============================================
+Starting pyLIQTR analysis with split-oracle...
+
+==================================================
+      SPLIT ORACLE RESOURCE ESTIMATION
+==================================================
+Total Qubits (Pos Walk):     5440
+Total Qubits (Mom Walk):     5440
+Lambda (Pos Normalization):  0.1510
+Lambda (Mom Normalization):  0.2488
+Total Lambda (Alpha_pos + Alpha_mom): 0.3998
+--------------------------------------------------
+T                        : 1.7132e+07
+Clifford                 : 3.5026e+07
+Logicalqubits            : 1.0912e+04
+==================================================
+
+
+--------------------------------------------------
+       SPLIT-ORACLE BASIS TRANSFORMATION COST
+--------------------------------------------------
+Pion Registers per QFT:      192
+T-gates per QFT/IQFT module:  1.9718e+05
+Total T-gates per walk step:  3.9437e+05
+--------------------------------------------------
+Iteration completed in 1248.48 seconds.
+
+--------------------------------------------------
+ Starting Simulation for A = 60 (L=4 in 3D)
+--------------------------------------------------
+--- Resource Evaluation: 4^3 Lattice, 28 Bits/Species ---
+Constructing Full EFT Hamiltonian...
+Total Qubits:      5632
+Total Sites:       64
+Normalizing Hamiltonians for QPE...
+-> Extracted classical energy shift: 1.0610e+13
+-> Physical Lambda:                  2.3286e+13
+-> Spectral Delta (Scaling factor):  5.8216e+13
+
+=============================================
+Total Pauli Strings (Non-Identity): 47520
+Maximum Pauli Weight:               2
+Weight-5 Strings:                   0
+=============================================
+Starting pyLIQTR analysis with split-oracle...
+
+==================================================
+      SPLIT ORACLE RESOURCE ESTIMATION
+==================================================
+Total Qubits (Pos Walk):     5632
+Total Qubits (Mom Walk):     5632
+Lambda (Pos Normalization):  0.0709
+Lambda (Mom Normalization):  0.3289
+Total Lambda (Alpha_pos + Alpha_mom): 0.3999
+--------------------------------------------------
+T                        : 1.7104e+07
+Clifford                 : 3.4895e+07
+Logicalqubits            : 1.1296e+04
+==================================================
+
+
+--------------------------------------------------
+       SPLIT-ORACLE BASIS TRANSFORMATION COST
+--------------------------------------------------
+Pion Registers per QFT:      192
+T-gates per QFT/IQFT module:  2.0659e+05
+Total T-gates per walk step:  4.1318e+05
+--------------------------------------------------
+Iteration completed in 1186.50 seconds.
+
+--------------------------------------------------
+ Starting Simulation for A = 50 (L=4 in 3D)
+--------------------------------------------------
+--- Resource Evaluation: 4^3 Lattice, 27 Bits/Species ---
+Constructing Full EFT Hamiltonian...
+Total Qubits:      5440
+Total Sites:       64
+Normalizing Hamiltonians for QPE...
+-> Extracted classical energy shift: 3.7223e+12
+-> Physical Lambda:                  9.1771e+12
+-> Spectral Delta (Scaling factor):  2.2943e+13
+
+=============================================
+Total Pauli Strings (Non-Identity): 53136
+Maximum Pauli Weight:               2
+Weight-5 Strings:                   0
+=============================================
+Starting pyLIQTR analysis with split-oracle...
+
+==================================================
+      SPLIT ORACLE RESOURCE ESTIMATION
+==================================================
+Total Qubits (Pos Walk):     5440
+Total Qubits (Mom Walk):     5440
+Lambda (Pos Normalization):  0.1510
+Lambda (Mom Normalization):  0.2488
+Total Lambda (Alpha_pos + Alpha_mom): 0.3998
+--------------------------------------------------
+T                        : 1.7132e+07
+Clifford                 : 3.5026e+07
+Logicalqubits            : 1.0912e+04
+==================================================
+
+
+--------------------------------------------------
+       SPLIT-ORACLE BASIS TRANSFORMATION COST
+--------------------------------------------------
+Pion Registers per QFT:      192
+T-gates per QFT/IQFT module:  1.9718e+05
+Total T-gates per walk step:  3.9437e+05
+--------------------------------------------------
+Iteration completed in 1248.48 seconds.
+
+--------------------------------------------------
+ Starting Simulation for A = 60 (L=4 in 3D)
+--------------------------------------------------
+--- Resource Evaluation: 4^3 Lattice, 28 Bits/Species ---
+Constructing Full EFT Hamiltonian...
+Total Qubits:      5632
+Total Sites:       64
+Normalizing Hamiltonians for QPE...
+-> Extracted classical energy shift: 1.0610e+13
+-> Physical Lambda:                  2.3286e+13
+-> Spectral Delta (Scaling factor):  5.8216e+13
+
+=============================================
+Total Pauli Strings (Non-Identity): 47520
+Maximum Pauli Weight:               2
+Weight-5 Strings:                   0
+=============================================
+Starting pyLIQTR analysis with split-oracle...
+
+==================================================
+      SPLIT ORACLE RESOURCE ESTIMATION
+==================================================
+Total Qubits (Pos Walk):     5632
+Total Qubits (Mom Walk):     5632
+Lambda (Pos Normalization):  0.0709
+Lambda (Mom Normalization):  0.3289
+Total Lambda (Alpha_pos + Alpha_mom): 0.3999
+--------------------------------------------------
+T                        : 1.7104e+07
+Clifford                 : 3.4895e+07
+Logicalqubits            : 1.1296e+04
+==================================================
+
+
+--------------------------------------------------
+       SPLIT-ORACLE BASIS TRANSFORMATION COST
+--------------------------------------------------
+Pion Registers per QFT:      192
+T-gates per QFT/IQFT module:  2.0659e+05
+Total T-gates per walk step:  4.1318e+05
+--------------------------------------------------
+Iteration completed in 1186.50 seconds.
+
+[DataIO] Successfully saved sweep data to: data/2026-04-06/sweep_L4_3D_094123.json
+
+Sweep completed successfully. You can now plot this data using plot_sweep_data.py
+Saved data file: data/2026-04-06/sweep_L4_3D_094123.json
+(NuQu) macbookpro@TonyMac NuQu % /Users/macbookpro/opt/anaconda3/envs/NuQu/bin/
+python /Users/macbookpro/NuQu/run_nucleon_sweep.py
+========================================================
+ INITIATING NUCLEON SWEEP (A=1 to 100)
+========================================================
+
+--------------------------------------------------
+ Starting Simulation for A = 70 (L=4 in 3D)
+--------------------------------------------------
+--- Resource Evaluation: 4^3 Lattice, 28 Bits/Species ---
+Constructing Full EFT Hamiltonian...
+Total Qubits:      5632
+Total Sites:       64
+Normalizing Hamiltonians for QPE...
+-> Extracted classical energy shift: 9.4499e+12
+-> Physical Lambda:                  2.1298e+13
+-> Spectral Delta (Scaling factor):  5.3244e+13
+
+=============================================
+Total Pauli Strings (Non-Identity): 47520
+Maximum Pauli Weight:               2
+Weight-5 Strings:                   0
+=============================================
+Starting pyLIQTR analysis with split-oracle...
+
+==================================================
+      SPLIT ORACLE RESOURCE ESTIMATION
+==================================================
+Total Qubits (Pos Walk):     5632
+Total Qubits (Mom Walk):     5632
+Lambda (Pos Normalization):  0.0900
+Lambda (Mom Normalization):  0.3098
+Total Lambda (Alpha_pos + Alpha_mom): 0.3999
+--------------------------------------------------
+Clifford                 : 3.4904e+07
+Logicalqubits            : 1.1296e+04
+T                        : 1.7106e+07
+==================================================
+
+
+--------------------------------------------------
+       SPLIT-ORACLE BASIS TRANSFORMATION COST
+--------------------------------------------------
+Pion Registers per QFT:      192
+T-gates per QFT/IQFT module:  2.0659e+05
+Total T-gates per walk step:  4.1318e+05
+--------------------------------------------------
+Iteration completed in 1187.16 seconds.
+
+--------------------------------------------------
+ Starting Simulation for A = 80 (L=4 in 3D)
+--------------------------------------------------
+--- Resource Evaluation: 4^3 Lattice, 28 Bits/Species ---
+Constructing Full EFT Hamiltonian...
+Total Qubits:      5632
+Total Sites:       64
+Normalizing Hamiltonians for QPE...
+-> Extracted classical energy shift: 8.6140e+12
+-> Physical Lambda:                  1.9958e+13
+-> Spectral Delta (Scaling factor):  4.9894e+13
+
+=============================================
+Total Pauli Strings (Non-Identity): 47520
+Maximum Pauli Weight:               2
+Weight-5 Strings:                   0
+=============================================
+Starting pyLIQTR analysis with split-oracle...
+
+==================================================
+      SPLIT ORACLE RESOURCE ESTIMATION
+==================================================
+Total Qubits (Pos Walk):     5632
+Total Qubits (Mom Walk):     5632
+Lambda (Pos Normalization):  0.1094
+Lambda (Mom Normalization):  0.2904
+Total Lambda (Alpha_pos + Alpha_mom): 0.3998
+--------------------------------------------------
+Clifford                 : 3.4916e+07
+Logicalqubits            : 1.1296e+04
+T                        : 1.7109e+07
+==================================================
+
+
+--------------------------------------------------
+       SPLIT-ORACLE BASIS TRANSFORMATION COST
+--------------------------------------------------
+Pion Registers per QFT:      192
+T-gates per QFT/IQFT module:  2.0659e+05
+Total T-gates per walk step:  4.1318e+05
+--------------------------------------------------
+Iteration completed in 1172.30 seconds.
+
+
+--------------------------------------------------
+ Starting Simulation for A = 90 (L=4 in 3D)
+--------------------------------------------------
+--- Resource Evaluation: 4^3 Lattice, 28 Bits/Species ---
+Constructing Full EFT Hamiltonian...
+Total Qubits:      5632
+Total Sites:       64
+Normalizing Hamiltonians for QPE...
+-> Extracted classical energy shift: 7.9962e+12
+-> Physical Lambda:                  1.9053e+13
+-> Spectral Delta (Scaling factor):  4.7632e+13
+
+=============================================
+Total Pauli Strings (Non-Identity): 47520
+Maximum Pauli Weight:               2
+Weight-5 Strings:                   0
+=============================================
+Starting pyLIQTR analysis with split-oracle...
+
+==================================================
+      SPLIT ORACLE RESOURCE ESTIMATION
+==================================================
+Total Qubits (Pos Walk):     5632
+Total Qubits (Mom Walk):     5632
+Lambda (Pos Normalization):  0.1285
+Lambda (Mom Normalization):  0.2713
+Total Lambda (Alpha_pos + Alpha_mom): 0.3998
+--------------------------------------------------
+Clifford                 : 3.4916e+07
+Logicalqubits            : 1.1296e+04
+T                        : 1.7109e+07
+==================================================
+
+
+--------------------------------------------------
+       SPLIT-ORACLE BASIS TRANSFORMATION COST
+--------------------------------------------------
+Pion Registers per QFT:      192
+T-gates per QFT/IQFT module:  2.0659e+05
+Total T-gates per walk step:  4.1318e+05
+--------------------------------------------------
+Iteration completed in 1169.67 seconds.
+
+--------------------------------------------------
+ Starting Simulation for A = 100 (L=4 in 3D)
+--------------------------------------------------
+--- Resource Evaluation: 4^3 Lattice, 28 Bits/Species ---
+Constructing Full EFT Hamiltonian...
+Total Qubits:      5632
+Total Sites:       64
+Normalizing Hamiltonians for QPE...
+-> Extracted classical energy shift: 7.5319e+12
+-> Physical Lambda:                  1.8455e+13
+-> Spectral Delta (Scaling factor):  4.6137e+13
+
+=============================================
+Total Pauli Strings (Non-Identity): 53136
+Maximum Pauli Weight:               2
+Weight-5 Strings:                   0
+=============================================
+Starting pyLIQTR analysis with split-oracle...
+
+==================================================
+      SPLIT ORACLE RESOURCE ESTIMATION
+==================================================
+Total Qubits (Pos Walk):     5632
+Total Qubits (Mom Walk):     5632
+Lambda (Pos Normalization):  0.1470
+Lambda (Mom Normalization):  0.2528
+Total Lambda (Alpha_pos + Alpha_mom): 0.3999
+--------------------------------------------------
+Clifford                 : 3.5026e+07
+Logicalqubits            : 1.1296e+04
+T                        : 1.7132e+07
+==================================================
+
+
+--------------------------------------------------
+       SPLIT-ORACLE BASIS TRANSFORMATION COST
+--------------------------------------------------
+Pion Registers per QFT:      192
+T-gates per QFT/IQFT module:  2.0659e+05
+Total T-gates per walk step:  4.1318e+05
+--------------------------------------------------
+Iteration completed in 2251.66 seconds.
