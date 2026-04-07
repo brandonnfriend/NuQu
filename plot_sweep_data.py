@@ -262,8 +262,8 @@ def plot_multi_L_total_tcost_comparison(filepaths, delta_E=1.0, e=0.1, E_kin=10,
             t_step_cost = r_entry['Total_T_Count']
             lam = r_entry['Physical_Lambda']
             
-            # Total T-cost = Total_T_Count * (sqrt(2*pi) * Physical_Lambda / delta_E)
-            qpe_walk_queries = (np.sqrt(2 * np.pi) * lam) / delta_E
+            # Total T-cost = Total_T_Count * (sqrt(2) * pi * Physical_Lambda / delta_E)
+            qpe_walk_queries = (np.sqrt(2) * np.pi * lam) / delta_E
             total_qpe = t_step_cost * qpe_walk_queries
             
             qpe_A_vals.append(A)
