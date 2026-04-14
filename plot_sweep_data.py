@@ -339,6 +339,147 @@ def plot_multi_L_total_tcost_comparison(filepaths, delta_E=1.0, e=0.1, E_kin=10,
     
     plt.show()
 
+def plot_tcost_vs_L_for_chosen_A(filepaths, target_A_vals=[1, 10, 60, 100], delta_E=1.0, e=0.1, E_kin=10, Cp=1e-3):
+    """
+    Loads pyLIQTR Qubitization sweep data from multiple files, extracts data for 
+    specific values of A, computes corresponding Trotterization T-costs, and 
+    plots Total T-cost vs L.
+    
+    Args:
+        filepaths (list of str): Paths to the saved Qubitization JSON data files (varying L).
+        target_A_vals (list of int): Specific nucleon numbers to plot curves for.
+        delta_E (float): Desired energy accuracy for QPE in MeV.
+        e (float): Trotter error tolerance.
+        E_kin (float): Kinetic energy parameter. 
+        Cp (float): Trotter simulation time parameter.
+    """
+    # 1. Initialize Data Structures grouped by A
+    # format: { A: [(L, qpe_cost, lam, t_step_cost), ...] }
+    qpe_data_by_A = {A: [] for A in target_A_vals}
+    trotter_data_by_A = {A: [] for A in target_A_vals}
+    
+    dim_for_title = 3 
+    
+    # 2. Extract Data from Files
+    for filepath in filepaths:
+        if not os.path.exists(filepath):
+            print(f"Error: File '{filepath}' not found. Skipping...")
+            continue
+
+        with open(filepath, 'r') as f:
+            data = json.load(f)
+            
+        metadata = data['metadata']
+        results = data['results']
+        
+        L = metadata.get('L', results[0].get('L'))
+        dim = metadata.get('dim', 3)
+        dim_for_title = dim
+        
+        # Look for the target A values in this L's file
+        for r_entry in results:
+            A = r_entry['A']
+            if A in target_A_vals:
+                t_step_cost = r_entry['Total_T_Count']
+                lam = r_entry['Physical_Lambda']
+                
+                # Total QPE T-cost = Total_T_Count * (sqrt(2*pi) * Physical_Lambda / delta_E)
+                qpe_walk_queries = (np.sqrt(2) * np.pi * lam) / delta_E
+                total_qpe = t_step_cost * qpe_walk_queries
+                
+                qpe_data_by_A[A].append((L, total_qpe, lam, t_step_cost))
+                
+                # Compute Trotterization Data for this exact A and L
+                total_trotter = get_total_trotter_cost(
+                    A=A, L=L, e=e, E_kin=E_kin, E_bound=None, Cp=Cp, dim=dim
+                )
+                trotter_data_by_A[A].append((L, total_trotter))
+
+    # 3. Setup JSON Export Package
+    all_saved_data = {
+        "metadata": {
+            "delta_E": delta_E,
+            "epsilon_trotter": e,
+            "E_kin": E_kin,
+            "Cp": Cp,
+            "source_files": filepaths,
+            "timestamp": datetime.now().isoformat()
+        },
+        "results": {}
+    }
+
+    # 4. Sort by L and Setup Plotting
+    plt.figure(figsize=(12, 8))
+    colors = ['blue', 'green', 'purple', 'orange', 'red', 'cyan']
+    
+    for idx, A in enumerate(target_A_vals):
+        # Skip if we didn't find data for this A
+        if not qpe_data_by_A[A]:
+            continue
+            
+        # Sort the (L, cost) tuples by L to ensure lines draw left-to-right
+        qpe_data_by_A[A].sort(key=lambda x: x[0])
+        trotter_data_by_A[A].sort(key=lambda x: x[0])
+        
+        # Unpack sorted arrays
+        L_vals_qpe = [item[0] for item in qpe_data_by_A[A]]
+        costs_qpe = [item[1] for item in qpe_data_by_A[A]]
+        
+        L_vals_trotter = [item[0] for item in trotter_data_by_A[A]]
+        costs_trotter = [item[1] for item in trotter_data_by_A[A]]
+        
+        color = colors[idx % len(colors)]
+        
+        # Plot Trotterization (dashed line, background)
+        plt.plot(L_vals_trotter, costs_trotter, color=color, linewidth=2, linestyle='--', 
+                 label=f'Trotter ($\epsilon={e}$, A={A})')
+                 
+        # Plot Qubitization (solid line with markers, foreground)
+        plt.plot(L_vals_qpe, costs_qpe, marker='o', color=color, linewidth=2.5, markersize=8,
+                 label=f'Qubitization (QPE $\\Delta E={delta_E}$, A={A})')
+                 
+        # Save to JSON structure
+        all_saved_data["results"][f"A_{A}"] = {
+            "qubitization": [{"L": L, "Total_T_Count": c} for L, c in zip(L_vals_qpe, costs_qpe)],
+            "trotter": [{"L": L, "Total_T_Count": c} for L, c in zip(L_vals_trotter, costs_trotter)]
+        }
+
+    # 5. Export JSON and Save Plot
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    save_dir = os.path.join("data", date_str)
+    os.makedirs(save_dir, exist_ok=True)
+    
+    base_filename = f"tcost_vs_L_comparison_{dim_for_title}D"
+    json_save_path = os.path.join(save_dir, f"{base_filename}.json")
+    plot_save_path = os.path.join(save_dir, f"{base_filename}_plot.png")
+    
+    with open(json_save_path, 'w') as f:
+        json.dump(all_saved_data, f, indent=4)
+    print(f"Data saved successfully to: {json_save_path}")
+
+    # 6. Formatting
+    plt.title(f"Total T-Gate Resource Cost vs Lattice Size ({dim_for_title}D)", 
+              fontsize=16, fontweight='bold')
+    plt.xlabel("Lattice Spatial Extent (L)", fontsize=14)
+    plt.ylabel("Total T-Gates", fontsize=14)
+    
+    plt.xscale('log')
+    plt.yscale('log') 
+    
+    # Since L values are likely integers (e.g., 2, 3, 4), force integer ticks on the X-axis
+    all_L = list(set([L for A in target_A_vals for L, _, _, _ in qpe_data_by_A[A]]))
+    if all_L:
+        plt.xticks(all_L, all_L)
+    
+    plt.grid(True, which="both", ls="--", alpha=0.5)
+    plt.legend(fontsize=11, loc='upper left', bbox_to_anchor=(1, 1))
+    plt.tight_layout()
+    
+    plt.savefig(plot_save_path, dpi=300)
+    print(f"Plot saved successfully to: {plot_save_path}")
+    
+    plt.show()
+
 if __name__ == "__main__":
     # You can change this path to point to whichever JSON file you want to plot!
     # Example: target_file = "data/2026-04-04/sweep_L2_3D_143000.json"
@@ -350,4 +491,4 @@ if __name__ == "__main__":
     # else:
     #     load_and_plot(target_file)
     file_list = ["data/2026-04-04/sweep_L2_3D_184616.json", "data/2026-04-04/sweep_L3_3D_203524.json", "data/2026-04-06/L4_3D.json", ]
-    plot_multi_L_total_tcost_comparison(file_list)
+    plot_tcost_vs_L_for_chosen_A(file_list)
