@@ -1,5 +1,5 @@
 from openfermion import QubitOperator, FermionOperator
-from src_OF.utils.utils import site_to_qubit_1D, qubit_to_site_1D
+from misc.src_OF.utils.utils import site_to_qubit_1D, qubit_to_site_1D
 import numpy as np
 
 fermionic_modes = [(0,0), (0,1), (1,0), (1,1)] #spin up/down and isospin up/down

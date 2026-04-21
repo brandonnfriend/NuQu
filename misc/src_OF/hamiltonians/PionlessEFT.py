@@ -1,8 +1,8 @@
 from openfermion import QubitOperator, FermionOperator, jordan_wigner
 import numpy as np
-from src_OF.utils import nearest_neighbor as NN
-from src_OF.hamiltonians.Operators import Create, Annihilate, Number
-from src_OF.utils.utils import site_to_qubit_1D, qubit_to_site_1D, total_qubits_1D
+from misc.src_OF.utils import nearest_neighbor as NN
+from misc.src_OF.hamiltonians.Operators import Create, Annihilate, Number
+from misc.src_OF.utils.utils import site_to_qubit_1D, qubit_to_site_1D, total_qubits_1D
 
 #Assume 1D lattice for simplicity. Each site can have 4 fermionic modes corresponding to spin up/down and isospin up/down. The Hamiltonian includes a free term (hopping and on-site energy), a two-body contact interaction, and a three-body contact interaction.
 
