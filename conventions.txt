@@ -1,1 +1,0 @@
-fermionic_modes = [(0,0), (0,1), (1,0), (1,1)] #spin up/down and isospin up/down. So each site will be encoded into 4 qubits. In reality the value of the spins should be +-1/2. See equation (1) in Watson et al. 2025. 
