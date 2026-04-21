@@ -12,3 +12,5 @@ __pycache__/
 
 # Mac Junk Files
 .DS_Store
+
+data/
