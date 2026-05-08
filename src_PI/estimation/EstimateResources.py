@@ -3,6 +3,7 @@ from src_PI.hamiltonians.ConstructEFT import build_eft_hamiltonian
 from src_PI.estimation.estimators import run_qubitization_analysis
 from src_PI.estimation.NormalizeHamiltonians import normalize_for_qpe
 
+
 def calculate_qft_cost(L, dim, n_b):
     """
     Estimates T-gate overhead for QFTs in the Split-Oracle.
@@ -73,20 +74,26 @@ def evaluate_resources(L, dim, n_b, pi_max, params):
     print("-"*50)
     
     # 6. Package Data for the Sweep Logger
-    base_t_count = liqtr_results.get('T', 0) if isinstance(liqtr_results, dict) else 0
-    base_clifford = liqtr_results.get('Clifford', 0) if isinstance(liqtr_results, dict) else 0
-    
-    # PyLIQTR combined the pos and mom walk qubits, but they happen sequentially on the same hardware.
-    # Therefore, the actual logical qubits needed is just half of the combined total.
-    combined_qubits = liqtr_results.get('Logicalqubits', 0) if isinstance(liqtr_results, dict) else 0
-    walk_logical_qubits = combined_qubits // 2 
+    if not isinstance(liqtr_results, dict):
+        liqtr_results = {}
+
+    base_t_count = liqtr_results.get('T', 0)
+    base_clifford = liqtr_results.get('Clifford', 0)
+
+    # estimators.run_qubitization_analysis already takes max(pos, mom) for LogicalQubits
+    # since the two walks run sequentially on the same hardware.
+    logical_qubits = liqtr_results.get('LogicalQubits', 0)
+    pos_logical_qubits = liqtr_results.get('Pos_LogicalQubits', 0)
+    mom_logical_qubits = liqtr_results.get('Mom_LogicalQubits', 0)
 
     # Save exactly the fields requested for the JSON output
     norm_data['Walk_T_Count'] = base_t_count
     norm_data['QFT_T_Count'] = total_qft_step_cost
     norm_data['Total_T_Count'] = base_t_count + total_qft_step_cost
     norm_data['Walk_Clifford_Count'] = base_clifford
-    norm_data['Logical_Qubits_Per_Walk'] = walk_logical_qubits
+    norm_data['Logical_Qubits'] = logical_qubits
+    norm_data['Pos_Walk_Logical_Qubits'] = pos_logical_qubits
+    norm_data['Mom_Walk_Logical_Qubits'] = mom_logical_qubits
     norm_data['Physical_Lambda'] = norm_data['physical_lambda'] # The non-normalized Lambda
-    
+
     return norm_data
