@@ -1,18 +1,7 @@
 import numpy as np
 from openfermion import QubitOperator, FermionOperator, jordan_wigner
 
-"""
-TODO: SPATIAL DIMENSIONALITY UPGRADE
-1. Generalize Stride: Update 'total_qubits' and index helpers to accept a 'dim' 
-   parameter. Offset logic must change from (site * stride) to 
-   ((z*Ly*Lx + y*Lx + x) * stride).
-2. Neighbor Mapping: Implement a 'get_neighbors(site_id, dim, lattice_shape)' 
-   utility to return adjacent indices for 2D (N, S, E, W) and 3D (+Up, Down).
-3. Boundary Conditions: Add support for Periodic Boundary Conditions (PBC) 
-   vs Open (OBC) to the neighbor utility.
-4. Precision Constants: Define a standardized 'a_L' (lattice spacing) handling 
-   for multi-dimensional volumes (a_L^3).
-"""
+
 
 # Pauli matrices as 2x2 arrays
 sigma_mats = [
