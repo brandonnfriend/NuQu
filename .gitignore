@@ -18,5 +18,6 @@ __pycache__/
 data/*
 !data/.gitkeep
 
+# AI Tools and folders
 claude/
 .claude/
