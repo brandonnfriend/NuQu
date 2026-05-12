@@ -6,6 +6,9 @@ env/
 .env
 .env/
 
+uv.lock
+
+
 # Python Cache
 __pycache__/
 *.pyc
