@@ -32,18 +32,22 @@ _RESOURCE_CACHE = {}
 
 
 def _estimate_with_cache(pos_instance, mom_instance):
-    """Run pyLIQTR estimator, or reuse a cached result for the same n_b bin."""
+    """Run pyLIQTR estimator, or reuse a cached result for the same n_b bin.
+
+    Returns (pos_results, mom_results, pos_alpha, mom_alpha, cache_hit).
+    `alpha` is the LCU norm sum |c_i|; on cache hit we read it directly from
+    the MyCustomHamiltonian instance instead of rebuilding the (expensive)
+    pyLIQTR PauliStringLCU encoding, which at L=3 was ~7s per cache hit just
+    to recompute a value we already have.
+    """
     cache_disabled = os.environ.get("NUQU_DISABLE_PYLIQTR_CACHE", "") == "1"
     key = None if cache_disabled else (pos_instance.n_qubits(), mom_instance.n_qubits())
 
     if key is not None and key in _RESOURCE_CACHE:
         cached = _RESOURCE_CACHE[key]
-        # Still build encodings so we can report current-A's alpha (LCU norm),
-        # which DOES depend on coefficients and so must reflect this A's H.
-        encoding_type = VALID_ENCODINGS.PauliLCU
-        pos_encoding = getEncoding(encoding_type)(pos_instance)
-        mom_encoding = getEncoding(encoding_type)(mom_instance)
-        return cached["pos_results"], cached["mom_results"], pos_encoding, mom_encoding, True
+        pos_alpha = pos_instance.get_alpha()
+        mom_alpha = mom_instance.get_alpha()
+        return cached["pos_results"], cached["mom_results"], pos_alpha, mom_alpha, True
 
     encoding_type = VALID_ENCODINGS.PauliLCU
     pos_encoding = getEncoding(encoding_type)(pos_instance)
@@ -60,7 +64,7 @@ def _estimate_with_cache(pos_instance, mom_instance):
             "pos_results": dict(pos_results),
             "mom_results": dict(mom_results),
         }
-    return pos_results, mom_results, pos_encoding, mom_encoding, False
+    return pos_results, mom_results, pos_encoding.alpha, mom_encoding.alpha, False
 
 
 def run_qubitization_analysis(pos_ham, mom_ham, n_sites, n_qubits_per_site):
@@ -73,7 +77,7 @@ def run_qubitization_analysis(pos_ham, mom_ham, n_sites, n_qubits_per_site):
     mom_instance = _ham_to_pyliqtr_instance(mom_ham)
 
     # 2–4. Estimate resources (coarse cache keyed on n_qubits ~ n_b bucket)
-    pos_results, mom_results, pos_encoding, mom_encoding, cache_hit = (
+    pos_results, mom_results, pos_alpha, mom_alpha, cache_hit = (
         _estimate_with_cache(pos_instance, mom_instance)
     )
 
@@ -107,9 +111,9 @@ def run_qubitization_analysis(pos_ham, mom_ham, n_sites, n_qubits_per_site):
     print(f"Logical Qubits (Pos Walk):    {pos_lq}")
     print(f"Logical Qubits (Mom Walk):    {mom_lq}")
     print(f"Logical Qubits (peak, max):   {combined_results['LogicalQubits']}")
-    print(f"Lambda (Pos Normalization):   {pos_encoding.alpha:.4f}")
-    print(f"Lambda (Mom Normalization):   {mom_encoding.alpha:.4f}")
-    print(f"Total Lambda (Alpha_pos + Alpha_mom): {(pos_encoding.alpha + mom_encoding.alpha):.4f}")
+    print(f"Lambda (Pos Normalization):   {pos_alpha:.4f}")
+    print(f"Lambda (Mom Normalization):   {mom_alpha:.4f}")
+    print(f"Total Lambda (Alpha_pos + Alpha_mom): {(pos_alpha + mom_alpha):.4f}")
     print("-" * 50)
 
     for key, value in combined_results.items():
