@@ -24,3 +24,5 @@ data/*
 # AI Tools and folders
 claude/
 .claude/
+
+tasks/
