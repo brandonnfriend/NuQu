@@ -1,3 +1,4 @@
+import os
 from pyLIQTR.BlockEncodings.getEncoding import getEncoding, VALID_ENCODINGS
 from pyLIQTR.qubitization.qubitized_gates import QubitizedWalkOperator
 from pyLIQTR.utils.resource_analysis import estimate_resources
@@ -12,27 +13,69 @@ def _ham_to_pyliqtr_instance(qubit_ham):
         pauli_dict[p_string] = float(coeff.real)
     return MyCustomHamiltonian(pauli_dict)
 
+
+# Coarse cache keyed on (pos_n_qubits, mom_n_qubits). Both are determined by
+# (L, dim, n_b), so the key is equivalent to the n_b-bucket. Within a bucket,
+# pyLIQTR's T/Clifford/LogicalQubits vary by <0.15% across A — that variation
+# is real (small) physics from near-cancellation bands, not noise — see
+# NormalizeHamiltonians.py for the diagnostic story. We collapse it to the
+# first-A representative because:
+#   (a) the variation is well below resource-estimator uncertainty,
+#   (b) the first-A in an increasing-A sweep is the smallest A in the bin,
+#       which carries the *largest* Lambda (LCU norm) and therefore the
+#       conservative-high QPE-depth cost (Lambda x T dominates),
+#   (c) it converts 25 expensive estimator calls into ~5-7 across the L=2..4
+#       sweeps, giving a ~3x sweep speedup.
+#
+# Set NUQU_DISABLE_PYLIQTR_CACHE=1 to bypass for verification runs.
+_RESOURCE_CACHE = {}
+
+
+def _estimate_with_cache(pos_instance, mom_instance):
+    """Run pyLIQTR estimator, or reuse a cached result for the same n_b bin."""
+    cache_disabled = os.environ.get("NUQU_DISABLE_PYLIQTR_CACHE", "") == "1"
+    key = None if cache_disabled else (pos_instance.n_qubits(), mom_instance.n_qubits())
+
+    if key is not None and key in _RESOURCE_CACHE:
+        cached = _RESOURCE_CACHE[key]
+        # Still build encodings so we can report current-A's alpha (LCU norm),
+        # which DOES depend on coefficients and so must reflect this A's H.
+        encoding_type = VALID_ENCODINGS.PauliLCU
+        pos_encoding = getEncoding(encoding_type)(pos_instance)
+        mom_encoding = getEncoding(encoding_type)(mom_instance)
+        return cached["pos_results"], cached["mom_results"], pos_encoding, mom_encoding, True
+
+    encoding_type = VALID_ENCODINGS.PauliLCU
+    pos_encoding = getEncoding(encoding_type)(pos_instance)
+    mom_encoding = getEncoding(encoding_type)(mom_instance)
+
+    pos_walk = QubitizedWalkOperator(pos_encoding)
+    mom_walk = QubitizedWalkOperator(mom_encoding)
+
+    pos_results = estimate_resources(pos_walk)
+    mom_results = estimate_resources(mom_walk)
+
+    if key is not None:
+        _RESOURCE_CACHE[key] = {
+            "pos_results": dict(pos_results),
+            "mom_results": dict(mom_results),
+        }
+    return pos_results, mom_results, pos_encoding, mom_encoding, False
+
+
 def run_qubitization_analysis(pos_ham, mom_ham, n_sites, n_qubits_per_site):
     """
-    Analyzes resources for Qubitized Phase Estimation by splitting the 
+    Analyzes resources for Qubitized Phase Estimation by splitting the
     Hamiltonian into position and momentum space walks.
     """
     # 1. Create instances for both Hamiltonians
     pos_instance = _ham_to_pyliqtr_instance(pos_ham)
     mom_instance = _ham_to_pyliqtr_instance(mom_ham)
 
-    # 2. Generate Block Encodings
-    encoding_type = VALID_ENCODINGS.PauliLCU
-    pos_encoding = getEncoding(encoding_type)(pos_instance)
-    mom_encoding = getEncoding(encoding_type)(mom_instance)
-
-    # 3. Create Walk Operators
-    pos_walk = QubitizedWalkOperator(pos_encoding)
-    mom_walk = QubitizedWalkOperator(mom_encoding)
-
-    # 4. Get PyLIQTR Estimates
-    pos_results = estimate_resources(pos_walk)
-    mom_results = estimate_resources(mom_walk)
+    # 2–4. Estimate resources (coarse cache keyed on n_qubits ~ n_b bucket)
+    pos_results, mom_results, pos_encoding, mom_encoding, cache_hit = (
+        _estimate_with_cache(pos_instance, mom_instance)
+    )
 
     # 5. Combine results with the correct per-key semantics for the split-oracle.
     # Gate counts (T, Clifford) are summed: one walk-step runs both encodings sequentially.
@@ -55,9 +98,10 @@ def run_qubitization_analysis(pos_ham, mom_ham, n_sites, n_qubits_per_site):
             combined_results[key] = pos_results.get(key, 0) + mom_results.get(key, 0)
 
     # 6. Print the summary
-    print("\n" + "="*50)
-    print("      SPLIT ORACLE RESOURCE ESTIMATION")
-    print("="*50)
+    cache_tag = "  [n_b bin cache HIT]" if cache_hit else ""
+    print("\n" + "=" * 50)
+    print(f"      SPLIT ORACLE RESOURCE ESTIMATION{cache_tag}")
+    print("=" * 50)
     print(f"System Qubits (Pos instance): {pos_instance.n_qubits()}")
     print(f"System Qubits (Mom instance): {mom_instance.n_qubits()}")
     print(f"Logical Qubits (Pos Walk):    {pos_lq}")
@@ -74,6 +118,6 @@ def run_qubitization_analysis(pos_ham, mom_ham, n_sites, n_qubits_per_site):
             print(f"{label:25}: {value:.4e}")
         else:
             print(f"{label:25}: {value}")
-    print("="*50 + "\n")
+    print("=" * 50 + "\n")
 
     return combined_results
