@@ -198,6 +198,137 @@ def plot_basis_comparison(filepaths, save_dir=None, save_basename=None):
     plt.show()
     return out_path
 
+def plot_basis_comparison_total_qpe(filepaths, delta_E=1.0, e=0.1, E_kin=10, Cp=1e-3,
+                                     trotter_A_range=(1, 100), save_dir=None,
+                                     save_basename=None):
+    """Overlay total QPE T-cost across bases, plus a Trotterization baseline.
+
+    For each input sweep, computes
+        T_total(A) = T_step(A) × (sqrt(2)·π · Λ(A) / ΔE)
+    (per-walk-step T-count times the QPE walk-query count) and overlays the
+    curves color-coded by basis. A Trotter baseline is drawn at the same
+    (L, dim) over `trotter_A_range`, using the first input file's geometry.
+
+    Args:
+        filepaths: list of sweep JSONs, one per basis to overlay.
+        delta_E: QPE energy precision target in MeV.
+        e: Trotter error tolerance.
+        E_kin, Cp: Trotter cost parameters (forwarded to get_total_trotter_cost).
+        trotter_A_range: (lo, hi) inclusive range for the Trotter curve.
+        save_dir: output directory (default data/<today>/).
+        save_basename: PNG basename without extension (default
+            'basis_comparison_total_qpe_L{L}_{dim}D').
+
+    Returns the saved PNG path. Also writes a parallel JSON with the
+    computed cost arrays for reproducibility.
+    """
+    if not filepaths:
+        print("plot_basis_comparison_total_qpe: no files passed.")
+        return None
+
+    plt.figure(figsize=(11, 7.5))
+    L_for_title = None
+    dim_for_title = None
+
+    save_pkg = {
+        "metadata": {
+            "delta_E": delta_E,
+            "epsilon_trotter": e,
+            "E_kin": E_kin,
+            "Cp": Cp,
+            "trotter_A_range": list(trotter_A_range),
+            "source_files": filepaths,
+            "timestamp": datetime.now().isoformat(),
+        },
+        "qubitization_by_basis": {},
+    }
+
+    for fp in filepaths:
+        if not os.path.exists(fp):
+            print(f"plot_basis_comparison_total_qpe: skipping missing file {fp}")
+            continue
+        with open(fp) as f:
+            data = json.load(f)
+        meta = data['metadata']
+        results = data['results']
+        basis = _get_basis_label(meta)
+        color = _BASIS_COLORS.get(basis, 'black')
+
+        if L_for_title is None:
+            L_for_title = meta.get('L', results[0].get('L'))
+            dim_for_title = meta.get('dim', 3)
+
+        A_vals, total_qpe, per_A_records = [], [], []
+        for r in results:
+            A = r['A']
+            t_step = r['Total_T_Count']
+            lam = r['Physical_Lambda']
+            queries = (np.sqrt(2) * np.pi * lam) / delta_E
+            total = t_step * queries
+            A_vals.append(A)
+            total_qpe.append(total)
+            per_A_records.append({
+                "A": int(A),
+                "Physical_Lambda": float(lam),
+                "QPE_Step_T_Count": int(t_step),
+                "Walk_Queries": float(queries),
+                "QPE_Total_T_Count": float(total),
+            })
+
+        n_b_label = ', '.join(sorted({str(r['n_b']) for r in results}))
+        label = f"Qubitization {basis} (n_b={n_b_label}, $\\Delta E$={delta_E} MeV)"
+
+        plt.plot(A_vals, total_qpe, marker='o', color=color, linewidth=2.5,
+                 markersize=7, label=label)
+        save_pkg["qubitization_by_basis"][basis] = per_A_records
+
+    # Trotter baseline at (L, dim) from the first valid file.
+    lo, hi = trotter_A_range
+    trotter_A_vals = np.arange(lo, hi + 1)
+    trotter_costs = [
+        get_total_trotter_cost(A=int(A), L=L_for_title, e=e, E_kin=E_kin,
+                               E_bound=None, Cp=Cp, dim=dim_for_title)
+        for A in trotter_A_vals
+    ]
+    plt.plot(trotter_A_vals, trotter_costs, color='tab:red', linewidth=2,
+             linestyle='--',
+             label=f"Trotterization ($\\epsilon$={e}, L={L_for_title}, "
+                   f"{dim_for_title}D)")
+    save_pkg["trotter"] = [
+        {"A": int(A), "Trotter_Total_T_Count": float(c)}
+        for A, c in zip(trotter_A_vals, trotter_costs)
+    ]
+
+    plt.title(
+        f"Total QPE T-Cost vs A: Basis Comparison + Trotter "
+        f"(L={L_for_title}, {dim_for_title}D)",
+        fontsize=15, fontweight='bold',
+    )
+    plt.xlabel("Nucleon Number (A)", fontsize=13)
+    plt.ylabel("Total T-Gates", fontsize=13)
+    plt.xscale('log')
+    plt.yscale('log')
+    plt.grid(True, which="both", ls="--", alpha=0.5)
+    plt.legend(fontsize=10, loc='best')
+    plt.tight_layout()
+
+    if save_dir is None:
+        save_dir = os.path.join("data", datetime.now().strftime("%Y-%m-%d"))
+    os.makedirs(save_dir, exist_ok=True)
+    if save_basename is None:
+        save_basename = f"basis_comparison_total_qpe_L{L_for_title}_{dim_for_title}D"
+    plot_path = os.path.join(save_dir, f"{save_basename}.png")
+    json_path = os.path.join(save_dir, f"{save_basename}.json")
+
+    plt.savefig(plot_path, dpi=300)
+    with open(json_path, 'w') as f:
+        json.dump(save_pkg, f, indent=4)
+    print(f"Plot saved to: {plot_path}")
+    print(f"Data saved to: {json_path}")
+    plt.show()
+    return plot_path
+
+
 def plot_total_tcost_comparison(filepath, delta_E=1.0, e=0.1, E_kin=10, Cp=1e-3):
     """
     Loads pyLIQTR Qubitization sweep data (JSON), computes Trotterization T-costs 
@@ -601,14 +732,8 @@ def plot_tcost_vs_L_for_chosen_A(filepaths, target_A_vals=[1, 10, 60, 100], delt
     plt.show()
 
 if __name__ == "__main__":
-    # You can change this path to point to whichever JSON file you want to plot!
-    # Example: target_file = "data/2026-04-04/sweep_L2_3D_143000.json"
-    
-    # target_file = "data/2026-04-06/L4_3D.json" # <-- UPDATE THIS PATH TO YOUR JSON FILE
-    
-    # if target_file == "INSERT_FILEPATH_HERE.json":
-    #     print("Please update 'target_file' at the bottom of the script with the path to your JSON data.")
-    # else:
-    #     load_and_plot(target_file)
-    file_list = ["data/2026-04-04/sweep_L2_3D_184616.json", "data/2026-04-04/sweep_L3_3D_203524.json", "data/2026-04-06/L4_3D.json", ]
-    plot_tcost_vs_L_for_chosen_A(file_list)
+    file_list = [
+        "data/2026-05-22/sweep_L2_3D_amplitude_165018.json",
+        "data/2026-05-22/sweep_L2_3D_fock_165517.json",
+    ]
+    plot_basis_comparison_total_qpe(file_list)
