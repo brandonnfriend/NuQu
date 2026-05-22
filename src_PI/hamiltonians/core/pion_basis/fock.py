@@ -6,7 +6,7 @@ the local Fock state |n⟩, n ∈ {0, …, N_f − 1} where N_f = 2^n_b. The pio
 field operators are polynomials in single-mode ladder operators:
 
     π̂_x  = c_π  · (â_x + â_x†)
-    Π̂_x  = c_Π  · i·(â_x† − â_x)
+    Π̂_x  =   i · c_Π · (â_x† − â_x)
 
 with coefficients (derived in claude/research/bosonic-encodings/
 01_two_readings_oscillator_basis.md, "Theoretical derivation" section):
@@ -22,12 +22,26 @@ For ω_0 = m_π, the *local* combined free-pion operator
 harmonic-oscillator number operator m_π·(â†â + ½). The gradient (∇π)²
 term remains off-diagonal because it couples neighboring sites.
 
+Front-end: OpenFermion's BosonOperator carries the ladder algebra
+symbolically. Each unique *ordered* single-mode monomial (e.g. â·â† vs
+â†·â — distinct on the truncated register because [â, â†] is **not** the
+identity at |N_f−1⟩) is Pauli-expanded once on local qubits [0..n_b−1]
+and cached in `_TEMPLATE_CACHE`; assembly into full-register operators
+is just qubit remapping plus per-term coefficient multiplication. We do
+*not* call `normal_ordered` — that would apply the full-Hilbert-space
+commutator and produce a truncation defect at the top register state.
+This avoids the ~16^n_b Pauli-product cost the previous front-end paid
+for every QubitOp multiplication while still representing the truncated
+operator faithfully.
+
 Returns a single-walk Hamiltonian bundle — no QFT between bases needed,
 since π and Π live in the same Fock register.
 """
 
+from collections import defaultdict
+
 import numpy as np
-from openfermion import QubitOperator
+from openfermion import BosonOperator, QubitOperator
 
 from src_PI.hamiltonians.core.Operators import Nucleon_Transition_JW
 from src_PI.utils.LatticeGeometry import (
@@ -43,20 +57,20 @@ _MODES = [(0, 0), (0, 1), (1, 0), (1, 1)]
 _EPSILONS = [(0, 1, 2, 1), (1, 2, 0, 1), (2, 0, 1, 1),
              (0, 2, 1, -1), (2, 1, 0, -1), (1, 0, 2, -1)]
 
-_IMAG_TOL = 1e-9  # Tolerance for dropping floating-point imaginary noise.
+_IMAG_TOL = 1e-9
+_TEMPLATE_CACHE = {}
 
 
-# --- Low-level: |i⟩⟨j| → Pauli decomposition ------------------------------
+# --- Low-level: |i⟩⟨j| → Pauli decomposition -------------------------------
+# Only used to build the â and â† templates once per n_b; everything above
+# that goes through the symbolic BosonOperator path.
 
 
 def _ket_bra(i, j, n_b, qubits):
-    """Build |i⟩⟨j| as a QubitOperator on the given n_b qubits.
+    """Build |i⟩⟨j| as a QubitOperator using the binary occupation encoding.
 
-    Standard binary-encoding projector decomposition:
-        |0⟩⟨0| = (I + Z)/2
-        |1⟩⟨1| = (I − Z)/2
-        |0⟩⟨1| = (X + iY)/2
-        |1⟩⟨0| = (X − iY)/2
+    |0⟩⟨0| = (I + Z)/2,  |1⟩⟨1| = (I − Z)/2,
+    |0⟩⟨1| = (X + iY)/2, |1⟩⟨0| = (X − iY)/2.
     """
     op = QubitOperator((), 1.0)
     for k in range(n_b):
@@ -76,11 +90,7 @@ def _ket_bra(i, j, n_b, qubits):
 
 
 def _drop_imag_noise(op):
-    """Return a new QubitOperator with imaginary float-noise stripped.
-
-    Raises if any coefficient has |Im| > _IMAG_TOL — that's a real bug,
-    not noise. Hermitian operators should have purely real coefficients.
-    """
+    """Strip floating-point imaginary noise; raise on real non-Hermitian terms."""
     new_terms = {}
     for term, coeff in op.terms.items():
         if abs(coeff.imag) > _IMAG_TOL:
@@ -94,90 +104,107 @@ def _drop_imag_noise(op):
     return out
 
 
-# --- Template builders for single-register ladder operators ---------------
-# These build operators on contiguous local qubits [0..n_b−1] once per n_b
-# and cache. Per-site/-species instances are made by shifting qubit indices.
+# --- Single-mode templates and the symbolic-to-qubit bridge ---------------
 
 
-_TEMPLATE_CACHE = {}
-
-
-def _build_x_ladder_template(n_b):
-    """(â + â†) on local qubits [0..n_b−1]. Hermitian, real coefficients."""
-    cache_key = ('x', n_b)
-    cached = _TEMPLATE_CACHE.get(cache_key)
+def _a_template(n_b):
+    """â on local qubits [0..n_b−1] as a QubitOperator. â = Σ √n |n−1⟩⟨n|."""
+    key = ('a', n_b)
+    cached = _TEMPLATE_CACHE.get(key)
     if cached is not None:
         return cached
     N_f = 2 ** n_b
     local_qubits = list(range(n_b))
     op = QubitOperator()
     for n in range(1, N_f):
-        c = float(np.sqrt(n))
-        op += c * (_ket_bra(n - 1, n, n_b, local_qubits)
-                   + _ket_bra(n, n - 1, n_b, local_qubits))
-    op = _drop_imag_noise(op)
-    _TEMPLATE_CACHE[cache_key] = op
+        op += float(np.sqrt(n)) * _ket_bra(n - 1, n, n_b, local_qubits)
+    _TEMPLATE_CACHE[key] = op
     return op
 
 
-def _build_p_ladder_template(n_b):
-    """i·(â† − â) on local qubits [0..n_b−1]. Hermitian, real coefficients."""
-    cache_key = ('p', n_b)
-    cached = _TEMPLATE_CACHE.get(cache_key)
+def _a_dag_template(n_b):
+    """â† on local qubits [0..n_b−1] as a QubitOperator. â† = Σ √n |n⟩⟨n−1|."""
+    key = ('a_dag', n_b)
+    cached = _TEMPLATE_CACHE.get(key)
     if cached is not None:
         return cached
     N_f = 2 ** n_b
     local_qubits = list(range(n_b))
     op = QubitOperator()
     for n in range(1, N_f):
-        c = float(np.sqrt(n))
-        # i·(â† − â) connects |n−1⟩↔|n⟩ with matrix element ±i·√n.
-        # Build directly so the result is manifestly real.
-        # i·(|n⟩⟨n−1| − |n−1⟩⟨n|) multiplied by √n.
-        op += (1j * c) * (_ket_bra(n, n - 1, n_b, local_qubits)
-                          - _ket_bra(n - 1, n, n_b, local_qubits))
-    op = _drop_imag_noise(op)
-    _TEMPLATE_CACHE[cache_key] = op
+        op += float(np.sqrt(n)) * _ket_bra(n, n - 1, n_b, local_qubits)
+    _TEMPLATE_CACHE[key] = op
     return op
 
 
-def _shift_qubits(op, shift):
-    """Return a copy of op with all qubit indices shifted by `shift`."""
+def _monomial_template(signature, n_b):
+    """Single-mode monomial built from an ordered ladder-letter signature.
+
+    `signature` is a tuple of '+' (â†) and '-' (â) read left-to-right —
+    the operator product is left-multiplied in that order so that
+    `signature=('+', '-')` builds â†·â, and `signature=('-', '+')` builds
+    â·â†. The two differ on the truncated register at the |N_f−1⟩ boundary,
+    so ordering must be preserved in the cache key.
+    """
+    key = ('mono', n_b, signature)
+    cached = _TEMPLATE_CACHE.get(key)
+    if cached is not None:
+        return cached
+    a = _a_template(n_b)
+    a_dag = _a_dag_template(n_b)
+    op = QubitOperator((), 1.0)
+    for s in signature:
+        if s == '+':
+            op = op * a_dag
+        else:
+            op = op * a
+    _TEMPLATE_CACHE[key] = op
+    return op
+
+
+def _remap_qubits(op, target_qubits):
+    """Return op with local qubits [0..n−1] remapped to target_qubits[0..n−1]."""
     new_terms = {}
     for term, coeff in op.terms.items():
-        new_term = tuple((idx + shift, pauli) for idx, pauli in term)
+        new_term = tuple((target_qubits[idx], pauli) for idx, pauli in term)
         new_terms[new_term] = coeff
     out = QubitOperator()
     out.terms = new_terms
     return out
 
 
-def _x_ladder_register(site_id, species, n_b):
-    """(â + â†) on the (site_id, species) Fock register."""
-    template = _build_x_ladder_template(n_b)
-    base = site_to_pion_qubit(site_id, species, 0, n_b)
-    return _shift_qubits(template, base)
+def _site_to_pion_qubits(site_id, species, n_b):
+    """Contiguous qubits backing the (site, species) Fock register."""
+    return [site_to_pion_qubit(site_id, species, k, n_b) for k in range(n_b)]
 
 
-def _p_ladder_register(site_id, species, n_b):
-    """i·(â† − â) on the (site_id, species) Fock register."""
-    template = _build_p_ladder_template(n_b)
-    base = site_to_pion_qubit(site_id, species, 0, n_b)
-    return _shift_qubits(template, base)
+def _bosonop_to_qubitop(b_op, n_b, mode_qubits):
+    """Convert a BosonOperator to a QubitOperator on the truncated register.
 
+    Within each mode, the term's ladder letters are collected in their
+    *original* left-to-right order — that order is meaningful on the
+    truncated register. Different modes act on disjoint qubits so the
+    across-mode order doesn't matter and is dropped.
 
-def _number_op_register(site_id, species, n_b):
-    """â†â on the (site_id, species) Fock register.
-
-    Diagonal: â†â = Σ_k 2^k · (I − Z_k)/2 in the binary encoding.
+    Args:
+        b_op: BosonOperator. Do **not** pre-normal-order — that uses the
+            full-Hilbert-space commutator and produces a truncation defect.
+        n_b: bits per mode.
+        mode_qubits: dict mapping mode_index → list of n_b target qubits.
     """
-    op = QubitOperator()
-    for k in range(n_b):
-        q = site_to_pion_qubit(site_id, species, k, n_b)
-        coeff = (2 ** k) / 2.0
-        op += QubitOperator((), coeff)
-        op += QubitOperator(((q, 'Z'),), -coeff)
-    return op
+    result = QubitOperator()
+    for term, coeff in b_op.terms.items():
+        per_mode = defaultdict(list)
+        for mode_idx, action in term:
+            per_mode[mode_idx].append('+' if action == 1 else '-')
+
+        term_qop = QubitOperator((), coeff)
+        for mode_idx, signature in per_mode.items():
+            local_qop = _monomial_template(tuple(signature), n_b)
+            shifted = _remap_qubits(local_qop, mode_qubits[mode_idx])
+            term_qop = term_qop * shifted
+        result += term_qop
+    return result
 
 
 # --- HO basis coefficients ------------------------------------------------
@@ -198,6 +225,30 @@ def _basis_coefficients(params, dim):
     return c_pi, c_Pi
 
 
+# --- Symbolic ladder building blocks --------------------------------------
+
+
+def _b_x(mode):
+    """Symbolic (â + â†) on `mode` as a BosonOperator."""
+    return BosonOperator(f'{mode}') + BosonOperator(f'{mode}^')
+
+
+def _b_p(mode):
+    """Symbolic i·(â† − â) on `mode` as a BosonOperator."""
+    return 1j * (BosonOperator(f'{mode}^') - BosonOperator(f'{mode}'))
+
+
+def _number_op_register(site_id, species, n_b):
+    """â†â on the (site, species) register, diagonal: Σ_k 2^k·(I − Z_k)/2."""
+    op = QubitOperator()
+    for k in range(n_b):
+        q = site_to_pion_qubit(site_id, species, k, n_b)
+        coeff = (2 ** k) / 2.0
+        op += QubitOperator((), coeff)
+        op += QubitOperator(((q, 'Z'),), -coeff)
+    return op
+
+
 # --- EFT Hamiltonian terms in the Fock basis ------------------------------
 
 
@@ -213,9 +264,6 @@ def H_pion_free_local(L, dim, n_b, params):
     omega_0 = _get_omega_0(params)
     m_pi = params['m_pi']
     if abs(omega_0 - m_pi) > 1e-6:
-        # The clean collapse requires ω_0 = m_π. If the user has chosen a
-        # different ω_0 (e.g. lattice-effective mass), they'll need to
-        # build Π² and π² explicitly. For now, warn.
         import warnings
         warnings.warn(
             f"H_pion_free_local: ω_0={omega_0} differs from m_π={m_pi}; "
@@ -233,16 +281,20 @@ def H_pion_free_local(L, dim, n_b, params):
 
 
 def H_pion_free_gradient(L, dim, n_b, params):
-    """Gradient term (a_L^d/2)·Σ_d (∇_d π̂)².
+    """Gradient term (a_L^(d−2)/2)·Σ_d (π_y − π_x)² in the Fock basis.
 
-    Bilinear in (â_x + â_x†)(â_y + â_y†) across neighboring sites.
-    Off-diagonal in the Fock basis.
+    Builds the diff² symbolically as a 2-mode BosonOperator (mode 0 → x,
+    mode 1 → y), normal-orders once, then expands per (x, y, species)
+    against the cached single-mode monomial templates.
     """
     a_L = params['a_L']
     c_pi, _ = _basis_coefficients(params, dim)
-    # (a_L^d / 2) · (1/a_L²) = a_L^(d−2)/2 per gradient pair.
     factor = (a_L ** (dim - 2)) / 2.0 * (c_pi ** 2)
     num_sites = get_total_sites(L, dim)
+
+    diff = _b_x(1) - _b_x(0)
+    diff_sq = diff * diff
+
     H = QubitOperator()
     for x in range(num_sites):
         coords = index_to_coord(x, L, dim)
@@ -251,16 +303,16 @@ def H_pion_free_gradient(L, dim, n_b, params):
                 continue
             site_next = x + L ** d
             for I in _PION_SPECIES:
-                # diff = (a_y + a_y†) − (a_x + a_x†)
-                # (pi_y − pi_x)² = c_π² · diff²; the c_π² is in `factor`.
-                diff = (_x_ladder_register(site_next, I, n_b)
-                        - _x_ladder_register(x, I, n_b))
-                H += factor * (diff * diff)
+                mode_qubits = {
+                    0: _site_to_pion_qubits(x, I, n_b),
+                    1: _site_to_pion_qubits(site_next, I, n_b),
+                }
+                H += factor * _bosonop_to_qubitop(diff_sq, n_b, mode_qubits)
     return H
 
 
 def H_pion_free(L, dim, n_b, params):
-    """Total free-pion: local (m, Π²) + gradient."""
+    """Total free-pion: local (m·n̂ + ½) + gradient."""
     return H_pion_free_local(L, dim, n_b, params) \
            + H_pion_free_gradient(L, dim, n_b, params)
 
@@ -269,6 +321,11 @@ def H_axial_vector(L, dim, n_b, params):
     """Axial-vector coupling H_AV in the Fock basis.
 
     H_AV = (g_A / (2 f_π)) · Σ_x Σ_d Σ_I N†(σ_d τ_I)N · ∇_d π_I (x)
+
+    Pion gradient is linear in â/â† and lives on two neighbor modes
+    (0 → x, 1 → y); normal-ordering is trivial but goes through the same
+    BosonOperator → QubitOperator path as the gradient and WT terms for
+    consistency.
     """
     a_L = params['a_L']
     c_pi, _ = _basis_coefficients(params, dim)
@@ -276,6 +333,9 @@ def H_axial_vector(L, dim, n_b, params):
     f_pi = params['f_pi']
     prefactor = g_A / (2.0 * f_pi * a_L) * c_pi
     num_sites = get_total_sites(L, dim)
+
+    pion_grad_b = _b_x(1) - _b_x(0)
+
     H = QubitOperator()
     for x in range(num_sites):
         coords = index_to_coord(x, L, dim)
@@ -285,11 +345,12 @@ def H_axial_vector(L, dim, n_b, params):
             site_next = x + L ** d
             spin_idx = 3 if dim == 1 else d + 1
             for I in _PION_SPECIES:
-                # ∇_d π_I (x) ≈ (π_I(x+e_d) − π_I(x))/a_L,
-                #             = c_π · (x_ladder_y − x_ladder_x)/a_L
-                # the c_π / a_L is in `prefactor`.
-                pion_grad = (_x_ladder_register(site_next, I, n_b)
-                             - _x_ladder_register(x, I, n_b))
+                mode_qubits = {
+                    0: _site_to_pion_qubits(x, I, n_b),
+                    1: _site_to_pion_qubits(site_next, I, n_b),
+                }
+                pion_grad = _bosonop_to_qubitop(pion_grad_b, n_b, mode_qubits)
+
                 nucleon_sum = QubitOperator()
                 for m_alpha in _MODES:
                     for m_beta in _MODES:
@@ -308,20 +369,29 @@ def H_axial_vector(L, dim, n_b, params):
 def H_WT_Logic(L, dim, n_b, params):
     """Weinberg-Tomozawa term H_WT in the Fock basis.
 
-    H_WT = (1/(4 f_π²)) · Σ_x Σ_{I1,I2,I3} ε_{I1 I2 I3} · N†τ_I1 N · π_I2(x) Π_I3(x)
+    H_WT = (1/(4 f_π²)) · Σ_x Σ_{I1,I2,I3} ε_{I1 I2 I3} · N†τ_{I1} N · π_{I2}(x) Π_{I3}(x)
+
+    π · Π on different species (I2 ≠ I3 from ε) becomes a 2-mode product
+    that normal-ordering splits into four single-mode-tensor monomials.
     """
     c_pi, c_Pi = _basis_coefficients(params, dim)
     f_pi = params['f_pi']
     prefactor = 1.0 / (4.0 * f_pi ** 2)
-    pion_coeff = c_pi * c_Pi  # absorbs the c_π · c_Π that comes from π · Π
+    pion_coeff = c_pi * c_Pi
     num_sites = get_total_sites(L, dim)
+
+    pi_dot_Pi_b = _b_x(0) * _b_p(1)
+
     H = QubitOperator()
     for x in range(num_sites):
         for I1, I2, I3, sign in _EPSILONS:
-            # π_I2(x) · Π_I3(x) = c_π · c_Π · x_ladder(I2) · p_ladder(I3)
-            x_lad = _x_ladder_register(x, I2, n_b)
-            p_lad = _p_ladder_register(x, I3, n_b)
-            pion_block = pion_coeff * (x_lad * p_lad)
+            mode_qubits = {
+                0: _site_to_pion_qubits(x, I2, n_b),
+                1: _site_to_pion_qubits(x, I3, n_b),
+            }
+            pion_block = pion_coeff * _bosonop_to_qubitop(
+                pi_dot_Pi_b, n_b, mode_qubits
+            )
             nucleon_block = QubitOperator()
             for m_alpha in _MODES:
                 for m_beta in _MODES:
