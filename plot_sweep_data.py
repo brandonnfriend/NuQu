@@ -7,9 +7,26 @@ from datetime import datetime
 from src_PI.trotter_theory.TrotterCost import get_total_trotter_cost
 
 
+# Standard color per basis for overlay plots.
+_BASIS_COLORS = {
+    'amplitude': 'tab:blue',
+    'fock': 'tab:orange',
+}
+
+
+def _get_basis_label(metadata):
+    """Extract pion_basis from metadata['config'] if present; default 'amplitude'.
+
+    Old sweep files predate the Config object and have no basis field. We treat
+    them as amplitude basis for backward compatibility (which is what they were).
+    """
+    cfg = metadata.get('config') or {}
+    return cfg.get('pion_basis', 'amplitude')
+
+
 def load_and_plot(filepath):
-    """Loads sweep JSON data and plots T-counts and Lambda vs Nucleon Number (A)."""
-    
+    """Loads sweep JSON data and plots T-counts, Lambda, qubits, runtime vs A."""
+
     if not os.path.exists(filepath):
         print(f"Error: File '{filepath}' not found.")
         return
@@ -17,36 +34,45 @@ def load_and_plot(filepath):
     # 1. Load Data
     with open(filepath, 'r') as f:
         data = json.load(f)
-        
+
     metadata = data['metadata']
     results = data['results']
-    
+    basis = _get_basis_label(metadata)
+
     # 2. Extract Arrays
     A_vals = [r['A'] for r in results]
     L_vals = [r.get('L', metadata.get('L')) for r in results]
-    
-    # Hardware Stats
+
     total_T = [r['Total_T_Count'] for r in results]
-    walk_T = [r['Walk_T_Count'] for r in results]
-    qft_T = [r['QFT_T_Count'] for r in results]
-    
-    # Physics & Performance Stats
+    walk_T = [r.get('Walk_T_Count', 0) for r in results]
+    qft_T = [r.get('QFT_T_Count', 0) for r in results]
+
     lambdas = [r['Physical_Lambda'] for r in results]
-    runtimes = [r['Runtime_Seconds'] for r in results]
-    
-    # Determine L for the title
+    runtimes = [r.get('Runtime_Seconds', 0) for r in results]
+    qubits = [r.get('Logical_Qubits', 0) for r in results]
+
+    # Title bits
     unique_L = np.unique(L_vals)
     if len(unique_L) == 1:
         l_string = f"L={unique_L[0]}"
     else:
         l_string = f"L Range [{min(unique_L)}-{max(unique_L)}]"
 
- # 3. Create Plots (3 Subplots)
-    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(20, 6))
-    fig.suptitle(f"Dynamical Pion EFT Resource Scaling ({l_string}, {metadata['dim']}D)", fontsize=18, fontweight='bold')
+    # 3. Create Plots (4 subplots — added Logical Qubits)
+    fig, axes = plt.subplots(1, 4, figsize=(24, 6))
+    ax1, ax2, ax3, ax4 = axes
+    fig.suptitle(
+        f"Dynamical Pion EFT Resource Scaling ({l_string}, {metadata['dim']}D, "
+        f"basis={basis})",
+        fontsize=18, fontweight='bold',
+    )
+    color = _BASIS_COLORS.get(basis, 'black')
 
     # --- Plot 1: T-Gate Scaling ---
-    ax1.plot(A_vals, total_T, marker='o', color='black', linewidth=2.5, label='Total Step Cost')
+    ax1.plot(A_vals, total_T, marker='o', color=color, linewidth=2.5, label='Total Step Cost')
+    if any(qft_T):
+        ax1.plot(A_vals, qft_T, marker='s', color=color, linewidth=1.5,
+                 linestyle='--', alpha=0.6, label='QFT step cost')
     ax1.set_title("Total T-Gate Costs per Step", fontsize=14)
     ax1.set_xlabel("Nucleon Number (A)", fontsize=12)
     ax1.set_ylabel("T-Gates", fontsize=12)
@@ -55,28 +81,122 @@ def load_and_plot(filepath):
     ax1.legend()
 
     # --- Plot 2: Physical Lambda ---
-    ax2.plot(A_vals, lambdas, marker='D', color='purple', linewidth=2)
-    ax2.set_title("Physical $\Lambda$ (Energy Scale)", fontsize=14)
+    ax2.plot(A_vals, lambdas, marker='D', color=color, linewidth=2)
+    ax2.set_title("Physical $\\Lambda$ (Energy Scale)", fontsize=14)
     ax2.set_xlabel("Nucleon Number (A)", fontsize=12)
-    ax2.set_ylabel("$\Lambda$ (MeV)", fontsize=12)
+    ax2.set_ylabel("$\\Lambda$ (MeV)", fontsize=12)
     ax2.set_yscale('log')
     ax2.grid(True, which="both", ls="--", alpha=0.5)
 
-    # --- Plot 3: Classical Runtime ---
-    ax3.plot(A_vals, runtimes, marker='o', color='green', linewidth=2)
-    ax3.set_title("Estimation Runtime", fontsize=14)
+    # --- Plot 3: Logical Qubits ---
+    ax3.plot(A_vals, qubits, marker='^', color=color, linewidth=2)
+    ax3.set_title("Logical Qubits (peak)", fontsize=14)
     ax3.set_xlabel("Nucleon Number (A)", fontsize=12)
-    ax3.set_ylabel("Wall Clock Time (Seconds)", fontsize=12)
-    ax3.grid(True, ls="--", alpha=0.5)
+    ax3.set_ylabel("Logical Qubits", fontsize=12)
+    ax3.grid(True, which="both", ls="--", alpha=0.5)
 
-    plt.tight_layout(rect=[0, 0.03, 1, 0.95]) # Adjust for the main title
-    
-    # Save the plot
+    # --- Plot 4: Classical Runtime ---
+    ax4.plot(A_vals, runtimes, marker='o', color=color, linewidth=2)
+    ax4.set_title("Estimation Runtime", fontsize=14)
+    ax4.set_xlabel("Nucleon Number (A)", fontsize=12)
+    ax4.set_ylabel("Wall Clock Time (Seconds)", fontsize=12)
+    ax4.grid(True, ls="--", alpha=0.5)
+
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+
     plot_filename = filepath.replace('.json', '_plot.png')
     plt.savefig(plot_filename, dpi=300)
     print(f"Plot saved successfully to: {plot_filename}")
-    
+
     plt.show()
+
+
+def plot_basis_comparison(filepaths, save_dir=None, save_basename=None):
+    """Overlay multiple sweeps for direct A-vs-B (basis) comparison.
+
+    Args:
+        filepaths: list of sweep JSON files. Each file's metadata['config']
+            gives its basis label; overlapping bases are drawn together.
+        save_dir: directory to save the comparison plot to. Defaults to
+            data/<today>/.
+        save_basename: basename for the output PNG (no extension). Defaults
+            to 'basis_comparison_L{L}_{dim}D'.
+
+    Side effect: writes a PNG with four subplots (T-count, Λ, qubits, runtime)
+    overlaying every input sweep, color-coded by basis.
+
+    Returns the save path.
+    """
+    if not filepaths:
+        print("plot_basis_comparison: no files passed.")
+        return None
+
+    fig, axes = plt.subplots(1, 4, figsize=(24, 6))
+    ax_T, ax_L, ax_Q, ax_t = axes
+
+    L_for_title = None
+    dim_for_title = None
+
+    for fp in filepaths:
+        if not os.path.exists(fp):
+            print(f"plot_basis_comparison: skipping missing file {fp}")
+            continue
+        with open(fp) as f:
+            data = json.load(f)
+        meta = data['metadata']
+        results = data['results']
+        basis = _get_basis_label(meta)
+        color = _BASIS_COLORS.get(basis, 'black')
+
+        if L_for_title is None:
+            L_for_title = meta.get('L', results[0].get('L'))
+            dim_for_title = meta.get('dim', 3)
+
+        A_vals = [r['A'] for r in results]
+        T_vals = [r['Total_T_Count'] for r in results]
+        Lam_vals = [r['Physical_Lambda'] for r in results]
+        Q_vals = [r.get('Logical_Qubits', 0) for r in results]
+        rt_vals = [r.get('Runtime_Seconds', 0) for r in results]
+
+        n_b_label = ', '.join(sorted({str(r['n_b']) for r in results}))
+        label = f"{basis}  (n_b={n_b_label})"
+
+        ax_T.plot(A_vals, T_vals, marker='o', color=color, linewidth=2, label=label)
+        ax_L.plot(A_vals, Lam_vals, marker='D', color=color, linewidth=2, label=label)
+        ax_Q.plot(A_vals, Q_vals, marker='^', color=color, linewidth=2, label=label)
+        ax_t.plot(A_vals, rt_vals, marker='s', color=color, linewidth=2, label=label)
+
+    ax_T.set_title("Total T-Gate Cost per Step"); ax_T.set_yscale('log')
+    ax_L.set_title("Physical $\\Lambda$ (MeV)");    ax_L.set_yscale('log')
+    ax_Q.set_title("Logical Qubits (peak)")
+    ax_t.set_title("Estimation Runtime (s)")
+
+    for ax in axes:
+        ax.set_xlabel("Nucleon Number (A)")
+        ax.grid(True, which="both", ls="--", alpha=0.5)
+        ax.legend(fontsize=10)
+    ax_T.set_ylabel("T-Gates")
+    ax_L.set_ylabel("$\\Lambda$ (MeV)")
+    ax_Q.set_ylabel("Logical Qubits")
+    ax_t.set_ylabel("Wall-clock (s)")
+
+    fig.suptitle(
+        f"Basis Comparison: Dynamical Pion EFT Resources "
+        f"(L={L_for_title}, {dim_for_title}D)",
+        fontsize=18, fontweight='bold',
+    )
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+
+    if save_dir is None:
+        save_dir = os.path.join("data", datetime.now().strftime("%Y-%m-%d"))
+    os.makedirs(save_dir, exist_ok=True)
+    if save_basename is None:
+        save_basename = f"basis_comparison_L{L_for_title}_{dim_for_title}D"
+    out_path = os.path.join(save_dir, f"{save_basename}.png")
+    plt.savefig(out_path, dpi=300)
+    print(f"Plot saved successfully to: {out_path}")
+    plt.show()
+    return out_path
 
 def plot_total_tcost_comparison(filepath, delta_E=1.0, e=0.1, E_kin=10, Cp=1e-3):
     """

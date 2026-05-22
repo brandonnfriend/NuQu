@@ -1,99 +1,120 @@
 import math
+
 from src_PI.hamiltonians.ConstructEFT import build_eft_hamiltonian
 from src_PI.estimation.estimators import run_qubitization_analysis
 from src_PI.estimation.NormalizeHamiltonians import normalize_for_qpe
 
 
-def calculate_qft_cost(L, dim, n_b):
+def calculate_qft_cost(L, dim, n_b, config):
+    """Estimates T-gate overhead for QFTs in the split-oracle walk step.
+
+    Returns 0 for any basis that doesn't need a basis rotation between
+    sub-Hamiltonians (e.g. Fock basis, where π and Π share one register).
+    For the amplitude basis, each pion species per site needs an n_b-bit
+    QFT, doubled because each walk step needs a QFT into momentum basis
+    and an IQFT back.
     """
-    Estimates T-gate overhead for QFTs in the Split-Oracle.
-    Each pion species on each site needs a QFT of size n_b.
-    """
-    num_pion_registers = 3 * (L**dim)
-    
-    # Proper scaling for an n-bit QFT synthesis 
+    if config.pion_basis != 'amplitude':
+        return 0
+
+    num_pion_registers = 3 * (L ** dim)
     if n_b <= 1:
-        t_gates_per_qft = 0  # Only Hadamards needed, which are Clifford (0 T-gates)
+        t_gates_per_qft = 0  # Hadamards only → 0 T-gates.
     else:
         t_gates_per_qft = int(8 * n_b * math.log2(n_b))
-        
-    return num_pion_registers * t_gates_per_qft
+    # ×2: QFT to momentum basis + IQFT back, per walk step.
+    return 2 * num_pion_registers * t_gates_per_qft
 
-def evaluate_resources(L, dim, n_b, pi_max, params):
-    """Calculates and prints hardware requirements for the D-dimensional EFT."""
-    
-    print(f"--- Resource Evaluation: {L}^{dim} Lattice, {n_b} Bits/Species ---")
-    
-    # 1 & 2. Build Hamiltonians via the Constructor
+
+def evaluate_resources(L, dim, n_b, pi_max, params, config):
+    """Calculates and prints hardware requirements for the D-dimensional EFT.
+
+    Basis-agnostic: dispatches via `config.pion_basis` through
+    `build_eft_hamiltonian`. Iterates over the resulting HamiltonianBundle's
+    sub-Hamiltonians; the only basis-conditional code path is the QFT
+    overhead calculation.
+    """
+    print(f"--- Resource Evaluation: {L}^{dim} Lattice, {n_b} Bits/Species, "
+          f"basis={config.pion_basis}, walk_mode={config.walk_mode} ---")
+
+    # 1. Build the Hamiltonian bundle via the basis-dispatching constructor.
     print("Constructing Full EFT Hamiltonian...")
-    H_pos, H_mom, q_count, num_sites = build_eft_hamiltonian(L, dim, n_b, pi_max, params)
-    
+    bundle, q_count, num_sites = build_eft_hamiltonian(
+        L, dim, n_b, pi_max, params, config
+    )
+
     print(f"Total Qubits:      {q_count}")
     print(f"Total Sites:       {num_sites}")
-    
-    # 3. Normalize Hamiltonians
-    print("Normalizing Hamiltonians for QPE...")
-    norm_data = normalize_for_qpe(H_pos, H_mom, safety_factor=2.5)
-    
-    print(f"-> Extracted classical energy shift: {norm_data['identity_shift'].real:.4e}")
-    print(f"-> Physical Lambda:                  {norm_data['physical_lambda']:.4e}")
-    print(f"-> Spectral Delta (Scaling factor):  {norm_data['delta']:.4e}")
+    print(f"Sub-Hamiltonians:  {bundle.names()}")
 
-    H_total_norm = norm_data['H_pos_norm'] + norm_data['H_mom_norm']
-    num_terms = len(H_total_norm.terms)
-    weights = [len(term) for term in H_total_norm.terms]
+    # 2. Normalize every sub-Hamiltonian against a shared Δ.
+    print("Normalizing Hamiltonians for QPE...")
+    norm_data = normalize_for_qpe(bundle, safety_factor=2.5)
+
+    print(f"-> Extracted classical energy shift: {norm_data['identity_shift'].real if hasattr(norm_data['identity_shift'], 'real') else norm_data['identity_shift']:.4e}")
+    print(f"-> Physical Lambda (total):          {norm_data['physical_lambda']:.4e}")
+    print(f"-> Spectral Delta (Scaling factor):  {norm_data['delta']:.4e}")
+    for name, lam in norm_data['sub_lambdas']:
+        share = (lam / norm_data['physical_lambda'] * 100.0) if norm_data['physical_lambda'] else 0.0
+        print(f"   - sub '{name}': Λ = {lam:.4e}  ({share:.2f}% of total)")
+
+    # Diagnostic: combined Pauli stats across all sub-Hamiltonians.
+    num_terms = 0
+    weights = []
+    for _, H_norm in norm_data['sub_hamiltonians']:
+        num_terms += len(H_norm.terms)
+        weights.extend(len(t) for t in H_norm.terms)
     max_w = max(weights) if weights else 0
-    w5_count = sum(1 for w in weights if w == 5)
-    
-    print("\n" + "="*45)
+
+    print("\n" + "=" * 45)
     print(f"Total Pauli Strings (Non-Identity): {num_terms}")
     print(f"Maximum Pauli Weight:               {max_w}")
-    print(f"Weight-5 Strings:                   {w5_count}")
-    print("="*45)
+    print("=" * 45)
 
-    # 4. Resource Estimation via pyLIQTR
-    print("Starting pyLIQTR analysis with split-oracle...")
-    liqtr_results = run_qubitization_analysis(
-        norm_data['H_pos_norm'], 
-        norm_data['H_mom_norm'], 
-        num_sites, 
-        n_b
-    )
-    
-    # 5. QFT Overhead Calculation
-    qft_overhead = calculate_qft_cost(L, dim, n_b)
-    # Multiply by 2 because each walk step requires a QFT into momentum basis and an IQFT back
-    total_qft_step_cost = 2 * qft_overhead 
-    
-    print("\n" + "-"*50)
-    print("       SPLIT-ORACLE BASIS TRANSFORMATION COST")
-    print("-"*50)
-    print(f"Pion Registers per QFT:      {3 * (L**dim)}")
-    print(f"T-gates per QFT/IQFT module: {qft_overhead: .4e}")
-    print(f"Total T-gates per walk step: {total_qft_step_cost: .4e}")
-    print("-"*50)
-    
-    # 6. Package Data for the Sweep Logger
+    # 3. pyLIQTR resource estimation across the bundle.
+    print("Starting pyLIQTR analysis...")
+    liqtr_results = run_qubitization_analysis(norm_data, num_sites, n_b)
+
+    # 4. QFT overhead — basis-conditional (zero for Fock).
+    total_qft_step_cost = calculate_qft_cost(L, dim, n_b, config)
+    if total_qft_step_cost > 0:
+        print("\n" + "-" * 50)
+        print("       BASIS-ROTATION (QFT) COST PER WALK STEP")
+        print("-" * 50)
+        print(f"Pion Registers (QFT'd):      {3 * (L**dim)}")
+        print(f"Total T-gates per walk step: {total_qft_step_cost: .4e}")
+        print("-" * 50)
+    else:
+        print(f"\n[basis={config.pion_basis}] No QFT-between-walks cost; "
+              f"all sub-Hamiltonians share one register.\n")
+
+    # 5. Package data for the sweep logger.
     if not isinstance(liqtr_results, dict):
         liqtr_results = {}
 
     base_t_count = liqtr_results.get('T', 0)
     base_clifford = liqtr_results.get('Clifford', 0)
-
-    # estimators.run_qubitization_analysis already takes max(pos, mom) for LogicalQubits
-    # since the two walks run sequentially on the same hardware.
     logical_qubits = liqtr_results.get('LogicalQubits', 0)
-    pos_logical_qubits = liqtr_results.get('Pos_LogicalQubits', 0)
-    mom_logical_qubits = liqtr_results.get('Mom_LogicalQubits', 0)
+    per_sub = liqtr_results.get('per_sub', [])
 
-    # Save exactly the fields requested for the JSON output
     norm_data['Walk_T_Count'] = base_t_count
     norm_data['QFT_T_Count'] = total_qft_step_cost
     norm_data['Total_T_Count'] = base_t_count + total_qft_step_cost
     norm_data['Walk_Clifford_Count'] = base_clifford
     norm_data['Logical_Qubits'] = logical_qubits
-    norm_data['Pos_Walk_Logical_Qubits'] = pos_logical_qubits
-    norm_data['Mom_Walk_Logical_Qubits'] = mom_logical_qubits
-    norm_data['Physical_Lambda'] = norm_data['physical_lambda'] # The non-normalized Lambda
+    norm_data['Physical_Lambda'] = norm_data['physical_lambda']
+
+    # Per-sub-Hamiltonian breakouts for the JSON record. Encodes the
+    # bundle structure in a backward-friendly way for plotting tools.
+    norm_data['Per_Sub_Walk'] = [
+        {
+            'name': e['name'],
+            'T': e['T'],
+            'Clifford': e['Clifford'],
+            'LogicalQubits': e['LogicalQubits'],
+            'alpha': e['alpha'],
+        }
+        for e in per_sub
+    ]
 
     return norm_data

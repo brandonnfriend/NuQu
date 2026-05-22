@@ -42,6 +42,40 @@ Deep context for the NuQu project. Loaded on demand (not every conversation). Fo
 - Energy unit throughout: **MeV**. Length conversions via `hc = 197.327 MeV·fm`.
 - Data files are date-stamped under `data/`; raw outputs are gitignored (only `data/.gitkeep` is tracked).
 
+## Bosonic cutoff parameters: π_max, Π_max, δπ, n_b
+The Watson bosonic encoding has **two physically meaningful parameters and two derived ones**, despite four numbers appearing in the code (`pi_max`, `Pi_max`, `delta_pi`, `n_b`). Knowing which are independent and which are derived matters when choosing or auditing cutoffs.
+
+### Structural relations (Watson §II.C.2.a, Eqs. 28–33)
+- Eq. 28: `n_b = log₂(2·π_max/δπ + 1)` → grid relation: `δπ = 2·π_max/(2^{n_b} − 1)`
+- Eq. 32: `Π_max = π / (a_L³ · δπ)` → FFT/Nyquist relation: `Π_max ∝ 1/δπ`
+- Combined (Eq. 78): `n_b = log₂(2·a_L³·π_max·Π_max/π + 1)`
+
+So once you pick `π_max` and `Π_max`, both `δπ` and `n_b` are determined. **The two free parameters are (π_max, Π_max)**, not (π_max, δπ, n_b).
+
+### What Lemma 5 actually fixes
+Lemma 5 gives **two independent lower bounds** (one per parameter), derived from Watson Appendix D's Chebyshev-style energy-bound argument:
+- Eq. 75: `π_max ≥ π_max_bound` (controls field-amplitude aliasing for states with `⟨H⟩ ≤ E_bound`)
+- Eq. 76: `Π_max ≥ Π_max_bound` (controls conjugate-field aliasing)
+
+`δπ` does not get a separate error bound in App. D — once `(π_max, Π_max)` are chosen, the FFT is exact and `δπ` is determined.
+
+### The integer-ceiling slack and how to use it
+Watson p. 26 explicitly notes: "since `n_b` is the number of qubits, it must be an integer. In practice we do not exactly substitute the bounds for `π_max` and `Π_max` into Eq. (78). Rather, we choose the nearest cutoffs above these bounds to ensure `n_b` is an integer."
+
+Current code (`EFTParameters.calculate_dynamic_cutoffs`) returns `pi_max = π_max_bound` and `Pi_max = Π_max_bound` exactly, then `n_b = ceil(log₂(...))`. Because `n_b` is rounded up, the *effective* `Π_max` used downstream — computed from `δπ = 2·π_max/(2^{n_b}−1)` and `Π_max = π/(a_L³·δπ)` — is generally **larger than the Eq. 76 bound**. The slack is silently absorbed into `Π_max`.
+
+### Why this matters for Λ
+Λ has contributions roughly `Λ ≈ c_π · π_max² + c_Π · Π_max² + (small cross terms)`. Under the constraint `π_max · Π_max = const` (set by the chosen integer `n_b`), the Lagrangian optimum is `c_π · π_max² = c_Π · Π_max²` (the two contributions equal).
+
+The Λ audit at L=2, dim=3, A=2 measured **c_Π · Π_max² = 73.25%** of Λ and `c_π · π_max² = 26.69%`. The current implicit allocation (slack absorbed into `Π_max`) makes Π² *larger*, going the **wrong direction**. The optimum at this parameter point is `π_max → 1.29·π_max_bound`, `Π_max → 0.78·Π_max_effective` (still above the Eq. 76 bound), giving roughly **~12% Λ reduction** for free.
+
+(The 73/27 ratio drifts with (A, L) since `π_max²`'s T2/T3 pieces grow like `A`; the optimum shifts but the *principle* — re-allocate slack to equalize contributions — is constant.)
+
+### Bottom line for code authors
+- `(π_max, Π_max)` are the meaningful dials. `δπ` and `n_b` are derived.
+- Macridin/Klco-Savage's NS prescription replaces Lemma 5's energy-bound `(π_max_bound, Π_max_bound)` with NS-optimal bounds tied to a boson-number cutoff. See `claude/research/bosonic-encodings/01_two_readings_oscillator_basis.md` for the three-reading taxonomy (B = NS-optimal cutoff in field-amplitude register, A = occupation-number register, C = basis-adapted compression on top of B via displaced HO or variational basis à la Li 2023).
+- The slack-reallocation Λ reduction is independent of those three readings and available *now* — it's a tweak inside `calculate_dynamic_cutoffs`, not a new derivation.
+
 ## Known issues / TODOs the user has flagged
 - `utils.py` has a TODO block about generalizing strides/PBC, but the dimension-agnostic helpers in `LatticeGeometry.py` already cover most of it; the `_1D` helpers in `utils.py` are legacy duplicates.
 

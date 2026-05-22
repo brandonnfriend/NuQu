@@ -9,6 +9,7 @@ This file is the assistant's standing context for the NuQu project. Keep it shor
 
 ### Scope and boundaries
 - **Stay inside the project root** (the directory containing this `CLAUDE.md`). Do not create or modify files outside it.
+- **`human_knowledge/` is read-only.** Files inside `human_knowledge/` are written by the user to record their own understanding, intuition, and direction. Read them freely for context, but never edit, rewrite, rename, delete, or create files inside that folder. If you think something there is wrong or stale, raise it in conversation instead of editing.
 - **Don't push to remote.** The user reviews changes locally and pushes themselves. Never `git push` without an explicit request.
 - Work on a feature branch. Don't commit to `main` directly.
 
@@ -32,6 +33,7 @@ This file is the assistant's standing context for the NuQu project. Keep it shor
 - **Write tests with new code.** A small `test_<module>.py` in `tests/`, or a short script that prints expected vs. actual, is fine — match what the user asks for case by case.
 - **Print a short result summary whenever you run a script.** Quick read on what happened (key resource numbers, runtime, file written). Don't dump giant tables.
 - **No infinite loops.** Sweeps and HPC-style runs must have explicit bounds; warn before launching anything that could be long-running. Default to small `L` (≤2) and a short `A` range for local smoke tests.
+- **Comparison switches for substantial design changes.** When introducing a substantive design change (different basis, different encoder, different fermion mapping, different cutoff prescription, etc.), **keep the previous path alive as a runtime flag/switch rather than replacing it.** Direct A-vs-B comparison numbers are themselves publishable results — they quantify the gain from each change instead of just asserting it. Both paths must pass their own tests; the dual-maintenance cost is real but acceptable for the duration of the comparison study, and the deprecated path can be retired once the result is published. Examples on the roadmap: Fock vs. field-amplitude basis; sparse-oracle vs. PauliLCU block encoder; Verstraete–Cirac vs. Jordan–Wigner fermion encoding; NS-optimal vs. Watson-Lemma-5 cutoffs.
 
 ### Workflow
 - The default reviewer is the user. Stage diffs, summarize what changed, and let them push.
@@ -49,3 +51,8 @@ Read it before:
 - Interpreting Λ values or T-counts in the saved JSON output.
 - Reasoning about Watson 2025 lemmas, the split-oracle structure, or qubit-counting conventions.
 - Picking up follow-up work referenced in "Live state" (VC encoding comparison, lambda-reduction levers, etc.).
+
+## Open homework (user-owned tasks)
+Bring up periodically when contextually relevant; don't nag.
+
+- **Rigorous Fock-basis cutoff from Tong et al. 2022.** `calculate_fock_cutoff` in `src_PI/hamiltonians/core/EFTParameters.py` currently uses a hand-rolled heuristic `n_q = max(4, ceil(4 + log₂(1+A)))`. The Tong–Albert–McClean–Preskill–Su 2022 paper (arXiv:2110.06942, PDF in `claude/research/bosonic-encodings/`) proves `N_f = O(polylog(1/ε))` suffices for bosonic Hamiltonians with bounded-degree polynomial coupling (our case: H_AV degree 1, H_WT degree 2). The open task: instantiate their Theorem 6 for our specific Hamiltonian — bound the operator norms of the per-site polynomial pieces, plug the lattice geometry into their multi-site analysis, derive the explicit `N_f(ε, t, L, A, couplings)` formula. Would be a publishable contribution to the NuQu paper. Until then the heuristic is a placeholder.
