@@ -164,4 +164,4 @@ def run_sweep(**overrides):
 
 
 if __name__ == '__main__':
-    run_sweep(pion_basis = 'fock')
+    run_sweep()
