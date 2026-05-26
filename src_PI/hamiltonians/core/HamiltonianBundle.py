@@ -18,25 +18,40 @@ Walk-mode (`series` vs `parallel`) controls how per-walk logical qubits are
 combined into a peak qubit count:
 - series: walks reuse the same hardware → peak = max(walk_qubits)
 - parallel: walks run simultaneously → peak = sum(walk_qubits)
+
+Storage: `self.sub_hamiltonians` is a list of `SubHamiltonian` instances.
+For backwards-compatibility, `SubHamiltonian` is tuple-unpackable as
+`(name, operator)`, so existing iteration code `for name, op in bundle:`
+keeps working. The constructor also accepts legacy `(name, operator)`
+tuples and auto-wraps them as `SubHamiltonian(name, operator, algebra='pauli')`.
 """
+
+from src_PI.hamiltonians.core.SubHamiltonian import SubHamiltonian
 
 
 class HamiltonianBundle:
-    """A list of named (QubitOperator) sub-Hamiltonians plus walk-mode metadata."""
+    """A list of named sub-Hamiltonians (`SubHamiltonian` objects) plus walk-mode metadata."""
 
     def __init__(self, sub_hamiltonians, walk_mode='series', metadata=None):
         """
         Args:
-            sub_hamiltonians: list of (name, QubitOperator) tuples.
-                e.g. [('pos', H_pos), ('mom', H_mom)] for amplitude basis,
-                     [('fock', H_full)]              for Fock basis.
+            sub_hamiltonians: list of `SubHamiltonian` instances, OR (back-compat)
+                a list of `(name, operator)` tuples — tuples are auto-wrapped as
+                `SubHamiltonian(name, operator, algebra='pauli')`.
             walk_mode: 'series' (default) or 'parallel'.
             metadata: optional dict of extra info (basis label, etc.) to
                 preserve through the pipeline.
         """
         if walk_mode not in ('series', 'parallel'):
             raise ValueError(f"walk_mode must be 'series' or 'parallel', got {walk_mode!r}")
-        self.sub_hamiltonians = list(sub_hamiltonians)
+        wrapped = []
+        for item in sub_hamiltonians:
+            if isinstance(item, SubHamiltonian):
+                wrapped.append(item)
+            else:
+                name, operator = item
+                wrapped.append(SubHamiltonian(name=name, operator=operator, algebra='pauli'))
+        self.sub_hamiltonians = wrapped
         self.walk_mode = walk_mode
         self.metadata = dict(metadata) if metadata else {}
 
@@ -47,16 +62,20 @@ class HamiltonianBundle:
         return len(self.sub_hamiltonians)
 
     def names(self):
-        return [name for name, _ in self.sub_hamiltonians]
+        return [sh.name for sh in self.sub_hamiltonians]
 
     def operators(self):
-        return [op for _, op in self.sub_hamiltonians]
+        return [sh.operator for sh in self.sub_hamiltonians]
+
+    def algebras(self):
+        """Return the algebra label of each sub-Hamiltonian, in order."""
+        return [sh.algebra for sh in self.sub_hamiltonians]
 
     def get(self, name):
-        """Lookup a sub-Hamiltonian by name. Returns None if not found."""
-        for n, op in self.sub_hamiltonians:
-            if n == name:
-                return op
+        """Lookup a sub-Hamiltonian's operator by name. Returns None if not found."""
+        for sh in self.sub_hamiltonians:
+            if sh.name == name:
+                return sh.operator
         return None
 
     def combine_qubit_count(self, per_walk_counts):

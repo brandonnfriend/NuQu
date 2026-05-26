@@ -43,6 +43,9 @@ def get_sweep_config(**overrides):
         # Amplitude-basis cutoff prescription: 'energy_bound' (Watson Lemma 5)
         # or 'ns' (Nyquist-Shannon optimal, Path B). Ignored by the Fock basis.
         'cutoff_method': 'energy_bound',
+        # Block-encoder strategy: 'pauli_lcu' (default), 'sparse' (task 26),
+        # or 'lobe' (task 28). See src_PI/estimation/block_encoders/.
+        'block_encoder': 'pauli_lcu',
         'epsilon_cut': 0.1,
         'E_bound_per_A_MeV': 10.0,       # E_max = E_bound_per_A_MeV * A
         # Optional override: if set, used instead of the basis-specific
@@ -94,12 +97,14 @@ def run_sweep(**overrides):
         pion_basis=run_cfg['pion_basis'],
         walk_mode=run_cfg['walk_mode'],
         cutoff_method=run_cfg['cutoff_method'],
+        block_encoder=run_cfg['block_encoder'],
         extras=run_cfg['extras'],
     )
 
     print("========================================================")
     print(f" INITIATING NUCLEON SWEEP (basis={config.pion_basis}, "
-          f"cutoff={config.cutoff_method}, walk_mode={config.walk_mode})")
+          f"cutoff={config.cutoff_method}, encoder={config.block_encoder}, "
+          f"walk_mode={config.walk_mode})")
     print(f" A values = {list(run_cfg['A_values'])}")
     print("========================================================")
 

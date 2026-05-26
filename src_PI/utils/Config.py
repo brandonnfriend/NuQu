@@ -11,12 +11,15 @@ Currently supported axes:
 - cutoff_method: 'energy_bound' (Watson Lemma 5, default) or 'ns'
                  (Nyquist-Shannon optimal). Only consulted for the
                  amplitude basis; the Fock basis derives its own cutoff.
+- block_encoder: 'pauli_lcu' (default — current pyLIQTR path),
+                 'sparse' (BCK sparse-oracle, task 26),
+                 or 'lobe' (Ladder-Operator Block-Encoding, task 28).
+                 Selects the strategy in `src_PI/estimation/block_encoders/`.
 
-To add a new design axis (e.g. block_encoder, fermion_encoding,
-cutoff_method): add a field here with a sensible default; downstream
-dispatch reads `config.<axis>` at the entry point and routes to the
-appropriate module. Old call sites keep working because defaults match
-current behavior.
+To add a new design axis (e.g. fermion_encoding): add a field here with
+a sensible default; downstream dispatch reads `config.<axis>` at the
+entry point and routes to the appropriate module. Old call sites keep
+working because defaults match current behavior.
 """
 
 from dataclasses import dataclass, asdict, field
@@ -25,6 +28,7 @@ from dataclasses import dataclass, asdict, field
 _VALID_PION_BASES = ('amplitude', 'fock')
 _VALID_WALK_MODES = ('series', 'parallel')
 _VALID_CUTOFF_METHODS = ('energy_bound', 'ns')
+_VALID_BLOCK_ENCODERS = ('pauli_lcu', 'sparse', 'lobe')
 
 
 @dataclass
@@ -35,11 +39,9 @@ class Config:
     # Lemma 5 (current default); 'ns' = Nyquist-Shannon optimal (Path B).
     # Ignored by the Fock basis, which derives its own cutoff.
     cutoff_method: str = 'energy_bound'
-
-    # Future axes — add as we implement them. Defaults preserve current
-    # behavior so existing call sites don't break.
-    # block_encoder: str = 'pauli_lcu'
-    # fermion_encoding: str = 'jw'
+    # Block-encoder strategy. Default 'pauli_lcu' preserves the current
+    # behavior; 'sparse' / 'lobe' will be wired in by tasks 26 / 28.
+    block_encoder: str = 'pauli_lcu'
 
     # Free-form extras: anything the user wants to remember about the run
     # but that doesn't drive code dispatch. Saved to JSON alongside the
@@ -59,6 +61,11 @@ class Config:
             raise ValueError(
                 f"cutoff_method must be one of {_VALID_CUTOFF_METHODS}, "
                 f"got {self.cutoff_method!r}"
+            )
+        if self.block_encoder not in _VALID_BLOCK_ENCODERS:
+            raise ValueError(
+                f"block_encoder must be one of {_VALID_BLOCK_ENCODERS}, "
+                f"got {self.block_encoder!r}"
             )
 
     def to_dict(self):
