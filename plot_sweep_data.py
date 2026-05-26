@@ -13,6 +13,14 @@ _BASIS_COLORS = {
     'fock': 'tab:orange',
 }
 
+# Color per "series" — basis plus, for the amplitude basis, the cutoff method.
+# This keeps energy_bound vs NS amplitude runs visually distinct in overlays.
+_SERIES_COLORS = {
+    'amplitude/energy_bound': 'tab:blue',
+    'amplitude/ns': 'tab:green',
+    'fock': 'tab:orange',
+}
+
 
 def _get_basis_label(metadata):
     """Extract pion_basis from metadata['config'] if present; default 'amplitude'.
@@ -22,6 +30,35 @@ def _get_basis_label(metadata):
     """
     cfg = metadata.get('config') or {}
     return cfg.get('pion_basis', 'amplitude')
+
+
+def _get_cutoff_label(metadata):
+    """Extract cutoff_method from metadata['config']; default 'energy_bound'.
+
+    Old files predate the cutoff_method axis; they used the Watson Lemma 5
+    energy-bound cutoff, so that is the backward-compatible default.
+    """
+    cfg = metadata.get('config') or {}
+    return cfg.get('cutoff_method', 'energy_bound')
+
+
+def _get_series_key(metadata):
+    """Composite series id: basis, plus cutoff method for the amplitude basis.
+
+    e.g. 'amplitude/energy_bound', 'amplitude/ns', 'fock'. Lets a single
+    comparison overlay distinguish the two amplitude cutoff prescriptions.
+    """
+    basis = _get_basis_label(metadata)
+    if basis == 'amplitude':
+        return f"amplitude/{_get_cutoff_label(metadata)}"
+    return basis
+
+
+def _series_color(series_key):
+    """Color for a series key, falling back to basis color then black."""
+    if series_key in _SERIES_COLORS:
+        return _SERIES_COLORS[series_key]
+    return _BASIS_COLORS.get(series_key.split('/')[0], 'black')
 
 
 def load_and_plot(filepath):
@@ -38,6 +75,7 @@ def load_and_plot(filepath):
     metadata = data['metadata']
     results = data['results']
     basis = _get_basis_label(metadata)
+    series = _get_series_key(metadata)
 
     # 2. Extract Arrays
     A_vals = [r['A'] for r in results]
@@ -63,10 +101,10 @@ def load_and_plot(filepath):
     ax1, ax2, ax3, ax4 = axes
     fig.suptitle(
         f"Dynamical Pion EFT Resource Scaling ({l_string}, {metadata['dim']}D, "
-        f"basis={basis})",
+        f"basis={series})",
         fontsize=18, fontweight='bold',
     )
-    color = _BASIS_COLORS.get(basis, 'black')
+    color = _series_color(series)
 
     # --- Plot 1: T-Gate Scaling ---
     ax1.plot(A_vals, total_T, marker='o', color=color, linewidth=2.5, label='Total Step Cost')
@@ -145,8 +183,8 @@ def plot_basis_comparison(filepaths, save_dir=None, save_basename=None):
             data = json.load(f)
         meta = data['metadata']
         results = data['results']
-        basis = _get_basis_label(meta)
-        color = _BASIS_COLORS.get(basis, 'black')
+        series = _get_series_key(meta)
+        color = _series_color(series)
 
         if L_for_title is None:
             L_for_title = meta.get('L', results[0].get('L'))
@@ -159,7 +197,7 @@ def plot_basis_comparison(filepaths, save_dir=None, save_basename=None):
         rt_vals = [r.get('Runtime_Seconds', 0) for r in results]
 
         n_b_label = ', '.join(sorted({str(r['n_b']) for r in results}))
-        label = f"{basis}  (n_b={n_b_label})"
+        label = f"{series}  (n_b={n_b_label})"
 
         ax_T.plot(A_vals, T_vals, marker='o', color=color, linewidth=2, label=label)
         ax_L.plot(A_vals, Lam_vals, marker='D', color=color, linewidth=2, label=label)
@@ -251,8 +289,8 @@ def plot_basis_comparison_total_qpe(filepaths, delta_E=1.0, e=0.1, E_kin=10, Cp=
             data = json.load(f)
         meta = data['metadata']
         results = data['results']
-        basis = _get_basis_label(meta)
-        color = _BASIS_COLORS.get(basis, 'black')
+        series = _get_series_key(meta)
+        color = _series_color(series)
 
         if L_for_title is None:
             L_for_title = meta.get('L', results[0].get('L'))
@@ -276,11 +314,11 @@ def plot_basis_comparison_total_qpe(filepaths, delta_E=1.0, e=0.1, E_kin=10, Cp=
             })
 
         n_b_label = ', '.join(sorted({str(r['n_b']) for r in results}))
-        label = f"Qubitization {basis} (n_b={n_b_label}, $\\Delta E$={delta_E} MeV)"
+        label = f"Qubitization {series} (n_b={n_b_label}, $\\Delta E$={delta_E} MeV)"
 
         plt.plot(A_vals, total_qpe, marker='o', color=color, linewidth=2.5,
                  markersize=7, label=label)
-        save_pkg["qubitization_by_basis"][basis] = per_A_records
+        save_pkg["qubitization_by_basis"][series] = per_A_records
 
     # Trotter baseline at (L, dim) from the first valid file.
     lo, hi = trotter_A_range
