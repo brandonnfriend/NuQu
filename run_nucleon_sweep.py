@@ -5,7 +5,8 @@ import numpy as np
 from src_PI.estimation.EstimateResources import evaluate_resources
 from src_PI.hamiltonians.core.EFTParameters import (
     calculate_dynamic_cutoffs,
-    calculate_fock_cutoff,
+    calculate_ns_cutoffs,
+    estimate_boson_cutoff,
     get_physical_parameters,
 )
 from src_PI.utils.Config import Config
@@ -39,6 +40,9 @@ def get_sweep_config(**overrides):
         'A_values': get_A_sweep_values(),
         'pion_basis': 'amplitude',
         'walk_mode': 'series',
+        # Amplitude-basis cutoff prescription: 'energy_bound' (Watson Lemma 5)
+        # or 'ns' (Nyquist-Shannon optimal, Path B). Ignored by the Fock basis.
+        'cutoff_method': 'energy_bound',
         'epsilon_cut': 0.1,
         'E_bound_per_A_MeV': 10.0,       # E_max = E_bound_per_A_MeV * A
         # Optional override: if set, used instead of the basis-specific
@@ -53,21 +57,29 @@ def get_sweep_config(**overrides):
 
 
 def _compute_cutoffs(L, dim, A, params, run_cfg, config):
-    """Dispatch cutoff calculation by basis. Returns (n_b, pi_max, Pi_max).
+    """Dispatch cutoff calculation by basis + cutoff_method. Returns
+    (n_b, pi_max, Pi_max).
 
-    Both basis branches return the same 3-tuple shape so the caller doesn't
-    need to know which one ran. In the Fock branch, pi_max/Pi_max are
-    diagnostic-only (computed via the amplitude formula for comparison)
-    and don't drive any operator construction.
+    All branches return the same 3-tuple shape so the caller doesn't need
+    to know which one ran:
+      - amplitude + 'energy_bound': Watson Lemma 5 (calculate_dynamic_cutoffs).
+      - amplitude + 'ns':           Nyquist-Shannon optimal (calculate_ns_cutoffs).
+      - fock:                       estimate_boson_cutoff; pi_max/Pi_max are
+                                    diagnostic-only and don't drive operators.
     """
     E_max = run_cfg['E_bound_per_A_MeV'] * A
     eps = run_cfg['epsilon_cut']
     if config.pion_basis == 'amplitude':
-        n_b, pi_max, Pi_max = calculate_dynamic_cutoffs(
-            L, dim, A, params, epsilon_cut=eps, E_bound=E_max
-        )
+        if config.cutoff_method == 'ns':
+            n_b, pi_max, Pi_max = calculate_ns_cutoffs(
+                L, dim, A, params, epsilon_cut=eps, E_bound=E_max
+            )
+        else:
+            n_b, pi_max, Pi_max = calculate_dynamic_cutoffs(
+                L, dim, A, params, epsilon_cut=eps, E_bound=E_max
+            )
     else:
-        n_b, pi_max, Pi_max = calculate_fock_cutoff(
+        n_b, pi_max, Pi_max = estimate_boson_cutoff(
             L, dim, A, params, epsilon_cut=eps, E_bound=E_max
         )
     if run_cfg.get('n_b_override') is not None:
@@ -81,12 +93,13 @@ def run_sweep(**overrides):
     config = Config(
         pion_basis=run_cfg['pion_basis'],
         walk_mode=run_cfg['walk_mode'],
+        cutoff_method=run_cfg['cutoff_method'],
         extras=run_cfg['extras'],
     )
 
     print("========================================================")
     print(f" INITIATING NUCLEON SWEEP (basis={config.pion_basis}, "
-          f"walk_mode={config.walk_mode})")
+          f"cutoff={config.cutoff_method}, walk_mode={config.walk_mode})")
     print(f" A values = {list(run_cfg['A_values'])}")
     print("========================================================")
 
@@ -151,4 +164,4 @@ def run_sweep(**overrides):
 
 
 if __name__ == '__main__':
-    run_sweep()
+    run_sweep(pion_basis = 'fock')

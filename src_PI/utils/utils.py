@@ -35,15 +35,32 @@ def get_P_Q(pi_max, n_b):
     # In some papers Q is simply delta_pi; let's stick to the paper's P and Q.
     return P, Q
 
-def get_Pp_Qp(pi_max, n_b, a_L):
+def get_Pi_max(pi_max, n_b, a_L, dim=3):
+    """
+    Realized conjugate-momentum window Pi_max implied by the field grid.
+
+    From the discrete-Fourier conjugate (Nyquist-Shannon) relation, the
+    register holding pi on [-pi_max, +pi_max] over 2^n_b points fixes the
+    conjugate window to Pi_max = pi / (a_L^dim * delta_pi). This is the
+    value the operator builders actually use; callers that derive pi_max
+    from an NS-optimal target (calculate_ns_cutoffs) can compare against it.
+    """
+    delta_pi = (2 * pi_max) / (2**n_b - 1)
+    return np.pi / (a_L**dim * delta_pi)
+
+
+def get_Pp_Qp(pi_max, n_b, a_L, dim=3):
     """
     Calculates P' and Q' for the Conjugate Momentum encoding (Eq 32-33).
+
+    dim defaults to 3 so existing call sites that omit it keep the prior
+    a_L**3 behavior; the amplitude pipeline passes the lattice dim explicitly.
     """
     # From Eq 32
     delta_pi = (2 * pi_max) / (2**n_b - 1)
-    delta_Pi = (2 * np.pi) / (a_L**3 * delta_pi * (2**n_b))
-    Pi_max = np.pi / (a_L**3 * delta_pi)
-    
+    delta_Pi = (2 * np.pi) / (a_L**dim * delta_pi * (2**n_b))
+    Pi_max = get_Pi_max(pi_max, n_b, a_L, dim)
+
     # Eq 33/74
     Pp = -Pi_max + (delta_Pi / 2) * (2**n_b - 1)
     Qp = -delta_Pi / 2

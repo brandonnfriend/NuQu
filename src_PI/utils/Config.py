@@ -6,8 +6,11 @@ fermion-encoding / cutoff-method choices) in one place. Saved into JSON
 metadata so a sweep file is self-describing.
 
 Currently supported axes:
-- pion_basis: 'amplitude' or 'fock'
-- walk_mode:  'series' (default) or 'parallel'
+- pion_basis:    'amplitude' or 'fock'
+- walk_mode:     'series' (default) or 'parallel'
+- cutoff_method: 'energy_bound' (Watson Lemma 5, default) or 'ns'
+                 (Nyquist-Shannon optimal). Only consulted for the
+                 amplitude basis; the Fock basis derives its own cutoff.
 
 To add a new design axis (e.g. block_encoder, fermion_encoding,
 cutoff_method): add a field here with a sensible default; downstream
@@ -21,18 +24,22 @@ from dataclasses import dataclass, asdict, field
 
 _VALID_PION_BASES = ('amplitude', 'fock')
 _VALID_WALK_MODES = ('series', 'parallel')
+_VALID_CUTOFF_METHODS = ('energy_bound', 'ns')
 
 
 @dataclass
 class Config:
     pion_basis: str = 'amplitude'
     walk_mode: str = 'series'
+    # Cutoff prescription for the amplitude basis. 'energy_bound' = Watson
+    # Lemma 5 (current default); 'ns' = Nyquist-Shannon optimal (Path B).
+    # Ignored by the Fock basis, which derives its own cutoff.
+    cutoff_method: str = 'energy_bound'
 
     # Future axes — add as we implement them. Defaults preserve current
     # behavior so existing call sites don't break.
     # block_encoder: str = 'pauli_lcu'
     # fermion_encoding: str = 'jw'
-    # cutoff_method: str = 'lemma5'
 
     # Free-form extras: anything the user wants to remember about the run
     # but that doesn't drive code dispatch. Saved to JSON alongside the
@@ -47,6 +54,11 @@ class Config:
         if self.walk_mode not in _VALID_WALK_MODES:
             raise ValueError(
                 f"walk_mode must be one of {_VALID_WALK_MODES}, got {self.walk_mode!r}"
+            )
+        if self.cutoff_method not in _VALID_CUTOFF_METHODS:
+            raise ValueError(
+                f"cutoff_method must be one of {_VALID_CUTOFF_METHODS}, "
+                f"got {self.cutoff_method!r}"
             )
 
     def to_dict(self):

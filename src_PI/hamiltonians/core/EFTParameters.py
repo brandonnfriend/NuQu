@@ -48,8 +48,9 @@ def calculate_dynamic_cutoffs(L, dim, A_nucleons, params, epsilon_cut=0.1, E_bou
     Calculates the dynamic pion field cutoffs and required qubits (n_b)
     based on Lemma 5 of the paper.
 
-    Used for the **amplitude-basis** path (Watson Lemma 5 cutoff). The
-    Fock-basis path uses calculate_fock_cutoff() below.
+    Used for the **amplitude-basis** path with the energy-bound ('energy_bound')
+    cutoff method. The Nyquist-Shannon amplitude path uses calculate_ns_cutoffs()
+    and the Fock-basis path uses estimate_boson_cutoff(), both below.
     """
     a_L = params['a_L']
     m_pi = params['m_pi']
@@ -110,7 +111,7 @@ def calculate_dynamic_cutoffs(L, dim, A_nucleons, params, epsilon_cut=0.1, E_bou
 
 
 # -----------------------------------------------------------------------
-# Fock-basis cutoff
+# Per-site boson-number cutoff (shared by the Fock and NS amplitude paths)
 # -----------------------------------------------------------------------
 # **Starter heuristic, NOT a rigorous derivation.** Tong et al. 2022
 # (arXiv:2110.06942) proves that for bosonic Hamiltonians with bounded-
@@ -123,7 +124,12 @@ def calculate_dynamic_cutoffs(L, dim, A_nucleons, params, epsilon_cut=0.1, E_bou
 #
 # The heuristic below is what we use until the rigorous bound is plugged
 # in. It is intentionally conservative for small-A test runs and grows
-# slowly with A (which broadens P(n) via the H_AV/H_WT sources).
+# slowly with A (which broadens P(n) via the H_AV/H_WT sources). The same
+# per-site boson cutoff drives two encodings:
+#   - Fock basis (Reading A): N_f = 2^n_q states, n_b = n_q qubits.
+#   - NS amplitude basis (Reading B): boson cutoff N_b = 2^n_q, encoded in
+#     a field-amplitude register of N_phi = 2*N_b grid points (one extra
+#     qubit; see calculate_ns_cutoffs).
 #
 # Formula:
 #     n_q = max(N_Q_MIN, ceil(N_Q_BASE + N_Q_PER_LOG_A · log2(1 + A)))
@@ -148,17 +154,19 @@ N_Q_BASE = 4
 N_Q_PER_LOG_A = 1.0
 
 
-def calculate_fock_cutoff(L, dim, A_nucleons, params, epsilon_cut=0.1, E_bound=140.0):
+def estimate_boson_cutoff(L, dim, A_nucleons, params, epsilon_cut=0.1, E_bound=140.0):
     """
-    Returns (n_b, pi_max, Pi_max) for the **Fock-basis** path.
+    Returns (n_q, pi_max, Pi_max), the shared per-site boson-cutoff estimate.
 
-    n_b is the number of qubits per pion species per site, encoding a
-    Fock-space of dimension N_f = 2^n_b.
+    n_q is the number of qubits needed to index the per-site boson cutoff:
+      - Fock-basis path uses it directly (N_f = 2^n_q states, n_b = n_q).
+      - NS amplitude path treats the boson cutoff as N_b = 2^n_q and derives
+        its own register size from it (see calculate_ns_cutoffs).
 
-    pi_max and Pi_max are computed via the amplitude-basis formula for
-    *return-shape consistency* with calculate_dynamic_cutoffs() and for
-    diagnostic comparison plots. They are NOT used in Fock-basis operator
-    construction.
+    pi_max and Pi_max are computed via the amplitude-basis (energy-bound)
+    formula for *return-shape consistency* with calculate_dynamic_cutoffs()
+    and for diagnostic comparison plots. They are NOT used in Fock-basis
+    operator construction, and are NOT the NS-optimal windows.
 
     Args mirror calculate_dynamic_cutoffs() so the sweep dispatcher can
     call either with the same signature.
@@ -168,7 +176,6 @@ def calculate_fock_cutoff(L, dim, A_nucleons, params, epsilon_cut=0.1, E_bound=1
         N_Q_MIN,
         int(math.ceil(N_Q_BASE + N_Q_PER_LOG_A * math.log2(max(1, A_nucleons) + 1)))
     )
-    n_b = n_q  # We reuse the variable name n_b for consistency through the pipeline.
 
     # Compute amplitude-basis pi_max/Pi_max for the metadata, not used in
     # Fock operator construction. Caller is free to ignore.
@@ -181,6 +188,54 @@ def calculate_fock_cutoff(L, dim, A_nucleons, params, epsilon_cut=0.1, E_bound=1
         # If the amplitude formula fails (bad a_L regime), just report NaN.
         pi_max = float('nan')
         Pi_max = float('nan')
+
+    return n_q, pi_max, Pi_max
+
+
+def calculate_ns_cutoffs(L, dim, A_nucleons, params, epsilon_cut=0.1, E_bound=140.0):
+    """
+    Returns (n_b, pi_max, Pi_max) for the **amplitude basis with the
+    Nyquist-Shannon-optimal cutoff** (Reading B / Path B).
+
+    Same field-amplitude register and operator constructions as the
+    energy-bound path (calculate_dynamic_cutoffs); only the windows change.
+    Instead of Watson Lemma 5's global worst-case energy bound, the field
+    window F = pi_max and conjugate window K = Pi_max are set per-site from
+    the boson cutoff N_b and the oscillator frequency omega_0 (Macridin 2022
+    Eq. 87), giving n_b independent of L, A, E_total (at fixed N_b).
+
+    Derivation (field-theory units, [pi,Pi] = i/a_L^d):
+      - N_b = 2^n_q from estimate_boson_cutoff (the shared physics input).
+      - N_phi = 2*N_b is the field register size needed to hold the first
+        N_b oscillator states with O(1e-4) leakage (the "2" is the empirical
+        Hermite-Gauss tail margin; see the bosonic-encodings research note).
+      - n_b = ceil(log2(2*N_b)) = n_q + 1 (one qubit more than the Fock path).
+      - Macridin Eq. 87 windows, ratio K/F = omega_0 (the matching condition):
+            pi_max = sqrt(pi * N_phi / (2 * a_L^d * omega_0))
+            Pi_max = sqrt(pi * N_phi * omega_0 / (2 * a_L^d))
+        The a_L^d factors carry the field-theory normalization (Macridin's
+        QM-convention formula has no a_L^d). N_phi uses the realized 2^n_b
+        (>= 2*N_b after the ceil) so the windows match the power-of-2 FFT grid.
+
+    omega_0 defaults to params['m_0'] (= m_pi). Note: when fed through
+    get_Pp_Qp, the realized Pi_max equals this Pi_max up to a factor
+    (2^n_b - 1)/2^n_b (one grid cell); the matching ratio K/F = omega_0 is
+    enforced automatically by the existing conjugate-grid relation.
+    """
+    a_L = params['a_L']
+    omega_0 = params['m_0']
+
+    n_q, _, _ = estimate_boson_cutoff(
+        L, dim, A_nucleons, params, epsilon_cut=epsilon_cut, E_bound=E_bound
+    )
+    N_b = 2 ** n_q
+    n_b = int(math.ceil(math.log2(2 * N_b)))  # = n_q + 1
+
+    N_phi = 2 ** n_b  # realized field-register size (>= 2*N_b)
+    aLd = a_L ** dim
+
+    pi_max = math.sqrt(math.pi * N_phi / (2.0 * aLd * omega_0))
+    Pi_max = math.sqrt(math.pi * N_phi * omega_0 / (2.0 * aLd))
 
     return n_b, pi_max, Pi_max
 

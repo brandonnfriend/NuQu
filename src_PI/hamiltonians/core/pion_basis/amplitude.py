@@ -258,7 +258,7 @@ def Full_Dynamical_Pion_Hamiltonian(L, dim, n_b, pi_max, params):
 
     # Compute P, Q, Pp, Qp once and reuse across all sub-Hamiltonian builders.
     P, Q = get_P_Q(pi_max, n_b)
-    Pp, Qp = get_Pp_Qp(pi_max, n_b, a_L)
+    Pp, Qp = get_Pp_Qp(pi_max, n_b, a_L, dim)
 
     H_pos_free, H_mom = H_pion_free(
         L, dim, n_b, P, Q, Pp, Qp, params['m_pi'], a_L

@@ -29,6 +29,10 @@ def save_sweep_data(L, dim, params, sweep_results, config=None):
     basis_tag = ""
     if config is not None and getattr(config, 'pion_basis', None):
         basis_tag = f"_{config.pion_basis}"
+        # For the amplitude basis, the cutoff method distinguishes otherwise
+        # identically-tagged comparison runs (energy_bound vs NS).
+        if config.pion_basis == 'amplitude' and getattr(config, 'cutoff_method', None):
+            basis_tag += f"_{config.cutoff_method}"
     filename = f"sweep_L{L}_{dim}D{basis_tag}_{current_time}.json"
     filepath = os.path.join(target_dir, filename)
 
