@@ -152,6 +152,20 @@ def _amplitude_oracle_ops(s, amp, j_qubits, n_b):
 # --- The full BCK circuit ---------------------------------------------
 
 
+def yield_ops_on_qubits(s, amp, j_qubits, n_b):
+    """Yield the BCK block-encoding ops on the supplied qubits.
+
+    Used both by `build_single_ladder_circuit` (which allocates its own
+    `cirq.NamedQubit`s for the standalone classical-sim path) and by the
+    pyLIQTR `BlockEncoding` wrapper, which receives qubits via Qualtran's
+    register-bound `decompose_from_registers` protocol.
+    """
+    yield cirq.H(s)
+    yield from _amplitude_oracle_ops(s, amp, j_qubits, n_b)
+    yield _shift_gate(n_b).on(s, *j_qubits)
+    yield cirq.H(s)
+
+
 def build_single_ladder_circuit(n_b):
     """Build the prototype BCK block encoding circuit for `(â + â†)` at n_b qubits.
 
@@ -166,19 +180,19 @@ def build_single_ladder_circuit(n_b):
     s = cirq.NamedQubit('s')
     amp = cirq.NamedQubit('amp')
     j_qubits = [cirq.NamedQubit(f'j_{k}') for k in range(n_b)]
-
-    circuit = cirq.Circuit()
-    # Diffusion.
-    circuit.append(cirq.H(s))
-    # Amplitude oracle.
-    for op in _amplitude_oracle_ops(s, amp, j_qubits, n_b):
-        circuit.append(op)
-    # Conditional shift on the system register.
-    circuit.append(_shift_gate(n_b).on(s, *j_qubits))
-    # Diffusion closes.
-    circuit.append(cirq.H(s))
-
+    circuit = cirq.Circuit(yield_ops_on_qubits(s, amp, j_qubits, n_b))
     return circuit, (s, amp), j_qubits, alpha_for(n_b)
+
+
+def count_amplitude_rotations(n_b):
+    """Number of non-trivial controlled-Ry rotations in the prototype amplitude oracle.
+
+    The oracle has 2·N_f controls (one per (s, j) pair). At every (s, j) we
+    apply Ry(θ_{s,j}) — including the two boundary cases where θ = π
+    (rotating amp to |1⟩ so the wraparound column doesn't contribute).
+    There are no skipped rotations in the current implementation.
+    """
+    return 2 * (1 << n_b)
 
 
 # --- Classical-sim block-encoding extraction --------------------------

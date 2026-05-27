@@ -11,20 +11,30 @@ Sub-phase status (see `claude/research/block-encoders/04_refactor_execution_log.
   * C4:           full pipeline + comparison sweep against PauliLCU / LOBE.
 """
 
+from src_PI.estimation.sparse_oracle.block_encoding import (
+    SingleLadderProblemInstance,
+    SparseSingleLadderBlockEncoding,
+)
 from src_PI.estimation.sparse_oracle.lambda_compute import (
     compute_native_lambda,
 )
 from src_PI.estimation.sparse_oracle.single_ladder import (
     alpha_for,
     build_single_ladder_circuit,
+    count_amplitude_rotations,
     extracted_block_matrix,
     single_ladder_matrix,
+    yield_ops_on_qubits,
 )
 
 __all__ = [
     'compute_native_lambda',
     'alpha_for',
     'build_single_ladder_circuit',
+    'count_amplitude_rotations',
     'extracted_block_matrix',
     'single_ladder_matrix',
+    'yield_ops_on_qubits',
+    'SingleLadderProblemInstance',
+    'SparseSingleLadderBlockEncoding',
 ]
