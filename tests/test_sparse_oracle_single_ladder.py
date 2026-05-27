@@ -91,6 +91,26 @@ def test_extracted_block_has_correct_tridiagonal_structure():
         assert abs(extracted[j, j - 1] - math.sqrt(j)) < 1e-9
 
 
+def test_qualtran_shift_matches_hand_rolled_shift_matrix():
+    """C3b: composing two `AddK` bloqs (inc + dec) should produce the same
+    unitary as the hand-rolled `_shift_matrix` cirq MatrixGate, at every
+    n_b in the validation range. Frobenius diff must be exactly zero —
+    Qualtran's add-K is a permutation, so no floating-point drift.
+    """
+    import numpy as np
+    from qualtran.bloqs.arithmetic.addition import AddK
+    from src_PI.estimation.sparse_oracle.single_ladder import _shift_matrix
+
+    for n_b in (2, 3, 4, 5):
+        N_f = 1 << n_b
+        dec = AddK(bitsize=n_b, k=N_f - 1, cvs=(0,), signed=False)
+        inc = AddK(bitsize=n_b, k=1, cvs=(1,), signed=False)
+        U_q = inc.tensor_contract() @ dec.tensor_contract()
+        U_h = _shift_matrix(n_b)
+        diff = np.linalg.norm(U_q - U_h)
+        assert diff == 0.0, f"n_b={n_b}: Qualtran shift vs hand-rolled diff = {diff}"
+
+
 def test_boundary_rotations_do_not_contribute_spurious_entries():
     """Regression guard for the boundary bug we hit during C2.
 

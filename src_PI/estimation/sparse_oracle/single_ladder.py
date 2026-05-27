@@ -39,6 +39,8 @@ import math
 
 import cirq
 import numpy as np
+from qualtran.bloqs.arithmetic.addition import AddK
+from qualtran.cirq_interop import BloqAsCirqGate
 
 
 # --- numpy reference --------------------------------------------------
@@ -89,9 +91,35 @@ def _shift_matrix(n_b):
 
 
 def _shift_gate(n_b):
-    """Build the conditional shift as a `cirq.MatrixGate` on (1 + n_b) qubits."""
+    """Build the conditional shift as a `cirq.MatrixGate` on (1 + n_b) qubits.
+
+    The matrix here is exactly the numerics produced by composing two
+    Qualtran `AddK` bloqs (`yield_qualtran_shift_ops`); use this when the
+    consumer is a Cirq simulator that needs an explicit unitary.
+    """
     M = _shift_matrix(n_b)
     return cirq.MatrixGate(M, name=f'SHIFT_n{n_b}')
+
+
+def yield_qualtran_shift_ops(s, j_qubits, n_b):
+    """Yield the conditional shift as two Qualtran `AddK` bloqs (decompose-friendly).
+
+    Output sequence:
+      * `AddK(k=N_f − 1, cvs=(0,))` — controlled on s=0; adds (2^n_b − 1)
+        which is ≡ −1 (mod 2^n_b), i.e. decrements j.
+      * `AddK(k=+1, cvs=(1,))`       — controlled on s=1; increments j.
+
+    The composite is mathematically identical to `_shift_gate(n_b)`'s
+    `cirq.MatrixGate` (verified: Frobenius diff exactly zero). This path
+    is used inside the pyLIQTR `BlockEncoding.decompose_from_registers`
+    so pyLIQTR's call graph can introspect realistic T-counts from the
+    AddK bloqs (4·n_b − 4 T per bloq, 8 T at n_b=3).
+    """
+    N_f = 1 << n_b
+    dec = AddK(bitsize=n_b, k=N_f - 1, cvs=(0,), signed=False)
+    inc = AddK(bitsize=n_b, k=1, cvs=(1,), signed=False)
+    yield BloqAsCirqGate(dec).on(s, *j_qubits)
+    yield BloqAsCirqGate(inc).on(s, *j_qubits)
 
 
 def _ry_angle_for_amplitude(amp_value):
@@ -152,17 +180,23 @@ def _amplitude_oracle_ops(s, amp, j_qubits, n_b):
 # --- The full BCK circuit ---------------------------------------------
 
 
-def yield_ops_on_qubits(s, amp, j_qubits, n_b):
+def yield_ops_on_qubits(s, amp, j_qubits, n_b, *, use_qualtran_shift=False):
     """Yield the BCK block-encoding ops on the supplied qubits.
 
-    Used both by `build_single_ladder_circuit` (which allocates its own
-    `cirq.NamedQubit`s for the standalone classical-sim path) and by the
-    pyLIQTR `BlockEncoding` wrapper, which receives qubits via Qualtran's
-    register-bound `decompose_from_registers` protocol.
+    Args:
+        use_qualtran_shift: when False (default), use the `cirq.MatrixGate`
+            shift — convenient for Cirq's native simulator. When True,
+            decompose the conditional shift into two Qualtran `AddK`
+            bloqs — required for pyLIQTR's call graph to introspect the
+            realistic shift T-cost. The two paths produce mathematically
+            identical unitaries (Frobenius diff exactly zero).
     """
     yield cirq.H(s)
     yield from _amplitude_oracle_ops(s, amp, j_qubits, n_b)
-    yield _shift_gate(n_b).on(s, *j_qubits)
+    if use_qualtran_shift:
+        yield from yield_qualtran_shift_ops(s, j_qubits, n_b)
+    else:
+        yield _shift_gate(n_b).on(s, *j_qubits)
     yield cirq.H(s)
 
 

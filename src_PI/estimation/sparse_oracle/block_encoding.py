@@ -28,6 +28,7 @@ import qualtran.bloqs.mcmt  # noqa: F401
 
 from qualtran._infra.data_types import QAny
 from qualtran._infra.registers import Register, Signature
+from qualtran.bloqs.arithmetic.addition import AddK
 from qualtran.cirq_interop.t_complexity_protocol import TComplexity
 from pyLIQTR.BlockEncodings.BlockEncoding import BlockEncoding
 from pyLIQTR.ProblemInstances.ProblemInstance import ProblemInstance
@@ -115,7 +116,15 @@ class SparseSingleLadderBlockEncoding(BlockEncoding):
     # --- Decomposition --------------------------------------------------
 
     def decompose_from_registers(self, *, context, **quregs):
-        """Yield the BCK ops on the qubits Qualtran assigns to each register."""
+        """Yield the BCK ops on the qubits Qualtran assigns to each register.
+
+        The decomposition uses Qualtran's `AddK` bloqs for the conditional
+        shift (rather than the `cirq.MatrixGate` used in the classical-sim
+        path) so pyLIQTR's call graph picks up the realistic shift T-cost
+        directly from each AddK's `t_complexity()`. Amplitude oracle still
+        emits explicit per-(s, j) controlled `Ry` rotations; replacement
+        with QROM + phase-kickback rotation lands in C3c.
+        """
         sel = list(quregs['selection'])
         sys = list(quregs['system'])
         assert len(sel) == 2, f"selection register must have 2 qubits, got {len(sel)}"
@@ -123,29 +132,36 @@ class SparseSingleLadderBlockEncoding(BlockEncoding):
             f"system register must have {self.n_b} qubits, got {len(sys)}"
         )
         s, amp = sel
-        yield from yield_ops_on_qubits(s, amp, sys, self.n_b)
+        yield from yield_ops_on_qubits(s, amp, sys, self.n_b, use_qualtran_shift=True)
 
     # --- Cost --------------------------------------------------------------
 
     def _t_complexity_(self) -> TComplexity:
-        """Conservative analytical T-count for the prototype circuit.
+        """Conservative analytical T-count for the C3b prototype.
 
         Breakdown:
-          * 2 Hadamards on `s`: 0 T, 2 Clifford.
-          * `2·N_f` controlled `Ry(θ_{s,j})` rotations (one per (s, j) pair,
-            including the 2 boundary `Ry(π)` rotations). These end up as
-            arbitrary-angle rotations after the controlled-gate decomposition;
-            we charge them under `rotations` so pyLIQTR's downstream
-            Selinger synthesis converts them to T at its standard precision.
-          * Conditional shift: implemented as a `cirq.MatrixGate` in the
-            prototype. We charge it at the analytical Qualtran-`Add` cost
-            `4·n_b − 4` T for the Qualtran-bloq replacement that lands in
-            C3b — that's the cost a realistic circuit would have.
+          * 2 Hadamards on `s`: 0 T, 2 Clifford (charged manually below
+            since pyLIQTR sees `_t_complexity_` rather than walking the
+            full circuit).
+          * `2·N_f` controlled `Ry(θ_{s,j})` rotations (one per (s, j)
+            pair, including the 2 boundary `Ry(π)`). Each ends up as an
+            arbitrary-angle rotation after the controlled-gate
+            decomposition; charged under `rotations` so pyLIQTR's
+            Selinger synthesis converts them to T at default precision.
+          * Conditional shift: two Qualtran `AddK` bloqs (one inc with
+            `cvs=(1,)`, one dec with `cvs=(0,)` and `k = N_f − 1`).
+            Each costs `4·n_b − 4` T, so the shift contributes
+            `8·n_b − 8` T total. This is the realistic Qualtran cost
+            (verified Frobenius-zero against the hand-rolled
+            `cirq.MatrixGate` permutation).
         """
         n_rotations = count_amplitude_rotations(self.n_b)
-        shift_t = max(0, 4 * self.n_b - 4)
+        # Per-AddK T-cost from Qualtran's analytical formula.
+        per_addk = AddK(bitsize=self.n_b, k=1, cvs=(1,), signed=False).t_complexity()
+        shift_t = 2 * per_addk.t           # 2 controlled AddKs (inc + dec)
+        shift_clifford = 2 * per_addk.clifford
         return TComplexity(
             t=shift_t,
-            clifford=2,
+            clifford=2 + shift_clifford,
             rotations=n_rotations,
         )

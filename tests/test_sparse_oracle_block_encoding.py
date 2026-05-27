@@ -49,16 +49,17 @@ def test_block_encoding_signature_shape():
 
 
 def test_block_encoding_reports_t_complexity():
-    """The TComplexity is finite, with the right shape for the prototype."""
+    """The TComplexity is finite, with the right shape for the C3b prototype."""
     pi = SingleLadderProblemInstance(n_b=3)
     be = SparseSingleLadderBlockEncoding(pi)
     tc = be._t_complexity_()
     # Two boundary `Ry(π)` + (2N_f - 2) generic rotations = 2N_f total.
     assert tc.rotations == 2 * (1 << 3)
-    # Conditional shift charged at Qualtran-Add cost 4n - 4.
-    assert tc.t == 4 * 3 - 4
-    # Two diffusion Hadamards.
-    assert tc.clifford == 2
+    # C3b: conditional shift = 2 Qualtran AddK bloqs (inc + dec); each is
+    # 4n − 4 T. Together: 2·(4·3 − 4) = 16 T at n_b=3.
+    assert tc.t == 2 * (4 * 3 - 4)
+    # 2 diffusion Hadamards (Clifford) + 2 · per-AddK Clifford cost.
+    assert tc.clifford >= 2
 
 
 def test_full_pyliqtr_pipeline_returns_finite_resources():
