@@ -90,27 +90,39 @@ def _build_native_bundle(L=2, dim=3, n_b=3):
     return build_eft_hamiltonian(L, dim, n_b, pi_max=0.0, params=params, config=config)
 
 
-def test_sparse_strategy_computes_lambda_then_raises():
-    """SparseStrategy.estimate computes Λ + identity_shift, then raises NotImplementedError."""
-    bundle, num_sites, _ = _build_native_bundle()
+def test_sparse_strategy_returns_full_resource_dict():
+    """C3d.1: SparseStrategy now returns a finished resource dict for the full bundle."""
+    bundle, _q_count, num_sites = _build_native_bundle()
     strat = get_block_encoder('sparse')
-    try:
-        strat.estimate(bundle, num_sites, n_b=3, config=None)
-    except NotImplementedError as e:
-        msg = str(e)
-        assert 'sparse-oracle' in msg
-        assert 'C2' in msg or 'circuit construction' in msg
-    else:
-        raise AssertionError(
-            "SparseStrategy.estimate should raise NotImplementedError in C1"
-        )
+    result = strat.estimate(bundle, num_sites, n_b=3, config=None)
+    # Mandatory shape — orchestrator + sweep + plot read these keys.
+    for key in ('Walk_T_Count', 'Walk_Clifford_Count', 'Logical_Qubits',
+                'Physical_Lambda', 'Per_Sub_Walk', 'walk_mode',
+                'identity_shift', 'physical_lambda'):
+        assert key in result, f"missing key in sparse return dict: {key}"
+    assert result['Walk_T_Count'] > 0
+    assert result['Logical_Qubits'] > 0
+    assert result['Physical_Lambda'] > 0
+
+
+def test_sparse_strategy_breakdown_counts_lcu_summands_correctly():
+    """The breakdown's L_eff should equal boson + fermion + mixed term counts."""
+    bundle, _q_count, num_sites = _build_native_bundle()
+    strat = get_block_encoder('sparse')
+    result = strat.estimate(bundle, num_sites, n_b=3, config=None)
+    bd = result['Sparse_Breakdown']
+    assert bd['L_eff'] == bd['boson_terms'] + bd['fermion_terms'] + bd['mixed_terms']
+    # All three sectors contribute at full L=2 dim=3 n_b=3.
+    assert bd['boson_terms'] > 0
+    assert bd['fermion_terms'] > 0
+    assert bd['mixed_terms'] > 0
 
 
 def test_sparse_strategy_rejects_pauli_bundle():
     """If a bundle has algebra='pauli', sparse strategy refuses to dispatch."""
     config = Config(pion_basis='fock', block_encoder='pauli_lcu')
     params = get_physical_parameters()
-    bundle, num_sites, _ = build_eft_hamiltonian(
+    bundle, _q_count, num_sites = build_eft_hamiltonian(
         L=2, dim=3, n_b=3, pi_max=0.0, params=params, config=config
     )
     strat = get_block_encoder('sparse')
@@ -136,7 +148,7 @@ def test_full_eft_native_lambda_is_finite_and_positive():
     `native.identity_shift << PauliLCU.identity_shift` is expected at our
     sizes, and not a bug. See `04_refactor_execution_log.md` §6.
     """
-    bundle, _, _ = _build_native_bundle()
+    bundle, _q_count, _num_sites = _build_native_bundle()
     mh = bundle.sub_hamiltonians[0].operator
     data = compute_native_lambda(mh, n_b=3)
     assert data['physical_lambda'] > 0.0
@@ -162,7 +174,7 @@ def test_native_identity_shift_does_not_include_binary_expansion_artifacts():
     """
     from src_PI.estimation.NormalizeHamiltonians import normalize_for_qpe
 
-    bundle_n, _, _ = _build_native_bundle()
+    bundle_n, _q_count, _num_sites = _build_native_bundle()
     mh = bundle_n.sub_hamiltonians[0].operator
     native = compute_native_lambda(mh, n_b=3)
 
