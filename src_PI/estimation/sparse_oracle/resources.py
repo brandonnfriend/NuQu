@@ -123,25 +123,39 @@ def estimate_sparse_resources(mh, n_b, num_sites):
             fermion_terms += 1
 
     # --- 3. Mixed contribution (H_AV, H_WT — each carries native F · B factors) ---
+    # Each `MixedTerm` is treated as ONE LCU summand whose block-encoding is
+    # the Gilyén composition (LOBE §2.4) of:
+    #   * BE_F = pyLIQTR-style PauliLCU over JW(mt.fermion_factor)
+    #   * BE_B = multi-mode sparse encoder over mt.boson_factor
+    # The composed BE has T-cost = T_F + T_B (Gilyén) and rescale
+    # α = |mt.coeff| · α_F · α_B. C3d.1 used a cross-product expansion that
+    # treated each `(JW-Pauli, boson-monomial)` pair as a separate LCU
+    # summand — that's the LARGEST-L_eff option and overcounts the SELECT
+    # cost by (~ #JW-Paulis × #boson-monomials / 1).
     mixed_T = 0
     mixed_Cl = 0
     mixed_terms_count = 0
     for mt in mh.mixed_terms:
         f_q = jordan_wigner(mt.fermion_factor)
-        f_pauli_iter = list(_pauli_strings(f_q))
-        b_monomial_iter = [
-            (mon, c) for mon, c in mt.boson_factor.terms.items() if mon != ()
-        ]
-        for pauli_term, _ in f_pauli_iter:
-            f_weight = len(pauli_term)
-            f_part_T = 4 * f_weight
-            f_part_Cl = 8 * f_weight
-            for b_monomial, _ in b_monomial_iter:
-                P = _ladder_factor_count(b_monomial)
-                # Gilyén product: F-part + B-part costs add.
-                mixed_T += f_part_T + P * single_T
-                mixed_Cl += f_part_Cl + P * single_Cl
-                mixed_terms_count += 1
+        # T_F: PauliLCU sub-encoder cost. Approximate as Σ_p 4·weight T;
+        # alias-sampling PREP overhead is small and folded into the
+        # global PREP estimate below.
+        T_F = sum(4 * len(p) for p, _ in _pauli_strings(f_q))
+        Cl_F = sum(8 * len(p) for p, _ in _pauli_strings(f_q))
+        # T_B: multi-mode sparse sub-encoder cost. Sum over boson monomials
+        # (each contributes its P-factor Gilyén product cost).
+        T_B = 0
+        Cl_B = 0
+        for b_monomial, _ in mt.boson_factor.terms.items():
+            if b_monomial == ():
+                continue
+            P = _ladder_factor_count(b_monomial)
+            T_B += P * single_T
+            Cl_B += P * single_Cl
+        # Gilyén product: F-side and B-side costs add.
+        mixed_T += T_F + T_B
+        mixed_Cl += Cl_F + Cl_B
+        mixed_terms_count += 1
 
     # --- 4. SELECT cost and LCU summand count ---
     select_T = boson_T + fermion_T + mixed_T
