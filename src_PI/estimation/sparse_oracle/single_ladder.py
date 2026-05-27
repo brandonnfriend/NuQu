@@ -40,6 +40,9 @@ import math
 import cirq
 import numpy as np
 from qualtran.bloqs.arithmetic.addition import AddK
+from qualtran.bloqs.rotations.programmable_rotation_gate_array import (
+    ProgrammableRotationGateArray,
+)
 from qualtran.cirq_interop import BloqAsCirqGate
 
 
@@ -99,6 +102,53 @@ def _shift_gate(n_b):
     """
     M = _shift_matrix(n_b)
     return cirq.MatrixGate(M, name=f'SHIFT_n{n_b}')
+
+
+def _angle_int_data(n_b, bit_precision):
+    """Build the 2·N_f-entry integer angle table indexed by (s, j) = s·N_f + j.
+
+    Encoding: integer k corresponds to angle (k/2^B)·π applied via
+    `cirq.Y ** angle_fraction = Ry(π·angle_fraction)`.
+    """
+    N_f = 1 << n_b
+    alpha_max = math.sqrt(N_f - 1)
+    B = bit_precision
+    cap = (1 << B) - 1
+    data = []
+    for idx in range(2 * N_f):
+        s_val = idx >> n_b
+        j_val = idx & (N_f - 1)
+        if s_val == 0:
+            amp_value = math.sqrt(j_val) / alpha_max
+        else:
+            # boundary: j+1 entry is undefined → rotate to |1⟩_amp (θ=π).
+            amp_value = 0.0 if j_val == N_f - 1 else math.sqrt(j_val + 1) / alpha_max
+        theta = 2.0 * math.acos(max(0.0, min(1.0, amp_value)))   # θ ∈ [0, π]
+        angle_int = int(round(theta * (1 << B) / math.pi))
+        data.append(max(0, min(cap, angle_int)))
+    return data
+
+
+def make_qrom_amplitude_bloq(n_b, bit_precision=8, kappa=None):
+    """Build the QROM-loaded-angle amplitude oracle as a Qualtran bloq.
+
+    Returns a `ProgrammableRotationGateArray` configured to apply the
+    angle θ_{s,j} on the amplitude qubit when the selection register
+    encodes the index `s·N_f + j`. The bloq's signature is:
+
+      * `selection`        — log₂(2·N_f) qubits = n_b + 1
+      * `kappa_load_target` — kappa qubits (temporary; we allocate them in
+                              the BlockEncoding's `decompose_from_registers`)
+      * `rotations_target` — 1 qubit (the amplitude qubit)
+    """
+    if kappa is None:
+        kappa = bit_precision
+    data = _angle_int_data(n_b, bit_precision)
+    return ProgrammableRotationGateArray(
+        tuple(data),
+        kappa=kappa,
+        rotation_gate=cirq.Y,
+    )
 
 
 def yield_qualtran_shift_ops(s, j_qubits, n_b):

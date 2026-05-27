@@ -49,16 +49,27 @@ def test_block_encoding_signature_shape():
 
 
 def test_block_encoding_reports_t_complexity():
-    """The TComplexity is finite, with the right shape for the C3b prototype."""
+    """The TComplexity is finite, with the right shape for the C3c prototype.
+
+    C3c uses ProgrammableRotationGateArray (QROM-loaded angle + B controlled
+    rotations) on the amplitude oracle side, plus the C3b two-AddK shift on
+    the column-oracle side. Total cost is a sum.
+    """
     pi = SingleLadderProblemInstance(n_b=3)
     be = SparseSingleLadderBlockEncoding(pi)
     tc = be._t_complexity_()
-    # Two boundary `Ry(π)` + (2N_f - 2) generic rotations = 2N_f total.
-    assert tc.rotations == 2 * (1 << 3)
-    # C3b: conditional shift = 2 Qualtran AddK bloqs (inc + dec); each is
-    # 4n − 4 T. Together: 2·(4·3 − 4) = 16 T at n_b=3.
-    assert tc.t == 2 * (4 * 3 - 4)
-    # 2 diffusion Hadamards (Clifford) + 2 · per-AddK Clifford cost.
+    # Rotations: now bounded by `kappa = 8` (not 2·N_f). The actual count
+    # comes from ProgrammableRotationGateArray's internals; expect O(kappa).
+    assert 0 < tc.rotations <= 64, (
+        f"rotations should be O(kappa)=O(8), got {tc.rotations}"
+    )
+    # T: at least the shift's 2 · (4·n_b − 4) = 16 T at n_b=3, plus the
+    # amplitude oracle's contribution.
+    assert tc.t >= 2 * (4 * 3 - 4), (
+        f"t should include at least the shift cost (16 T at n_b=3), got {tc.t}"
+    )
+    # Clifford: at least 2 from the diffusion Hadamards plus AddK + QROM
+    # contributions.
     assert tc.clifford >= 2
 
 

@@ -34,10 +34,20 @@ from pyLIQTR.BlockEncodings.BlockEncoding import BlockEncoding
 from pyLIQTR.ProblemInstances.ProblemInstance import ProblemInstance
 
 from src_PI.estimation.sparse_oracle.single_ladder import (
+    _amplitude_oracle_ops,
     alpha_for,
     count_amplitude_rotations,
-    yield_ops_on_qubits,
+    make_qrom_amplitude_bloq,
+    yield_qualtran_shift_ops,
 )
+
+
+# Bit precision and kappa-batch size for the QROM-based amplitude oracle.
+# B=8 gives angle resolution ~π/256 ≈ 0.012 rad, well below the ε_QPE typical
+# of MeV-scale problems. kappa = B uses a single batch, matching the simplest
+# von Burg layout.
+_AMPLITUDE_BIT_PRECISION = 8
+_AMPLITUDE_KAPPA = 8
 
 
 class SingleLadderProblemInstance(ProblemInstance):
@@ -118,12 +128,13 @@ class SparseSingleLadderBlockEncoding(BlockEncoding):
     def decompose_from_registers(self, *, context, **quregs):
         """Yield the BCK ops on the qubits Qualtran assigns to each register.
 
-        The decomposition uses Qualtran's `AddK` bloqs for the conditional
-        shift (rather than the `cirq.MatrixGate` used in the classical-sim
-        path) so pyLIQTR's call graph picks up the realistic shift T-cost
-        directly from each AddK's `t_complexity()`. Amplitude oracle still
-        emits explicit per-(s, j) controlled `Ry` rotations; replacement
-        with QROM + phase-kickback rotation lands in C3c.
+        C3a: pyLIQTR `BlockEncoding` wrap of the C2 prototype.
+        C3b: conditional shift replaced with two Qualtran `AddK` bloqs.
+        C3c: amplitude oracle replaced with `ProgrammableRotationGateArray`
+             — QROM-loads `B`-bit angles indexed by `(s · N_f + j)` and
+             applies them via Y^t phase-kickback rotation on the `amp`
+             qubit. `kappa_load_target` ancillae are allocated locally
+             via the decomposition context.
         """
         sel = list(quregs['selection'])
         sys = list(quregs['system'])
@@ -132,36 +143,67 @@ class SparseSingleLadderBlockEncoding(BlockEncoding):
             f"system register must have {self.n_b} qubits, got {len(sys)}"
         )
         s, amp = sel
-        yield from yield_ops_on_qubits(s, amp, sys, self.n_b, use_qualtran_shift=True)
+
+        # 1. Diffusion on the sparsity ancilla.
+        yield cirq.H(s)
+
+        # 2. QROM-loaded angle + phase-kickback rotation on amp. Allocate the
+        #    kappa-load ancilla via the decomposition context (Qualtran will
+        #    return these qubits to the pool after the bloq finishes).
+        amp_bloq = make_qrom_amplitude_bloq(
+            self.n_b,
+            bit_precision=_AMPLITUDE_BIT_PRECISION,
+            kappa=_AMPLITUDE_KAPPA,
+        )
+        kappa_qubits = context.qubit_manager.qalloc(_AMPLITUDE_KAPPA)
+        # The selection register of the Programmable bloq is a single
+        # BoundedQUInt of size (n_b + 1); pass `[s, *j_qubits]` (s = MSB,
+        # j = remaining n_b qubits) to encode `s · N_f + j`.
+        yield amp_bloq.on_registers(
+            selection=[s, *sys],
+            kappa_load_target=kappa_qubits,
+            rotations_target=[amp],
+        )
+        context.qubit_manager.qfree(kappa_qubits)
+
+        # 3. Conditional shift via two Qualtran AddK bloqs.
+        yield from yield_qualtran_shift_ops(s, sys, self.n_b)
+
+        # 4. Diffusion closes.
+        yield cirq.H(s)
 
     # --- Cost --------------------------------------------------------------
 
     def _t_complexity_(self) -> TComplexity:
-        """Conservative analytical T-count for the C3b prototype.
+        """Analytical T-count for the C3c prototype.
 
-        Breakdown:
-          * 2 Hadamards on `s`: 0 T, 2 Clifford (charged manually below
-            since pyLIQTR sees `_t_complexity_` rather than walking the
-            full circuit).
-          * `2·N_f` controlled `Ry(θ_{s,j})` rotations (one per (s, j)
-            pair, including the 2 boundary `Ry(π)`). Each ends up as an
-            arbitrary-angle rotation after the controlled-gate
-            decomposition; charged under `rotations` so pyLIQTR's
-            Selinger synthesis converts them to T at default precision.
-          * Conditional shift: two Qualtran `AddK` bloqs (one inc with
-            `cvs=(1,)`, one dec with `cvs=(0,)` and `k = N_f − 1`).
-            Each costs `4·n_b − 4` T, so the shift contributes
-            `8·n_b − 8` T total. This is the realistic Qualtran cost
-            (verified Frobenius-zero against the hand-rolled
-            `cirq.MatrixGate` permutation).
+        All components delegated to Qualtran's analytical bloq cost so the
+        report tracks Qualtran's analytics automatically:
+
+          * 2 Hadamards on the sparsity ancilla: 2 Cliffords.
+          * Conditional shift: 2 × `AddK(n_b, k=±1).t_complexity()`
+            (inc + dec). At n_b=3: 16 T, 76 Cliffords.
+          * Amplitude oracle: `ProgrammableRotationGateArray.t_complexity()`
+            with 2·N_f angles at `B = _AMPLITUDE_BIT_PRECISION` precision
+            and batch-size `kappa = _AMPLITUDE_KAPPA`. This is the QROM
+            +`B` controlled-Y-rotations construction (von Burg 2021).
         """
-        n_rotations = count_amplitude_rotations(self.n_b)
-        # Per-AddK T-cost from Qualtran's analytical formula.
+        # Shift contribution (two controlled AddK bloqs).
         per_addk = AddK(bitsize=self.n_b, k=1, cvs=(1,), signed=False).t_complexity()
-        shift_t = 2 * per_addk.t           # 2 controlled AddKs (inc + dec)
+        shift_t = 2 * per_addk.t
         shift_clifford = 2 * per_addk.clifford
+        shift_rotations = 2 * per_addk.rotations
+
+        # Amplitude-oracle contribution (Programmable rotation array).
+        amp_bloq = make_qrom_amplitude_bloq(
+            self.n_b,
+            bit_precision=_AMPLITUDE_BIT_PRECISION,
+            kappa=_AMPLITUDE_KAPPA,
+        )
+        amp_tc = amp_bloq.t_complexity()
+
         return TComplexity(
-            t=shift_t,
-            clifford=2 + shift_clifford,
-            rotations=n_rotations,
+            t=shift_t + amp_tc.t,
+            clifford=2 + shift_clifford + amp_tc.clifford,
+            rotations=shift_rotations + amp_tc.rotations,
         )
