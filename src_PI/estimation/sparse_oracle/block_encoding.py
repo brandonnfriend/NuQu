@@ -19,6 +19,7 @@ on the realistic Qualtran-bloq version.
 import math
 from typing import Tuple
 
+import cirq
 import qualtran as qt
 # pyLIQTR 1.3.4's `QubitizedReflection._t_complexity_` references
 # `qt.bloqs.mcmt.MultiControlPauli` via dotted-attribute access, but
@@ -34,7 +35,6 @@ from pyLIQTR.BlockEncodings.BlockEncoding import BlockEncoding
 from pyLIQTR.ProblemInstances.ProblemInstance import ProblemInstance
 
 from src_PI.estimation.sparse_oracle.single_ladder import (
-    _amplitude_oracle_ops,
     alpha_for,
     count_amplitude_rotations,
     make_qrom_amplitude_bloq,

@@ -98,6 +98,7 @@ def build_eft_hamiltonian(L, dim, n_b, pi_max, params, config):
 
     metadata = {
         'pion_basis': basis_module.BASIS_NAME,
+        'block_encoder': config.block_encoder,
         'L': L,
         'dim': dim,
         'n_b': n_b,

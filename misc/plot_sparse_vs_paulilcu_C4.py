@@ -64,6 +64,12 @@ def main():
 
     # Summary on stdout.
     print('=== C4: sparse-oracle vs PauliLCU on Fock EFT (L=2, dim=3) ===\n')
+    print('NOTE: sparse Walk_T uses an analytical aggregate (C3d.1 + C3d.2). The boson')
+    print('      contribution is an upper bound (Gilyén product over ``(â+â†)`` per-mode');
+    print('      cost); the fermion contribution is a lower bound (``4·weight`` T per JW')
+    print('      Pauli, no PauliLCU PREP/SELECT overhead). Net direction at our sizes:')
+    print('      sparse Walk_T_Count is ~conservative-upper because fermion is < 1% of')
+    print('      total. C3d.3 polish would tighten both ends. See execution log §10.\n')
     print(f'{"encoder":<22} | {"n_b":>3} | {"A":>3} | {"Walk_T":>10} | {"Λ":>10} | {"Walk_T·Λ":>10}')
     print('-' * 80)
     for r in pauli_rows:

@@ -20,17 +20,26 @@ once the per-term encoders for `n̂`-shaped and multi-mode monomials
 land. The Walk_T_Count reported here is what the comparison plot
 should use as the sparse number.
 
-**Approximations** (documented for the user, see execution log §10):
-  * Each P-factor boson monomial is upper-bounded as `P × single-mode
-    (â+â†) walk T`. Diagonal monomials (`n̂ = a^† a`) and pure-shift
-    monomials (`a` or `a^†` alone) are strictly cheaper in the real
-    BCK construction, so this is a conservative ceiling.
-  * Pure-fermion JW Pauli strings are charged `4 · weight` T each
-    (controlled-Pauli Toffoli decomp). The real PauliLCU SELECT/PREPARE
-    is more expensive; this is the lower-bound contribution.
-  * Mixed terms expand to (#JW-Paulis × #boson-monomials) LCU summands
-    by full Gilyén product, then summed.
-  * LCU PREP cost: ≈ `4 · L_eff` T for `L_eff` LCU summands (coarse
+**Approximations** (documented for the user, see execution log §10 and
+the "C3d.3 future-polish notes" subsection):
+
+  * **Boson side — UPPER bound.** Each P-factor monomial is costed as
+    `P × single-mode (â+â†) walk T` (Gilyén product). Diagonal monomials
+    (`n̂ = a^† a`) and pure-shift monomials (`a` or `a^†` alone) are
+    strictly cheaper in the real BCK construction (d=1 vs d=2). So the
+    boson contribution is a **conservative ceiling**.
+  * **Fermion side — LOWER bound.** Pure-fermion JW Pauli strings are
+    charged `4 · weight` T each (controlled-Pauli Toffoli decomp). This
+    omits the per-string PauliLCU PREP/SELECT overhead, so the fermion
+    contribution is a **floor**. At our problem sizes the fermion
+    contribution is < 1% of total Walk_T_Count, so this directional
+    asymmetry doesn't materially affect the C4 sparse-vs-PauliLCU plot —
+    but readers should know it's there. C3d.3 polish would replace this
+    with a real pyLIQTR PauliLCU sub-encoder cost calculation.
+  * **Mixed terms** are aggregated per `MixedTerm` (Gilyén composition
+    of fermion + boson sub-encoders), C3d.2 post-compression. NOT a
+    cross-product expansion.
+  * **LCU PREP cost** ≈ `4 · L_eff` T for `L_eff` LCU summands (coarse
     alias-sampling-style approximation; real cost depends on
     coefficient distribution).
 """
