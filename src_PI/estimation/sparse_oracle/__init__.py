@@ -14,7 +14,17 @@ Sub-phase status (see `claude/research/block-encoders/04_refactor_execution_log.
 from src_PI.estimation.sparse_oracle.lambda_compute import (
     compute_native_lambda,
 )
+from src_PI.estimation.sparse_oracle.single_ladder import (
+    alpha_for,
+    build_single_ladder_circuit,
+    extracted_block_matrix,
+    single_ladder_matrix,
+)
 
 __all__ = [
     'compute_native_lambda',
+    'alpha_for',
+    'build_single_ladder_circuit',
+    'extracted_block_matrix',
+    'single_ladder_matrix',
 ]
