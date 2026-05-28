@@ -167,10 +167,19 @@ def run_sweep(**overrides):
 
         # Post-process: compute and save the total QPE cost
         # (QPE_Total_T_Count = Total_T_Count · √2·π·Λ/ΔE) into the same file,
-        # so downstream plotting reads it instead of recomputing.
+        # so downstream plotting reads it instead of recomputing. The raw
+        # sweep is already safely on disk (above), so guard this step: a
+        # failure here must not mask an otherwise-successful (expensive)
+        # sweep — log and return the saved path regardless. The cost can be
+        # recomputed later via `python -m src_PI.estimation.qpe_cost`.
         delta_E = run_cfg['delta_E_MeV']
-        compute_total_qpe_cost(saved_filepath, delta_E=delta_E)
-        print(f"[qpe_cost] Saved total QPE cost (ΔE={delta_E} MeV) into {saved_filepath}")
+        try:
+            compute_total_qpe_cost(saved_filepath, delta_E=delta_E)
+            print(f"[qpe_cost] Saved total QPE cost (ΔE={delta_E} MeV) into {saved_filepath}")
+        except Exception as e:
+            print(f"[qpe_cost] WARNING: total-QPE-cost post-process failed ({e}); "
+                  f"sweep data is saved — recompute with "
+                  f"`python -m src_PI.estimation.qpe_cost {saved_filepath}`")
 
         print(f"\nSweep completed successfully. Plot via plot_sweep_data.py")
         print(f"Saved data file: {saved_filepath}")
