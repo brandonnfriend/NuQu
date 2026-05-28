@@ -3,6 +3,7 @@ import time
 import numpy as np
 
 from src_PI.estimation.EstimateResources import evaluate_resources
+from src_PI.estimation.qpe_cost import compute_total_qpe_cost, DEFAULT_DELTA_E_MEV
 from src_PI.hamiltonians.core.EFTParameters import (
     calculate_dynamic_cutoffs,
     calculate_ns_cutoffs,
@@ -48,6 +49,9 @@ def get_sweep_config(**overrides):
         'block_encoder': 'pauli_lcu',
         'epsilon_cut': 0.1,
         'E_bound_per_A_MeV': 10.0,       # E_max = E_bound_per_A_MeV * A
+        # QPE energy-precision target (MeV) for the total-cost computation
+        # (QPE_Total_T_Count = Total_T_Count · √2·π·Λ/ΔE). Watson uses 1 MeV.
+        'delta_E_MeV': DEFAULT_DELTA_E_MEV,
         # Optional override: if set, used instead of the basis-specific
         # cutoff calculation. Useful for smoke tests where you want a
         # tiny register, and for direct-comparison runs where you want
@@ -160,6 +164,14 @@ def run_sweep(**overrides):
         # per-entry; metadata captures the *file-naming* L).
         first_L = sweep_results[0]['L']
         saved_filepath = save_sweep_data(first_L, dim, params, sweep_results, config=config)
+
+        # Post-process: compute and save the total QPE cost
+        # (QPE_Total_T_Count = Total_T_Count · √2·π·Λ/ΔE) into the same file,
+        # so downstream plotting reads it instead of recomputing.
+        delta_E = run_cfg['delta_E_MeV']
+        compute_total_qpe_cost(saved_filepath, delta_E=delta_E)
+        print(f"[qpe_cost] Saved total QPE cost (ΔE={delta_E} MeV) into {saved_filepath}")
+
         print(f"\nSweep completed successfully. Plot via plot_sweep_data.py")
         print(f"Saved data file: {saved_filepath}")
         return saved_filepath
