@@ -18,6 +18,22 @@ computation now lives here as a standalone, file-in/file-out function so:
 `ΔE` is the QPE energy-precision target in MeV. The Watson reference report
 uses 1 MeV, which is the default here.
 
+**This formula is encoder-agnostic.** It comes from qubitization QPE
+(Babbush et al. 2018, PRX 8 041015, arXiv:1805.03662 — reference [11] of the
+NuQu final report, Eq. 9): the walk operator is `W(H) = e^{i·arccos(H/λ)}`,
+so its eigenphases are `±arccos(E_k/λ)` and QPE resolves `E_k` to precision
+ΔE with `O(λ/ΔE)` walk queries. Here `λ` is the **block-encoding
+subnormalization** — the factor s.t. `⟨0|U|0⟩ = H/λ` — NOT specifically a
+Pauli 1-norm. Babbush's own phrasing is "λ is a parameter *closely related
+to* the induced 1-norm." It equals the Pauli 1-norm only for the PauliLCU
+encoder; for the sparse-oracle encoder λ is the BCK subnormalization
+(`Σ_l |c_l|·α_l`, what `sparse_oracle.compute_native_lambda` returns). So
+this function works for every encoder: it reads each sweep's own
+`Physical_Lambda` (= that encoder's λ) and plugs it into the same formula
+with the same √2·π constant (a QPE-protocol property, encoder-independent).
+A sparse vs PauliLCU comparison via `QPE_Total_T_Count` is therefore
+apples-to-apples even though the two λ values differ for the same H.
+
 CLI:
     python -m src_PI.estimation.qpe_cost <sweep.json> [--delta-e 1.0]
 """
