@@ -33,6 +33,7 @@ gives the conservative number for early plumbing and a sanity-check
 ceiling on what the encoder needs to beat.
 """
 
+import functools
 import math
 
 import numpy as np
@@ -57,25 +58,69 @@ def _qubit_op_identity_coeff(qubit_op):
     return complex(coeff).real
 
 
+@functools.lru_cache(maxsize=None)
+def _single_mode_factor_max(actions, n_b):
+    """Max |matrix element| of a product of ladder ops on ONE mode.
+
+    `actions` is the left-to-right tuple of 1 (creation â†) / 0 (annihilation
+    â) for one mode, as they appear in the BosonOperator term tuple (order
+    matters on the truncated register). Builds the explicit N_f = 2^n_b matrix
+    and returns the largest |entry|. Any such single-mode product is a single
+    net-shift operator — each row has at most one nonzero — so it is d=1.
+    """
+    N_f = 1 << n_b
+    a = np.zeros((N_f, N_f))
+    for n in range(1, N_f):
+        a[n - 1, n] = math.sqrt(n)       # â|n⟩ = √n |n-1⟩
+    a_dag = a.T                          # â†|n⟩ = √(n+1)|n+1⟩ (0 at the top, truncated)
+    M = np.eye(N_f)
+    for act in actions:
+        M = M @ (a_dag if act == 1 else a)
+    return float(np.abs(M).max())
+
+
+def _monomial_max_amplitude(monomial, n_b):
+    """Exact max |matrix element| of a (multi-mode) boson product monomial.
+
+    The monomial factorizes across modes (different modes commute), so the
+    max element is the product of the per-mode factor maxima. Within a mode
+    the ladder-op order is preserved from the term tuple.
+    """
+    per_mode = {}
+    for mode_idx, action in monomial:
+        per_mode.setdefault(mode_idx, []).append(action)
+    max_amp = 1.0
+    for actions in per_mode.values():
+        max_amp *= _single_mode_factor_max(tuple(actions), n_b)
+    return max_amp
+
+
 def _sparse_lambda_for_boson_monomial(monomial, n_b):
-    """Sparse-oracle λ for a single bosonic-ladder monomial.
+    """Sparse-oracle λ for a single bosonic-ladder product monomial.
 
     `monomial` is the OpenFermion `BosonOperator` term tuple, e.g.
-    `((3, 1), (3, 0))` for `b_3^† b_3` (one creation, one annihilation
-    on mode 3 — a "1+1" length-2 monomial).
+    `((3, 1), (3, 0))` for `â†_3 â_3` (the number operator on mode 3).
 
-    Returns `2 · ⌈log₂(2^P)⌉ · (N_f − 1)^(P/2)` where `P = len(monomial)`
-    is the total ladder count. The empty tuple `()` is the identity and
-    returns `1.0` (no sparsity overhead — the identity is sparsity-1).
+    Every product monomial is **d=1-sparse** — a single net shift per mode
+    (or diagonal), so each row has at most one nonzero entry. The BCK
+    subnormalization for a d-sparse operator is `d · max|A_ij|`, which for
+    d=1 is just `max|A_ij|`, computed exactly from the per-mode factor
+    matrices. The empty tuple `()` is the identity (the caller tracks it as
+    the classical shift) and returns 1.
+
+    **C3d.3a tightening.** This replaces the earlier loose upper bound
+    `2 · P · (N_f − 1)^(P/2)` (which effectively assumed d=2^P sparsity and a
+    worst-case max-amplitude). Examples at N_f = 8 (n_b=3):
+      * `â†â` (number op): old `4·(N_f−1) = 28`; true `max = N_f−1 = 7` (4× tighter).
+      * `â`           : old `2·√7 ≈ 5.29`; true `max = √7 ≈ 2.65` (2× tighter).
+    The cost (T-count) is unchanged and remains a valid *upper* bound (the d=2
+    `(â+â†)` encoder is at least as expensive as a d=1 encoder), so the
+    tightened Λ with the conservative cost is still a conservative total-cost
+    estimate — just a sharper one (smaller N_walk = √2·π·Λ/ΔE).
     """
     if monomial == ():
         return 1.0
-    P = len(monomial)
-    sparsity_pow2 = 1 << P                       # 2^P
-    log2_S = math.ceil(math.log2(sparsity_pow2)) # == P (already a power of 2)
-    N_f = 1 << n_b
-    max_amp = (N_f - 1) ** (P / 2.0)
-    return 2.0 * log2_S * max_amp
+    return _monomial_max_amplitude(monomial, n_b)
 
 
 def _sparse_lambda_for_boson_op(boson_op, n_b):

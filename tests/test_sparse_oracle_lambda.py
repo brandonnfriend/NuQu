@@ -41,20 +41,20 @@ def test_lambda_picks_up_identity_shift_from_boson_part():
 
 
 def test_lambda_for_single_ladder_monomial():
-    """For `c · â_0` at n_b=3 (N_f=8): λ = 2 · 1 · √7 ≈ 5.29."""
+    """C3d.3a: `â_0` is d=1 with max|A| = √(N_f−1). At n_b=3: λ = √7 ≈ 2.65."""
     import math
     mh = MixedHamiltonian(boson_part=BosonOperator('0', 1.0))
     data = compute_native_lambda(mh, n_b=3)
-    expected = 2.0 * 1.0 * math.sqrt(7.0)  # P=1, log2_S=1, max_amp=√(N_f-1)
+    expected = math.sqrt(7.0)  # max element of â on the 8-level register
     assert abs(data['physical_lambda'] - expected) < 1e-9
 
 
 def test_lambda_for_number_operator():
-    """For `m_π · â_0^† â_0` (P=2): λ = 2 · 2 · 7 = 28; coeff scaling applies."""
+    """C3d.3a: `â_0^† â_0` is diagonal (d=1) with max|A| = N_f−1. At n_b=3: λ = 7·m_π."""
     m_pi = 135.0
     mh = MixedHamiltonian(boson_part=BosonOperator('0^ 0', m_pi))
     data = compute_native_lambda(mh, n_b=3)
-    expected = m_pi * 2.0 * 2.0 * 7.0  # 2·log₂(4)·(N_f-1)^1
+    expected = m_pi * 7.0  # max diagonal entry of n̂ on the 8-level register
     assert abs(data['physical_lambda'] - expected) < 1e-6
 
 
@@ -69,15 +69,27 @@ def test_lambda_pure_fermion_uses_pauli_one_norm():
 
 
 def test_mixed_term_lambda_is_product_of_factors():
-    """Gilyén product: λ_mixed = |c| · λ_f · λ_b."""
+    """Gilyén product: λ_mixed = |c| · λ_f · λ_b (C3d.3a: λ_b = √7 for â at n_b=3)."""
     import math
     c = 2.5
     F = FermionOperator('0^ 1') + FermionOperator('1^ 0')  # JW 1-norm = 1
-    B = BosonOperator('0')                                 # λ = 2·1·√7
+    B = BosonOperator('0')                                 # d=1, max|A| = √7
     mh = MixedHamiltonian(mixed_terms=[MixedTerm(coeff=c, fermion_factor=F, boson_factor=B)])
     data = compute_native_lambda(mh, n_b=3)
-    expected = abs(c) * 1.0 * (2.0 * 1.0 * math.sqrt(7.0))
+    expected = abs(c) * 1.0 * math.sqrt(7.0)
     assert abs(data['physical_lambda'] - expected) < 1e-9
+
+
+def test_lambda_monomial_max_amplitude_exact_values():
+    """C3d.3a: spot-check exact max-amplitude per monomial at n_b=3 (N_f=8)."""
+    import math
+    from src_PI.estimation.sparse_oracle.lambda_compute import _sparse_lambda_for_boson_monomial
+    # â†â†  maps |n⟩ → √((n+1)(n+2))|n+2⟩; max at n=N_f−3=5 → √(6·7)=√42.
+    assert abs(_sparse_lambda_for_boson_monomial(((0, 1), (0, 1)), 3) - math.sqrt(42.0)) < 1e-9
+    # two-mode â_0 â_1: product of per-mode maxes = √7·√7 = 7.
+    assert abs(_sparse_lambda_for_boson_monomial(((0, 0), (1, 0)), 3) - 7.0) < 1e-9
+    # identity returns 1.
+    assert _sparse_lambda_for_boson_monomial((), 3) == 1.0
 
 
 # --- End-to-end via SparseStrategy --------------------------------------
