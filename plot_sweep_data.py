@@ -61,6 +61,41 @@ def _series_color(series_key):
     return _BASIS_COLORS.get(series_key.split('/')[0], 'black')
 
 
+# Color per block encoder, for encoder-comparison overlays.
+_ENCODER_COLORS = {
+    'pauli_lcu': 'tab:red',
+    'sparse': 'tab:blue',
+    'lobe': 'tab:green',
+}
+
+
+def _get_encoder_label(metadata):
+    """Extract block_encoder from metadata['config']; default 'pauli_lcu'.
+
+    Legacy sweep files predate the block_encoder axis and were all PauliLCU,
+    so that's the backward-compatible default.
+    """
+    cfg = metadata.get('config') or {}
+    return cfg.get('block_encoder', 'pauli_lcu')
+
+
+def _total_qpe_for_result(r, metadata, delta_E):
+    """Total QPE T-cost for one result entry: N_walk · T_per_step.
+
+    Reads the precomputed `QPE_Total_T_Count` written by
+    `src_PI.estimation.qpe_cost` IF it was computed at the same ΔE
+    (recorded as `metadata['delta_E_MeV']`). Otherwise — legacy files
+    without the field, or a different requested ΔE — falls back to
+    computing `Total_T_Count · √2·π·Λ / ΔE` on the fly.
+    """
+    file_delta_E = metadata.get('delta_E_MeV')
+    if 'QPE_Total_T_Count' in r and file_delta_E == delta_E:
+        return r['QPE_Total_T_Count']
+    t_step = r['Total_T_Count']
+    lam = r['Physical_Lambda']
+    return t_step * (np.sqrt(2) * np.pi * lam) / delta_E
+
+
 def load_and_plot(filepath):
     """Loads sweep JSON data and plots T-counts, Lambda, qubits, runtime vs A."""
 
@@ -301,8 +336,10 @@ def plot_basis_comparison_total_qpe(filepaths, delta_E=1.0, e=0.1, E_kin=10, Cp=
             A = r['A']
             t_step = r['Total_T_Count']
             lam = r['Physical_Lambda']
+            # Pull the precomputed total (Phase E) when available at this ΔE;
+            # fall back to computing for legacy files.
+            total = _total_qpe_for_result(r, meta, delta_E)
             queries = (np.sqrt(2) * np.pi * lam) / delta_E
-            total = t_step * queries
             A_vals.append(A)
             total_qpe.append(total)
             per_A_records.append({
@@ -367,9 +404,100 @@ def plot_basis_comparison_total_qpe(filepaths, delta_E=1.0, e=0.1, E_kin=10, Cp=
     return plot_path
 
 
+def plot_encoder_comparison_total_qpe(filepaths, delta_E=1.0, x_axis='n_b',
+                                      save_dir=None, save_basename=None):
+    """Overlay total QPE T-cost across block encoders (PauliLCU / sparse / LOBE).
+
+    Each input file is one (basis, encoder) sweep. Series are keyed on
+    `basis/encoder` (e.g. 'fock/pauli_lcu', 'fock/sparse') and colored by
+    encoder. Total QPE cost is read from the precomputed `QPE_Total_T_Count`
+    field (Phase E) when available at this ΔE, else computed on the fly.
+
+    Args:
+        filepaths: list of sweep-JSON paths to overlay.
+        delta_E: QPE energy precision in MeV (must match the file's
+            `delta_E_MeV` to use the precomputed totals; else recomputed).
+        x_axis: 'n_b' (encoder scaling — natural for Fock comparisons) or
+            'A' (nucleon-number sweep).
+        save_dir, save_basename: output location; defaults to today's data dir
+            and `encoder_comparison_total_qpe`.
+
+    Note: LOBE is not implemented in this build, so a 'fock/lobe' series only
+    appears if a file was produced by some future LOBE path; today's call sites
+    will overlay PauliLCU vs sparse.
+    """
+    if not filepaths:
+        print("plot_encoder_comparison_total_qpe: no files passed.")
+        return None
+
+    plt.figure(figsize=(10, 7))
+    L_for_title = dim_for_title = None
+    save_pkg = {
+        "metadata": {"delta_E": delta_E, "x_axis": x_axis, "source_files": list(filepaths),
+                     "timestamp": datetime.now().isoformat()},
+        "by_encoder": {},
+    }
+
+    for fp in filepaths:
+        if not os.path.exists(fp):
+            print(f"plot_encoder_comparison_total_qpe: skipping missing file {fp}")
+            continue
+        with open(fp, 'r') as f:
+            data = json.load(f)
+        meta = data['metadata']
+        results = data['results']
+        basis = _get_basis_label(meta)
+        encoder = _get_encoder_label(meta)
+        series = f"{basis}/{encoder}"
+        if L_for_title is None:
+            L_for_title = meta.get('L', results[0].get('L'))
+            dim_for_title = meta.get('dim', 3)
+
+        # x value: n_b or A.
+        pts = []
+        for r in results:
+            x = r['n_b'] if x_axis == 'n_b' else r['A']
+            pts.append((x, _total_qpe_for_result(r, meta, delta_E)))
+        pts.sort()
+        xs = [p[0] for p in pts]
+        ys = [p[1] for p in pts]
+
+        plt.plot(xs, ys, marker='o', linewidth=2.5, markersize=7,
+                 color=_ENCODER_COLORS.get(encoder, 'black'),
+                 label=f"{series} ($\\Delta E$={delta_E} MeV)")
+        save_pkg["by_encoder"][series] = [
+            {x_axis: x, "QPE_Total_T_Count": float(y)} for x, y in pts
+        ]
+
+    plt.title(f"Total QPE T-Cost: Block-Encoder Comparison "
+              f"(L={L_for_title}, {dim_for_title}D)",
+              fontsize=15, fontweight='bold')
+    plt.xlabel("n_b (bits per pion mode)" if x_axis == 'n_b' else "Nucleon Number (A)",
+               fontsize=13)
+    plt.ylabel("Total QPE T-Gates  ($N_{walk}\\cdot T_{step}$)", fontsize=13)
+    plt.yscale('log')
+    plt.grid(True, which="both", ls="--", alpha=0.5)
+    plt.legend(fontsize=10, loc='best')
+    plt.tight_layout()
+
+    if save_dir is None:
+        save_dir = os.path.join("data", datetime.now().strftime("%Y-%m-%d"))
+    os.makedirs(save_dir, exist_ok=True)
+    if save_basename is None:
+        save_basename = f"encoder_comparison_total_qpe_L{L_for_title}_{dim_for_title}D"
+    plot_path = os.path.join(save_dir, f"{save_basename}.png")
+    json_path = os.path.join(save_dir, f"{save_basename}.json")
+    plt.savefig(plot_path, dpi=300)
+    with open(json_path, 'w') as f:
+        json.dump(save_pkg, f, indent=4)
+    print(f"Plot saved to: {plot_path}")
+    print(f"Data saved to: {json_path}")
+    return plot_path
+
+
 def plot_total_tcost_comparison(filepath, delta_E=1.0, e=0.1, E_kin=10, Cp=1e-3):
     """
-    Loads pyLIQTR Qubitization sweep data (JSON), computes Trotterization T-costs 
+    Loads pyLIQTR Qubitization sweep data (JSON), computes Trotterization T-costs
     over a range of A, plots the comparison, and saves to a date-stamped folder.
     
     Args:
@@ -402,14 +530,14 @@ def plot_total_tcost_comparison(filepath, delta_E=1.0, e=0.1, E_kin=10, Cp=1e-3)
         A = r_entry['A']
         t_step_cost = r_entry['Total_T_Count']
         lam = r_entry['Physical_Lambda']
-        
-        # Total T-cost = Total_T_Count * (sqrt(2*pi) * Physical_Lambda / delta_E)
-        qpe_walk_queries = (np.sqrt(2) * np.pi * lam) / delta_E
-        total_qpe = t_step_cost * qpe_walk_queries
-        
+
+        # Pull the precomputed total (Phase E) when available at this ΔE; fall
+        # back to Total_T_Count · √2·π·Λ/ΔE for legacy files.
+        total_qpe = _total_qpe_for_result(r_entry, metadata, delta_E)
+
         qpe_A_vals.append(A)
         qpe_total_costs.append(total_qpe)
-        
+
         qpe_save_data.append({
             "A": A,
             "Physical_Lambda": lam,
