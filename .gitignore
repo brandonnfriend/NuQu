@@ -28,3 +28,5 @@ claude/
 tasks/
 
 human_knowledge/
+# compiled Tier-2 connections port (rebuild via backend_fork/build_mixed_ci.sh)
+classical/trimci/backend_fork/*.so
