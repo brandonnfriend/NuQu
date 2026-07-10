@@ -113,19 +113,26 @@ def calculate_dynamic_cutoffs(L, dim, A_nucleons, params, epsilon_cut=0.1, E_bou
 # -----------------------------------------------------------------------
 # Per-site boson-number cutoff (shared by the Fock and NS amplitude paths)
 # -----------------------------------------------------------------------
-# **Starter heuristic, NOT a rigorous derivation.** Tong et al. 2022
-# (arXiv:2110.06942) proves that for bosonic Hamiltonians with bounded-
-# degree polynomial coupling — which includes our chiral EFT (H_AV degree 1,
-# H_WT degree 2 in â, â†) — a Fock cutoff N_f = O(polylog(1/ε)) is
-# rigorously sufficient. The explicit prefactor depends on operator norms
-# of the per-site polynomial pieces and the lattice geometry; instantiating
-# Tong's Theorem 6 for our specific Hamiltonian is open theory work (see
-# CLAUDE.md "Open homework").
+# TWO methods, selected by `boson_cutoff_method` on estimate_boson_cutoff:
 #
-# The heuristic below is what we use until the rigorous bound is plugged
-# in. It is intentionally conservative for small-A test runs and grows
-# slowly with A (which broadens P(n) via the H_AV/H_WT sources). The same
-# per-site boson cutoff drives two encodings:
+#   'heuristic' (default) — the starter formula below. NOT a rigorous
+#     derivation; intentionally conservative for small-A test runs and grows
+#     slowly with A (which broadens P(n) via the H_AV/H_WT sources).
+#
+#   'tong' — the rigorous Tong-2022 bound. Tong et al. (arXiv:2110.06942)
+#     proves that for bosonic Hamiltonians with bounded-degree polynomial
+#     coupling — which includes our chiral EFT (H_AV degree 1, H_WT degree 2
+#     in â, â†) — a Fock cutoff N_f = O(polylog(1/ε)) is rigorously
+#     sufficient. `classical/trimci/tong_bound.py::cutoff_predictions`
+#     instantiates that bound (SCS occupation + first/second-order spectral
+#     tails) for our specific H + lattice geometry, and `_tong_boson_cutoff`
+#     returns the certified choice max(n_b_eng, n_b_spec1) = 4-5, essentially
+#     A-independent. The classical nb/N_f convergence study confirms n_b=4-5
+#     are safe here. (The full Theorem-6 prefactor derivation remains the
+#     paper-grade open homework in CLAUDE.md; `tong_bound` is the first-draft
+#     rigorous replacement that this switch makes usable now.)
+#
+# The same per-site boson cutoff drives two encodings:
 #   - Fock basis (Reading A): N_f = 2^n_q states, n_b = n_q qubits.
 #   - NS amplitude basis (Reading B): boson cutoff N_b = 2^n_q, encoded in
 #     a field-amplitude register of N_phi = 2*N_b grid points (one extra
@@ -147,14 +154,36 @@ def calculate_dynamic_cutoffs(L, dim, A_nucleons, params, epsilon_cut=0.1, E_bou
 #     A = 100:   n_q = max(4, ceil(4 + 1·log2(101))) = max(4, ceil(10.66)) = 11
 #
 # These numbers are bigger than Tong's polylog would justify, but small
-# enough that the test pipeline stays tractable. Once the rigorous Tong
-# instantiation is in place this will be replaced.
+# enough that the test pipeline stays tractable. Switch to
+# boson_cutoff_method='tong' for the rigorous (much smaller, A-flat) cutoff.
 N_Q_MIN = 4
 N_Q_BASE = 4
 N_Q_PER_LOG_A = 1.0
 
 
-def estimate_boson_cutoff(L, dim, A_nucleons, params, epsilon_cut=0.1, E_bound=140.0):
+def _tong_boson_cutoff(L, dim, A_nucleons, params):
+    """Rigorous per-mode boson cutoff n_q from Tong et al. 2022, via the SCS +
+    spectral-bound instantiation in ``classical/trimci/tong_bound.py``.
+
+    Returns the *certified* choice ``max(n_b_eng, n_b_spec1)`` (tong_bound doc
+    §2-3: the engineering safety cutoff OR-ed with the first-order
+    Cauchy-Schwarz spectral bound — the "certified rigorous choice" the doc
+    calls out). For this EFT that lands at **n_q = 4-5 across the whole physical
+    A range** — near-A-independent, reflecting Tong's polylog(1/eps) scaling —
+    versus the heuristic's ``log2(1+A)`` growth to ~11. The classical nb/N_f
+    convergence study (``misc/run_nb_convergence.py``) confirms n_b = 4-5 are
+    safe here, so this is now a measured bound, not just a bracket.
+
+    The import is deferred (the classical solver package is heavier than this
+    module needs at import time, and only the 'tong' path pulls it in).
+    """
+    from classical.trimci.tong_bound import cutoff_predictions
+    pred = cutoff_predictions(L, dim, A_nucleons, params=params)
+    return max(pred["n_b_eng"], pred["n_b_spec1"])
+
+
+def estimate_boson_cutoff(L, dim, A_nucleons, params, epsilon_cut=0.1,
+                          E_bound=140.0, boson_cutoff_method='heuristic'):
     """
     Returns (n_q, pi_max, Pi_max), the shared per-site boson-cutoff estimate.
 
@@ -162,6 +191,15 @@ def estimate_boson_cutoff(L, dim, A_nucleons, params, epsilon_cut=0.1, E_bound=1
       - Fock-basis path uses it directly (N_f = 2^n_q states, n_b = n_q).
       - NS amplitude path treats the boson cutoff as N_b = 2^n_q and derives
         its own register size from it (see calculate_ns_cutoffs).
+
+    ``boson_cutoff_method`` selects how n_q is chosen (a design axis, kept as a
+    runtime switch so 'heuristic' vs 'tong' is a direct comparison rather than a
+    replacement):
+      - 'heuristic' (default): the starter formula
+        ``n_q = max(N_Q_MIN, ceil(N_Q_BASE + N_Q_PER_LOG_A·log2(1+A)))`` —
+        conservative, grows with A. See the module-level note for the caveat.
+      - 'tong': the rigorous Tong-2022 bound (``_tong_boson_cutoff``),
+        n_q = 4-5, essentially A-independent.
 
     pi_max and Pi_max are computed via the amplitude-basis (energy-bound)
     formula for *return-shape consistency* with calculate_dynamic_cutoffs()
@@ -171,11 +209,19 @@ def estimate_boson_cutoff(L, dim, A_nucleons, params, epsilon_cut=0.1, E_bound=1
     Args mirror calculate_dynamic_cutoffs() so the sweep dispatcher can
     call either with the same signature.
     """
-    # n_q from heuristic. See module-level note for the rigor caveat.
-    n_q = max(
-        N_Q_MIN,
-        int(math.ceil(N_Q_BASE + N_Q_PER_LOG_A * math.log2(max(1, A_nucleons) + 1)))
-    )
+    if boson_cutoff_method == 'tong':
+        n_q = _tong_boson_cutoff(L, dim, A_nucleons, params)
+    elif boson_cutoff_method == 'heuristic':
+        # See module-level note for the rigor caveat on this heuristic.
+        n_q = max(
+            N_Q_MIN,
+            int(math.ceil(N_Q_BASE + N_Q_PER_LOG_A * math.log2(max(1, A_nucleons) + 1)))
+        )
+    else:
+        raise ValueError(
+            f"boson_cutoff_method must be 'heuristic' or 'tong', "
+            f"got {boson_cutoff_method!r}"
+        )
 
     # Compute amplitude-basis pi_max/Pi_max for the metadata, not used in
     # Fock operator construction. Caller is free to ignore.
@@ -192,7 +238,8 @@ def estimate_boson_cutoff(L, dim, A_nucleons, params, epsilon_cut=0.1, E_bound=1
     return n_q, pi_max, Pi_max
 
 
-def calculate_ns_cutoffs(L, dim, A_nucleons, params, epsilon_cut=0.1, E_bound=140.0):
+def calculate_ns_cutoffs(L, dim, A_nucleons, params, epsilon_cut=0.1, E_bound=140.0,
+                         boson_cutoff_method='heuristic'):
     """
     Returns (n_b, pi_max, Pi_max) for the **amplitude basis with the
     Nyquist-Shannon-optimal cutoff** (Reading B / Path B).
@@ -226,7 +273,8 @@ def calculate_ns_cutoffs(L, dim, A_nucleons, params, epsilon_cut=0.1, E_bound=14
     omega_0 = params['m_0']
 
     n_q, _, _ = estimate_boson_cutoff(
-        L, dim, A_nucleons, params, epsilon_cut=epsilon_cut, E_bound=E_bound
+        L, dim, A_nucleons, params, epsilon_cut=epsilon_cut, E_bound=E_bound,
+        boson_cutoff_method=boson_cutoff_method,
     )
     N_b = 2 ** n_q
     n_b = int(math.ceil(math.log2(2 * N_b)))  # = n_q + 1

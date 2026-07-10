@@ -44,6 +44,10 @@ def get_sweep_config(**overrides):
         # Amplitude-basis cutoff prescription: 'energy_bound' (Watson Lemma 5)
         # or 'ns' (Nyquist-Shannon optimal, Path B). Ignored by the Fock basis.
         'cutoff_method': 'energy_bound',
+        # Per-site boson register-size method: 'heuristic' (default log2(1+A)
+        # starter formula) or 'tong' (rigorous Tong-2022 polylog bound,
+        # n_q=4-5). Drives the Fock basis + the NS amplitude register.
+        'boson_cutoff_method': 'heuristic',
         # Block-encoder strategy: 'pauli_lcu' (default), 'sparse' (task 26),
         # or 'lobe' (task 28). See src_PI/estimation/block_encoders/.
         'block_encoder': 'pauli_lcu',
@@ -73,21 +77,30 @@ def _compute_cutoffs(L, dim, A, params, run_cfg, config):
       - amplitude + 'ns':           Nyquist-Shannon optimal (calculate_ns_cutoffs).
       - fock:                       estimate_boson_cutoff; pi_max/Pi_max are
                                     diagnostic-only and don't drive operators.
+
+    The per-site boson register size follows config.boson_cutoff_method
+    ('heuristic' or 'tong') for the fock and ns paths; the energy_bound path
+    sets its own n_b from Lemma 5 and ignores it.
     """
     E_max = run_cfg['E_bound_per_A_MeV'] * A
     eps = run_cfg['epsilon_cut']
+    bcm = config.boson_cutoff_method
     if config.pion_basis == 'amplitude':
         if config.cutoff_method == 'ns':
             n_b, pi_max, Pi_max = calculate_ns_cutoffs(
-                L, dim, A, params, epsilon_cut=eps, E_bound=E_max
+                L, dim, A, params, epsilon_cut=eps, E_bound=E_max,
+                boson_cutoff_method=bcm,
             )
         else:
+            # Watson Lemma 5 sets its own n_b from the energy bound; the
+            # per-site boson-cutoff method does not apply here.
             n_b, pi_max, Pi_max = calculate_dynamic_cutoffs(
                 L, dim, A, params, epsilon_cut=eps, E_bound=E_max
             )
     else:
         n_b, pi_max, Pi_max = estimate_boson_cutoff(
-            L, dim, A, params, epsilon_cut=eps, E_bound=E_max
+            L, dim, A, params, epsilon_cut=eps, E_bound=E_max,
+            boson_cutoff_method=bcm,
         )
     if run_cfg.get('n_b_override') is not None:
         n_b = int(run_cfg['n_b_override'])
@@ -101,6 +114,7 @@ def run_sweep(**overrides):
         pion_basis=run_cfg['pion_basis'],
         walk_mode=run_cfg['walk_mode'],
         cutoff_method=run_cfg['cutoff_method'],
+        boson_cutoff_method=run_cfg['boson_cutoff_method'],
         block_encoder=run_cfg['block_encoder'],
         extras=run_cfg['extras'],
     )
