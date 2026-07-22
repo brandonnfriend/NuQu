@@ -7,9 +7,98 @@ from datetime import datetime
 from src_PI.trotter_theory.TrotterCost import get_total_trotter_cost
 
 
+# Standard color per basis for overlay plots.
+_BASIS_COLORS = {
+    'amplitude': 'tab:blue',
+    'fock': 'tab:orange',
+}
+
+# Color per "series" — basis plus, for the amplitude basis, the cutoff method.
+# This keeps energy_bound vs NS amplitude runs visually distinct in overlays.
+_SERIES_COLORS = {
+    'amplitude/energy_bound': 'tab:blue',
+    'amplitude/ns': 'tab:green',
+    'fock': 'tab:orange',
+}
+
+
+def _get_basis_label(metadata):
+    """Extract pion_basis from metadata['config'] if present; default 'amplitude'.
+
+    Old sweep files predate the Config object and have no basis field. We treat
+    them as amplitude basis for backward compatibility (which is what they were).
+    """
+    cfg = metadata.get('config') or {}
+    return cfg.get('pion_basis', 'amplitude')
+
+
+def _get_cutoff_label(metadata):
+    """Extract cutoff_method from metadata['config']; default 'energy_bound'.
+
+    Old files predate the cutoff_method axis; they used the Watson Lemma 5
+    energy-bound cutoff, so that is the backward-compatible default.
+    """
+    cfg = metadata.get('config') or {}
+    return cfg.get('cutoff_method', 'energy_bound')
+
+
+def _get_series_key(metadata):
+    """Composite series id: basis, plus cutoff method for the amplitude basis.
+
+    e.g. 'amplitude/energy_bound', 'amplitude/ns', 'fock'. Lets a single
+    comparison overlay distinguish the two amplitude cutoff prescriptions.
+    """
+    basis = _get_basis_label(metadata)
+    if basis == 'amplitude':
+        return f"amplitude/{_get_cutoff_label(metadata)}"
+    return basis
+
+
+def _series_color(series_key):
+    """Color for a series key, falling back to basis color then black."""
+    if series_key in _SERIES_COLORS:
+        return _SERIES_COLORS[series_key]
+    return _BASIS_COLORS.get(series_key.split('/')[0], 'black')
+
+
+# Color per block encoder, for encoder-comparison overlays.
+_ENCODER_COLORS = {
+    'pauli_lcu': 'tab:red',
+    'sparse': 'tab:blue',
+    'lobe': 'tab:green',
+}
+
+
+def _get_encoder_label(metadata):
+    """Extract block_encoder from metadata['config']; default 'pauli_lcu'.
+
+    Legacy sweep files predate the block_encoder axis and were all PauliLCU,
+    so that's the backward-compatible default.
+    """
+    cfg = metadata.get('config') or {}
+    return cfg.get('block_encoder', 'pauli_lcu')
+
+
+def _total_qpe_for_result(r, metadata, delta_E):
+    """Total QPE T-cost for one result entry: N_walk · T_per_step.
+
+    Reads the precomputed `QPE_Total_T_Count` written by
+    `src_PI.estimation.qpe_cost` IF it was computed at the same ΔE
+    (recorded as `metadata['delta_E_MeV']`). Otherwise — legacy files
+    without the field, or a different requested ΔE — falls back to
+    computing `Total_T_Count · √2·π·Λ / ΔE` on the fly.
+    """
+    file_delta_E = metadata.get('delta_E_MeV')
+    if 'QPE_Total_T_Count' in r and file_delta_E == delta_E:
+        return r['QPE_Total_T_Count']
+    t_step = r['Total_T_Count']
+    lam = r['Physical_Lambda']
+    return t_step * (np.sqrt(2) * np.pi * lam) / delta_E
+
+
 def load_and_plot(filepath):
-    """Loads sweep JSON data and plots T-counts and Lambda vs Nucleon Number (A)."""
-    
+    """Loads sweep JSON data and plots T-counts, Lambda, qubits, runtime vs A."""
+
     if not os.path.exists(filepath):
         print(f"Error: File '{filepath}' not found.")
         return
@@ -17,36 +106,46 @@ def load_and_plot(filepath):
     # 1. Load Data
     with open(filepath, 'r') as f:
         data = json.load(f)
-        
+
     metadata = data['metadata']
     results = data['results']
-    
+    basis = _get_basis_label(metadata)
+    series = _get_series_key(metadata)
+
     # 2. Extract Arrays
     A_vals = [r['A'] for r in results]
     L_vals = [r.get('L', metadata.get('L')) for r in results]
-    
-    # Hardware Stats
+
     total_T = [r['Total_T_Count'] for r in results]
-    walk_T = [r['Walk_T_Count'] for r in results]
-    qft_T = [r['QFT_T_Count'] for r in results]
-    
-    # Physics & Performance Stats
+    walk_T = [r.get('Walk_T_Count', 0) for r in results]
+    qft_T = [r.get('QFT_T_Count', 0) for r in results]
+
     lambdas = [r['Physical_Lambda'] for r in results]
-    runtimes = [r['Runtime_Seconds'] for r in results]
-    
-    # Determine L for the title
+    runtimes = [r.get('Runtime_Seconds', 0) for r in results]
+    qubits = [r.get('Logical_Qubits', 0) for r in results]
+
+    # Title bits
     unique_L = np.unique(L_vals)
     if len(unique_L) == 1:
         l_string = f"L={unique_L[0]}"
     else:
         l_string = f"L Range [{min(unique_L)}-{max(unique_L)}]"
 
- # 3. Create Plots (3 Subplots)
-    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(20, 6))
-    fig.suptitle(f"Dynamical Pion EFT Resource Scaling ({l_string}, {metadata['dim']}D)", fontsize=18, fontweight='bold')
+    # 3. Create Plots (4 subplots — added Logical Qubits)
+    fig, axes = plt.subplots(1, 4, figsize=(24, 6))
+    ax1, ax2, ax3, ax4 = axes
+    fig.suptitle(
+        f"Dynamical Pion EFT Resource Scaling ({l_string}, {metadata['dim']}D, "
+        f"basis={series})",
+        fontsize=18, fontweight='bold',
+    )
+    color = _series_color(series)
 
     # --- Plot 1: T-Gate Scaling ---
-    ax1.plot(A_vals, total_T, marker='o', color='black', linewidth=2.5, label='Total Step Cost')
+    ax1.plot(A_vals, total_T, marker='o', color=color, linewidth=2.5, label='Total Step Cost')
+    if any(qft_T):
+        ax1.plot(A_vals, qft_T, marker='s', color=color, linewidth=1.5,
+                 linestyle='--', alpha=0.6, label='QFT step cost')
     ax1.set_title("Total T-Gate Costs per Step", fontsize=14)
     ax1.set_xlabel("Nucleon Number (A)", fontsize=12)
     ax1.set_ylabel("T-Gates", fontsize=12)
@@ -55,32 +154,350 @@ def load_and_plot(filepath):
     ax1.legend()
 
     # --- Plot 2: Physical Lambda ---
-    ax2.plot(A_vals, lambdas, marker='D', color='purple', linewidth=2)
-    ax2.set_title("Physical $\Lambda$ (Energy Scale)", fontsize=14)
+    ax2.plot(A_vals, lambdas, marker='D', color=color, linewidth=2)
+    ax2.set_title("Physical $\\Lambda$ (Energy Scale)", fontsize=14)
     ax2.set_xlabel("Nucleon Number (A)", fontsize=12)
-    ax2.set_ylabel("$\Lambda$ (MeV)", fontsize=12)
+    ax2.set_ylabel("$\\Lambda$ (MeV)", fontsize=12)
     ax2.set_yscale('log')
     ax2.grid(True, which="both", ls="--", alpha=0.5)
 
-    # --- Plot 3: Classical Runtime ---
-    ax3.plot(A_vals, runtimes, marker='o', color='green', linewidth=2)
-    ax3.set_title("Estimation Runtime", fontsize=14)
+    # --- Plot 3: Logical Qubits ---
+    ax3.plot(A_vals, qubits, marker='^', color=color, linewidth=2)
+    ax3.set_title("Logical Qubits (peak)", fontsize=14)
     ax3.set_xlabel("Nucleon Number (A)", fontsize=12)
-    ax3.set_ylabel("Wall Clock Time (Seconds)", fontsize=12)
-    ax3.grid(True, ls="--", alpha=0.5)
+    ax3.set_ylabel("Logical Qubits", fontsize=12)
+    ax3.grid(True, which="both", ls="--", alpha=0.5)
 
-    plt.tight_layout(rect=[0, 0.03, 1, 0.95]) # Adjust for the main title
-    
-    # Save the plot
+    # --- Plot 4: Classical Runtime ---
+    ax4.plot(A_vals, runtimes, marker='o', color=color, linewidth=2)
+    ax4.set_title("Estimation Runtime", fontsize=14)
+    ax4.set_xlabel("Nucleon Number (A)", fontsize=12)
+    ax4.set_ylabel("Wall Clock Time (Seconds)", fontsize=12)
+    ax4.grid(True, ls="--", alpha=0.5)
+
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+
     plot_filename = filepath.replace('.json', '_plot.png')
     plt.savefig(plot_filename, dpi=300)
     print(f"Plot saved successfully to: {plot_filename}")
-    
+
     plt.show()
+
+
+def plot_basis_comparison(filepaths, save_dir=None, save_basename=None):
+    """Overlay multiple sweeps for direct A-vs-B (basis) comparison.
+
+    Args:
+        filepaths: list of sweep JSON files. Each file's metadata['config']
+            gives its basis label; overlapping bases are drawn together.
+        save_dir: directory to save the comparison plot to. Defaults to
+            data/<today>/.
+        save_basename: basename for the output PNG (no extension). Defaults
+            to 'basis_comparison_L{L}_{dim}D'.
+
+    Side effect: writes a PNG with four subplots (T-count, Λ, qubits, runtime)
+    overlaying every input sweep, color-coded by basis.
+
+    Returns the save path.
+    """
+    if not filepaths:
+        print("plot_basis_comparison: no files passed.")
+        return None
+
+    fig, axes = plt.subplots(1, 4, figsize=(24, 6))
+    ax_T, ax_L, ax_Q, ax_t = axes
+
+    L_for_title = None
+    dim_for_title = None
+
+    for fp in filepaths:
+        if not os.path.exists(fp):
+            print(f"plot_basis_comparison: skipping missing file {fp}")
+            continue
+        with open(fp) as f:
+            data = json.load(f)
+        meta = data['metadata']
+        results = data['results']
+        series = _get_series_key(meta)
+        color = _series_color(series)
+
+        if L_for_title is None:
+            L_for_title = meta.get('L', results[0].get('L'))
+            dim_for_title = meta.get('dim', 3)
+
+        A_vals = [r['A'] for r in results]
+        T_vals = [r['Total_T_Count'] for r in results]
+        Lam_vals = [r['Physical_Lambda'] for r in results]
+        Q_vals = [r.get('Logical_Qubits', 0) for r in results]
+        rt_vals = [r.get('Runtime_Seconds', 0) for r in results]
+
+        n_b_label = ', '.join(sorted({str(r['n_b']) for r in results}))
+        label = f"{series}  (n_b={n_b_label})"
+
+        ax_T.plot(A_vals, T_vals, marker='o', color=color, linewidth=2, label=label)
+        ax_L.plot(A_vals, Lam_vals, marker='D', color=color, linewidth=2, label=label)
+        ax_Q.plot(A_vals, Q_vals, marker='^', color=color, linewidth=2, label=label)
+        ax_t.plot(A_vals, rt_vals, marker='s', color=color, linewidth=2, label=label)
+
+    ax_T.set_title("Total T-Gate Cost per Step"); ax_T.set_yscale('log')
+    ax_L.set_title("Physical $\\Lambda$ (MeV)");    ax_L.set_yscale('log')
+    ax_Q.set_title("Logical Qubits (peak)")
+    ax_t.set_title("Estimation Runtime (s)")
+
+    for ax in axes:
+        ax.set_xlabel("Nucleon Number (A)")
+        ax.grid(True, which="both", ls="--", alpha=0.5)
+        ax.legend(fontsize=10)
+    ax_T.set_ylabel("T-Gates")
+    ax_L.set_ylabel("$\\Lambda$ (MeV)")
+    ax_Q.set_ylabel("Logical Qubits")
+    ax_t.set_ylabel("Wall-clock (s)")
+
+    fig.suptitle(
+        f"Basis Comparison: Dynamical Pion EFT Resources "
+        f"(L={L_for_title}, {dim_for_title}D)",
+        fontsize=18, fontweight='bold',
+    )
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+
+    if save_dir is None:
+        save_dir = os.path.join("data", datetime.now().strftime("%Y-%m-%d"))
+    os.makedirs(save_dir, exist_ok=True)
+    if save_basename is None:
+        save_basename = f"basis_comparison_L{L_for_title}_{dim_for_title}D"
+    out_path = os.path.join(save_dir, f"{save_basename}.png")
+    plt.savefig(out_path, dpi=300)
+    print(f"Plot saved successfully to: {out_path}")
+    plt.show()
+    return out_path
+
+def plot_basis_comparison_total_qpe(filepaths, delta_E=1.0, e=0.1, E_kin=10, Cp=1e-3,
+                                     trotter_A_range=(1, 100), save_dir=None,
+                                     save_basename=None):
+    """Overlay total QPE T-cost across bases, plus a Trotterization baseline.
+
+    For each input sweep, computes
+        T_total(A) = T_step(A) × (sqrt(2)·π · Λ(A) / ΔE)
+    (per-walk-step T-count times the QPE walk-query count) and overlays the
+    curves color-coded by basis. A Trotter baseline is drawn at the same
+    (L, dim) over `trotter_A_range`, using the first input file's geometry.
+
+    Args:
+        filepaths: list of sweep JSONs, one per basis to overlay.
+        delta_E: QPE energy precision target in MeV.
+        e: Trotter error tolerance.
+        E_kin, Cp: Trotter cost parameters (forwarded to get_total_trotter_cost).
+        trotter_A_range: (lo, hi) inclusive range for the Trotter curve.
+        save_dir: output directory (default data/<today>/).
+        save_basename: PNG basename without extension (default
+            'basis_comparison_total_qpe_L{L}_{dim}D').
+
+    Returns the saved PNG path. Also writes a parallel JSON with the
+    computed cost arrays for reproducibility.
+    """
+    if not filepaths:
+        print("plot_basis_comparison_total_qpe: no files passed.")
+        return None
+
+    plt.figure(figsize=(11, 7.5))
+    L_for_title = None
+    dim_for_title = None
+
+    save_pkg = {
+        "metadata": {
+            "delta_E": delta_E,
+            "epsilon_trotter": e,
+            "E_kin": E_kin,
+            "Cp": Cp,
+            "trotter_A_range": list(trotter_A_range),
+            "source_files": filepaths,
+            "timestamp": datetime.now().isoformat(),
+        },
+        "qubitization_by_basis": {},
+    }
+
+    for fp in filepaths:
+        if not os.path.exists(fp):
+            print(f"plot_basis_comparison_total_qpe: skipping missing file {fp}")
+            continue
+        with open(fp) as f:
+            data = json.load(f)
+        meta = data['metadata']
+        results = data['results']
+        series = _get_series_key(meta)
+        color = _series_color(series)
+
+        if L_for_title is None:
+            L_for_title = meta.get('L', results[0].get('L'))
+            dim_for_title = meta.get('dim', 3)
+
+        A_vals, total_qpe, per_A_records = [], [], []
+        for r in results:
+            A = r['A']
+            t_step = r['Total_T_Count']
+            lam = r['Physical_Lambda']
+            # Pull the precomputed total (Phase E) when available at this ΔE;
+            # fall back to computing for legacy files.
+            total = _total_qpe_for_result(r, meta, delta_E)
+            queries = (np.sqrt(2) * np.pi * lam) / delta_E
+            A_vals.append(A)
+            total_qpe.append(total)
+            per_A_records.append({
+                "A": int(A),
+                "Physical_Lambda": float(lam),
+                "QPE_Step_T_Count": int(t_step),
+                "Walk_Queries": float(queries),
+                "QPE_Total_T_Count": float(total),
+            })
+
+        n_b_label = ', '.join(sorted({str(r['n_b']) for r in results}))
+        label = f"Qubitization {series} (n_b={n_b_label}, $\\Delta E$={delta_E} MeV)"
+
+        plt.plot(A_vals, total_qpe, marker='o', color=color, linewidth=2.5,
+                 markersize=7, label=label)
+        save_pkg["qubitization_by_basis"][series] = per_A_records
+
+    # Trotter baseline at (L, dim) from the first valid file.
+    lo, hi = trotter_A_range
+    trotter_A_vals = np.arange(lo, hi + 1)
+    trotter_costs = [
+        get_total_trotter_cost(A=int(A), L=L_for_title, e=e, E_kin=E_kin,
+                               E_bound=None, Cp=Cp, dim=dim_for_title)
+        for A in trotter_A_vals
+    ]
+    plt.plot(trotter_A_vals, trotter_costs, color='tab:red', linewidth=2,
+             linestyle='--',
+             label=f"Trotterization ($\\epsilon$={e}, L={L_for_title}, "
+                   f"{dim_for_title}D)")
+    save_pkg["trotter"] = [
+        {"A": int(A), "Trotter_Total_T_Count": float(c)}
+        for A, c in zip(trotter_A_vals, trotter_costs)
+    ]
+
+    plt.title(
+        f"Total QPE T-Cost vs A: Basis Comparison + Trotter "
+        f"(L={L_for_title}, {dim_for_title}D)",
+        fontsize=15, fontweight='bold',
+    )
+    plt.xlabel("Nucleon Number (A)", fontsize=13)
+    plt.ylabel("Total T-Gates", fontsize=13)
+    plt.xscale('log')
+    plt.yscale('log')
+    plt.grid(True, which="both", ls="--", alpha=0.5)
+    plt.legend(fontsize=10, loc='best')
+    plt.tight_layout()
+
+    if save_dir is None:
+        save_dir = os.path.join("data", datetime.now().strftime("%Y-%m-%d"))
+    os.makedirs(save_dir, exist_ok=True)
+    if save_basename is None:
+        save_basename = f"basis_comparison_total_qpe_L{L_for_title}_{dim_for_title}D"
+    plot_path = os.path.join(save_dir, f"{save_basename}.png")
+    json_path = os.path.join(save_dir, f"{save_basename}.json")
+
+    plt.savefig(plot_path, dpi=300)
+    with open(json_path, 'w') as f:
+        json.dump(save_pkg, f, indent=4)
+    print(f"Plot saved to: {plot_path}")
+    print(f"Data saved to: {json_path}")
+    plt.show()
+    return plot_path
+
+
+def plot_encoder_comparison_total_qpe(filepaths, delta_E=1.0, x_axis='n_b',
+                                      save_dir=None, save_basename=None):
+    """Overlay total QPE T-cost across block encoders (PauliLCU / sparse / LOBE).
+
+    Each input file is one (basis, encoder) sweep. Series are keyed on
+    `basis/encoder` (e.g. 'fock/pauli_lcu', 'fock/sparse') and colored by
+    encoder. Total QPE cost is read from the precomputed `QPE_Total_T_Count`
+    field (Phase E) when available at this ΔE, else computed on the fly.
+
+    Args:
+        filepaths: list of sweep-JSON paths to overlay.
+        delta_E: QPE energy precision in MeV (must match the file's
+            `delta_E_MeV` to use the precomputed totals; else recomputed).
+        x_axis: 'n_b' (encoder scaling — natural for Fock comparisons) or
+            'A' (nucleon-number sweep).
+        save_dir, save_basename: output location; defaults to today's data dir
+            and `encoder_comparison_total_qpe`.
+
+    Note: LOBE is not implemented in this build, so a 'fock/lobe' series only
+    appears if a file was produced by some future LOBE path; today's call sites
+    will overlay PauliLCU vs sparse.
+    """
+    if not filepaths:
+        print("plot_encoder_comparison_total_qpe: no files passed.")
+        return None
+
+    plt.figure(figsize=(10, 7))
+    L_for_title = dim_for_title = None
+    save_pkg = {
+        "metadata": {"delta_E": delta_E, "x_axis": x_axis, "source_files": list(filepaths),
+                     "timestamp": datetime.now().isoformat()},
+        "by_encoder": {},
+    }
+
+    for fp in filepaths:
+        if not os.path.exists(fp):
+            print(f"plot_encoder_comparison_total_qpe: skipping missing file {fp}")
+            continue
+        with open(fp, 'r') as f:
+            data = json.load(f)
+        meta = data['metadata']
+        results = data['results']
+        basis = _get_basis_label(meta)
+        encoder = _get_encoder_label(meta)
+        series = f"{basis}/{encoder}"
+        if L_for_title is None:
+            L_for_title = meta.get('L', results[0].get('L'))
+            dim_for_title = meta.get('dim', 3)
+
+        # x value: n_b or A.
+        pts = []
+        for r in results:
+            x = r['n_b'] if x_axis == 'n_b' else r['A']
+            pts.append((x, _total_qpe_for_result(r, meta, delta_E)))
+        pts.sort()
+        xs = [p[0] for p in pts]
+        ys = [p[1] for p in pts]
+
+        plt.plot(xs, ys, marker='o', linewidth=2.5, markersize=7,
+                 color=_ENCODER_COLORS.get(encoder, 'black'),
+                 label=f"{series} ($\\Delta E$={delta_E} MeV)")
+        save_pkg["by_encoder"][series] = [
+            {x_axis: x, "QPE_Total_T_Count": float(y)} for x, y in pts
+        ]
+
+    plt.title(f"Total QPE T-Cost: Block-Encoder Comparison "
+              f"(L={L_for_title}, {dim_for_title}D)",
+              fontsize=15, fontweight='bold')
+    plt.xlabel("n_b (bits per pion mode)" if x_axis == 'n_b' else "Nucleon Number (A)",
+               fontsize=13)
+    plt.ylabel("Total QPE T-Gates  ($N_{walk}\\cdot T_{step}$)", fontsize=13)
+    plt.yscale('log')
+    plt.grid(True, which="both", ls="--", alpha=0.5)
+    plt.legend(fontsize=10, loc='best')
+    plt.tight_layout()
+
+    if save_dir is None:
+        save_dir = os.path.join("data", datetime.now().strftime("%Y-%m-%d"))
+    os.makedirs(save_dir, exist_ok=True)
+    if save_basename is None:
+        save_basename = f"encoder_comparison_total_qpe_L{L_for_title}_{dim_for_title}D"
+    plot_path = os.path.join(save_dir, f"{save_basename}.png")
+    json_path = os.path.join(save_dir, f"{save_basename}.json")
+    plt.savefig(plot_path, dpi=300)
+    with open(json_path, 'w') as f:
+        json.dump(save_pkg, f, indent=4)
+    print(f"Plot saved to: {plot_path}")
+    print(f"Data saved to: {json_path}")
+    return plot_path
+
 
 def plot_total_tcost_comparison(filepath, delta_E=1.0, e=0.1, E_kin=10, Cp=1e-3):
     """
-    Loads pyLIQTR Qubitization sweep data (JSON), computes Trotterization T-costs 
+    Loads pyLIQTR Qubitization sweep data (JSON), computes Trotterization T-costs
     over a range of A, plots the comparison, and saves to a date-stamped folder.
     
     Args:
@@ -113,14 +530,14 @@ def plot_total_tcost_comparison(filepath, delta_E=1.0, e=0.1, E_kin=10, Cp=1e-3)
         A = r_entry['A']
         t_step_cost = r_entry['Total_T_Count']
         lam = r_entry['Physical_Lambda']
-        
-        # Total T-cost = Total_T_Count * (sqrt(2*pi) * Physical_Lambda / delta_E)
-        qpe_walk_queries = (np.sqrt(2) * np.pi * lam) / delta_E
-        total_qpe = t_step_cost * qpe_walk_queries
-        
+
+        # Pull the precomputed total (Phase E) when available at this ΔE; fall
+        # back to Total_T_Count · √2·π·Λ/ΔE for legacy files.
+        total_qpe = _total_qpe_for_result(r_entry, metadata, delta_E)
+
         qpe_A_vals.append(A)
         qpe_total_costs.append(total_qpe)
-        
+
         qpe_save_data.append({
             "A": A,
             "Physical_Lambda": lam,
@@ -481,14 +898,8 @@ def plot_tcost_vs_L_for_chosen_A(filepaths, target_A_vals=[1, 10, 60, 100], delt
     plt.show()
 
 if __name__ == "__main__":
-    # You can change this path to point to whichever JSON file you want to plot!
-    # Example: target_file = "data/2026-04-04/sweep_L2_3D_143000.json"
-    
-    # target_file = "data/2026-04-06/L4_3D.json" # <-- UPDATE THIS PATH TO YOUR JSON FILE
-    
-    # if target_file == "INSERT_FILEPATH_HERE.json":
-    #     print("Please update 'target_file' at the bottom of the script with the path to your JSON data.")
-    # else:
-    #     load_and_plot(target_file)
-    file_list = ["data/2026-04-04/sweep_L2_3D_184616.json", "data/2026-04-04/sweep_L3_3D_203524.json", "data/2026-04-06/L4_3D.json", ]
-    plot_tcost_vs_L_for_chosen_A(file_list)
+    file_list = [
+        "data/2026-05-22/sweep_L2_3D_amplitude_165018.json",
+        "data/2026-05-22/sweep_L2_3D_fock_165517.json",
+    ]
+    plot_basis_comparison_total_qpe(file_list)

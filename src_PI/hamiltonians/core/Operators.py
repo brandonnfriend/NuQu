@@ -1,80 +1,77 @@
+"""
+Shared low-level operator primitives used by both amplitude- and Fock-basis
+pion encodings.
+
+Basis-specific operators (Pi_Squared_Operator, Gradient_Squared_Operator,
+Momentum_Squared_Operator) have moved to
+src_PI/hamiltonians/core/pion_basis/amplitude.py — they encoded the
+amplitude-basis-specific P, Q, Pp, Qp parameters that don't exist in the
+Fock basis.
+
+What stays here:
+- Nucleon_Transition_JW: Jordan-Wigner-mapped (a†_α a_β + h.c.) for one
+  site, cached. Used by both bases for the fermionic coupling structure.
+- Dict-accumulator helpers (_add, _z_key, _to_qubit_op): used by amplitude.py
+  to build dense Pauli sums efficiently. Kept here so they're accessible
+  to any future basis module.
+"""
+
 from openfermion import QubitOperator, FermionOperator, jordan_wigner
-from src_PI.utils.LatticeGeometry import site_to_nucleon_qubit, site_to_pion_qubit
 
-def Pi_Squared_Operator(site_id, pion_species, n_b, P, Q):
-    """Implements Eq. (71): pi^2 expressed in Pauli Z operators."""
-    H = QubitOperator('', P**2)
-    
-    # Term 2: 2PQ * sum(2^m * Z_m)
-    for m in range(n_b):
-        idx = site_to_pion_qubit(site_id, pion_species, m, n_b)
-        H += QubitOperator(f'Z{idx}', 2 * P * Q * (2**m))
-        
-    # Term 3: Q^2 * sum(2^(m+m') * Z_m * Z_m')
-    for m in range(n_b):
-        for mp in range(n_b):
-            idx_m = site_to_pion_qubit(site_id, pion_species, m, n_b)
-            idx_mp = site_to_pion_qubit(site_id, pion_species, mp, n_b)
-            coeff = Q**2 * (2**(m + mp))
-            
-            if idx_m == idx_mp:
-                H += QubitOperator('', coeff) # Z_m * Z_m = I
-            else:
-                H += QubitOperator(f'Z{idx_m} Z{idx_mp}', coeff)
-    return H
+from src_PI.utils.LatticeGeometry import site_to_nucleon_qubit
 
-def Gradient_Squared_Operator(site_x, site_y, pion_species, n_b, Q, a_L):
-    """Implements Eq. (72): ((pi(y) - pi(x)) / a_L)^2 for any adjacent site pair."""
-    H = QubitOperator()
-    inv_aL2 = 1.0 / (a_L**2)
-    
-    for m in range(n_b):
-        idx_x_m = site_to_pion_qubit(site_x, pion_species, m, n_b)
-        idx_y_m = site_to_pion_qubit(site_y, pion_species, m, n_b)
-        for n in range(n_b):
-            idx_x_n = site_to_pion_qubit(site_x, pion_species, n, n_b)
-            idx_y_n = site_to_pion_qubit(site_y, pion_species, n, n_b)
-            
-            common_coeff = (Q**2 * 2**(m+n)) * inv_aL2
-            
-            # site x internal
-            if idx_x_m == idx_x_n: H += QubitOperator('', common_coeff)
-            else: H += QubitOperator(f'Z{idx_x_m} Z{idx_x_n}', common_coeff)
-                
-            # site y internal
-            if idx_y_m == idx_y_n: H += QubitOperator('', common_coeff)
-            else: H += QubitOperator(f'Z{idx_y_m} Z{idx_y_n}', common_coeff)
-                
-            # cross term -2 * pi(x) * pi(y)
-            H += QubitOperator(f'Z{idx_x_m} Z{idx_y_n}', -2 * common_coeff)
-    return H
 
-def Momentum_Squared_Operator(site_id, pion_species, n_b, Pp, Qp):
-    """Implements the Pi^2 (conjugate momentum) operator in its diagonal basis."""
-    H = QubitOperator('', Pp**2)
-    
-    # Term 2: 2 * Pp * Qp * sum(2^m * Z_m)
-    for m in range(n_b):
-        idx = site_to_pion_qubit(site_id, pion_species, m, n_b)
-        H += QubitOperator(f'Z{idx}', 2 * Pp * Qp * (2**m))
-        
-    # Term 3: Qp^2 * sum(2^(m+m') * Z_m * Z_m')
-    for m in range(n_b):
-        for mp in range(n_b):
-            idx_m = site_to_pion_qubit(site_id, pion_species, m, n_b)
-            idx_mp = site_to_pion_qubit(site_id, pion_species, mp, n_b)
-            coeff = Qp**2 * (2**(m + mp))
-            
-            if idx_m == idx_mp:
-                H += QubitOperator('', coeff) # Z_m * Z_m = I
-            else:
-                H += QubitOperator(f'Z{idx_m} Z{idx_mp}', coeff)
-    return H
+# --- Dict-accumulator helpers ----------------------------------------------
+# Used by the amplitude-basis Pauli-string builders to avoid the per-term
+# QubitOperator parse + dict-merge overhead of `H += QubitOperator(...)`.
+
+
+def _z_key(idx):
+    """Canonical single-Z term tuple."""
+    return ((idx, 'Z'),)
+
+
+def _add(terms_dict, key, coeff):
+    """Accumulate coeff into terms_dict[key] (dict.get keeps it O(1))."""
+    terms_dict[key] = terms_dict.get(key, 0.0) + coeff
+
+
+def _to_qubit_op(terms_dict):
+    """Wrap an accumulated terms-dict into a QubitOperator (no per-term overhead)."""
+    op = QubitOperator()
+    op.terms = terms_dict
+    return op
+
+
+# --- Nucleon transitions ---------------------------------------------------
+# JW result depends only on (site_id, mode_alpha, mode_beta, n_b), all hashable.
+# Within a single Hamiltonian build, H_WT_Logic calls each (site, alpha, beta)
+# 6x (once per epsilon-tensor row) and H_axial_vector up to dim*3 = 9x per
+# site, so the cache saves a meaningful chunk of jordan_wigner work.
+#
+# The cache is module-level and never cleared. Callers must NOT mutate the
+# returned QubitOperator (in code today all use sites pre-multiply, so this is
+# fine — we return a fresh copy to be defensive).
+_NUCLEON_TRANSITION_CACHE = {}
+
+
+def _nucleon_transition_jw_uncached(site_id, mode_alpha, mode_beta, n_b):
+    idx_alpha = site_to_nucleon_qubit(site_id, mode_alpha, n_b)
+    idx_beta = site_to_nucleon_qubit(site_id, mode_beta, n_b)
+    f_op = (FermionOperator(f'{idx_alpha}^ {idx_beta}')
+            + FermionOperator(f'{idx_beta}^ {idx_alpha}'))
+    return jordan_wigner(f_op)
+
 
 def Nucleon_Transition_JW(site_id, mode_alpha, mode_beta, n_b):
     """Jordan-Wigner mapped Pauli string for (a^dagger_alpha a_beta + h.c.)"""
-    idx_alpha = site_to_nucleon_qubit(site_id, mode_alpha, n_b)
-    idx_beta = site_to_nucleon_qubit(site_id, mode_beta, n_b)
-    
-    f_op = FermionOperator(f'{idx_alpha}^ {idx_beta}') + FermionOperator(f'{idx_beta}^ {idx_alpha}')
-    return jordan_wigner(f_op)
+    key = (site_id, mode_alpha, mode_beta, n_b)
+    cached = _NUCLEON_TRANSITION_CACHE.get(key)
+    if cached is None:
+        cached = _nucleon_transition_jw_uncached(*key)
+        _NUCLEON_TRANSITION_CACHE[key] = cached
+    # Return a shallow copy of the terms dict so callers can safely *= or mutate
+    # without poisoning the cache.
+    op = QubitOperator()
+    op.terms = dict(cached.terms)
+    return op

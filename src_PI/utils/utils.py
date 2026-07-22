@@ -1,18 +1,7 @@
 import numpy as np
 from openfermion import QubitOperator, FermionOperator, jordan_wigner
 
-"""
-TODO: SPATIAL DIMENSIONALITY UPGRADE
-1. Generalize Stride: Update 'total_qubits' and index helpers to accept a 'dim' 
-   parameter. Offset logic must change from (site * stride) to 
-   ((z*Ly*Lx + y*Lx + x) * stride).
-2. Neighbor Mapping: Implement a 'get_neighbors(site_id, dim, lattice_shape)' 
-   utility to return adjacent indices for 2D (N, S, E, W) and 3D (+Up, Down).
-3. Boundary Conditions: Add support for Periodic Boundary Conditions (PBC) 
-   vs Open (OBC) to the neighbor utility.
-4. Precision Constants: Define a standardized 'a_L' (lattice spacing) handling 
-   for multi-dimensional volumes (a_L^3).
-"""
+
 
 # Pauli matrices as 2x2 arrays
 sigma_mats = [
@@ -46,15 +35,32 @@ def get_P_Q(pi_max, n_b):
     # In some papers Q is simply delta_pi; let's stick to the paper's P and Q.
     return P, Q
 
-def get_Pp_Qp(pi_max, n_b, a_L):
+def get_Pi_max(pi_max, n_b, a_L, dim=3):
+    """
+    Realized conjugate-momentum window Pi_max implied by the field grid.
+
+    From the discrete-Fourier conjugate (Nyquist-Shannon) relation, the
+    register holding pi on [-pi_max, +pi_max] over 2^n_b points fixes the
+    conjugate window to Pi_max = pi / (a_L^dim * delta_pi). This is the
+    value the operator builders actually use; callers that derive pi_max
+    from an NS-optimal target (calculate_ns_cutoffs) can compare against it.
+    """
+    delta_pi = (2 * pi_max) / (2**n_b - 1)
+    return np.pi / (a_L**dim * delta_pi)
+
+
+def get_Pp_Qp(pi_max, n_b, a_L, dim=3):
     """
     Calculates P' and Q' for the Conjugate Momentum encoding (Eq 32-33).
+
+    dim defaults to 3 so existing call sites that omit it keep the prior
+    a_L**3 behavior; the amplitude pipeline passes the lattice dim explicitly.
     """
     # From Eq 32
     delta_pi = (2 * pi_max) / (2**n_b - 1)
-    delta_Pi = (2 * np.pi) / (a_L**3 * delta_pi * (2**n_b))
-    Pi_max = np.pi / (a_L**3 * delta_pi)
-    
+    delta_Pi = (2 * np.pi) / (a_L**dim * delta_pi * (2**n_b))
+    Pi_max = get_Pi_max(pi_max, n_b, a_L, dim)
+
     # Eq 33/74
     Pp = -Pi_max + (delta_Pi / 2) * (2**n_b - 1)
     Qp = -delta_Pi / 2
