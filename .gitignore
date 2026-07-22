@@ -21,6 +21,9 @@ __pycache__/
 data/*
 !data/.gitkeep
 
+# Condor run directories (created server-side by hpc/submitscr.sh)
+hpc/rundir-*/
+
 # AI Tools and folders
 claude/
 .claude/
