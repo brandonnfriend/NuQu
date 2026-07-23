@@ -1,72 +1,70 @@
 #!/bin/sh
-# Condor executable for the classical dets-vs-L HPC test run.
+# Condor executable — self-provisions its Python env on the compute node, then runs
+# the classical dets-vs-L driver.
 #
-# Runs in the Condor execute sandbox. Reads code + venv from the shared
-# /nfs_scratch checkout (qis nodes mount it), writes outputs BOTH into
-# $REPO/data/classical/ (durable, rsync-able) and the returned rundir.
+# Probe (cluster 289774, qis3) established that a qis execute node: reads
+# /nfs_scratch, has outbound internet + g++11, but has NO uv, only python3.9, and no
+# home mount. So we install uv + CPython 3.10 + the pinned deps and compile the
+# mixed_ci C++ hot path INTO THE CONDOR SANDBOX (all discarded on exit). The repo is
+# only READ from /nfs_scratch; only the small rundir (outputs) transfers back.
 #
-# Provisioning (venv + C++ backend) is done once by setup_env.sh — this script
-# only activates and runs.
-REPO="/nfs_scratch/bfriend3/NuQu/NuQu"
-
-# --- capture the transferred (returned-ON_EXIT) rundir ----------------------
-cd rundir* 2>/dev/null || { echo "ERROR: no rundir in sandbox" >&2; exit 1; }
+# arg $1 = mode (test|full).
+set -u
+MODE="${1:-full}"
+REPO=/nfs_scratch/bfriend3/NuQu/NuQu
 SANDBOX="$(pwd)"
+RUNDIR="$(ls -d "$SANDBOX"/rundir* 2>/dev/null | head -1)"
+[ -n "$RUNDIR" ] || { echo "ERROR: no rundir in sandbox" >&2; exit 1; }
+[ -r "$REPO/misc/run_dets_vs_L.py" ] || { echo "ERROR: cannot read repo at $REPO" >&2; exit 1; }
 
-# --- thread env = requested cpus (numpy/scipy BLAS) + headless plotting ------
-cpus="${_CONDOR_REQUEST_CPUS:-4}"
+cpus="${_CONDOR_REQUEST_CPUS:-2}"
 export OMP_NUM_THREADS="$cpus" MKL_NUM_THREADS="$cpus" OPENBLAS_NUM_THREADS="$cpus" \
-       BLIS_NUM_THREADS="$cpus" NUMEXPR_NUM_THREADS="$cpus"
-export MPLBACKEND=Agg
+       BLIS_NUM_THREADS="$cpus" NUMEXPR_NUM_THREADS="$cpus" MPLBACKEND=Agg
+# keep ALL tool state in the writable sandbox (the real home isn't mounted on the node)
+export HOME="$SANDBOX" UV_INSTALL_DIR="$SANDBOX/uvbin" \
+       UV_PYTHON_INSTALL_DIR="$SANDBOX/uvpy" UV_CACHE_DIR="$SANDBOX/uvcache"
+export PATH="$UV_INSTALL_DIR:$SANDBOX/.local/bin:$PATH"
 
-# --- locate the shared venv python (no activation needed) --------------------
-PY="$REPO/.venv/bin/python"
-[ -x "$PY" ] || { echo "ERROR: $PY missing — run hpc/detsvsL/setup_env.sh on the server first" >&2; exit 1; }
-cd "$REPO" || { echo "ERROR: repo missing at $REPO" >&2; exit 1; }
+echo "[run] host=$(hostname) mode=$MODE cpus=$cpus"
+echo "[run] installing uv..."
+curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null 2>&1 || { echo "ERROR: uv install failed" >&2; exit 1; }
+command -v uv >/dev/null 2>&1 || { echo "ERROR: uv not on PATH" >&2; exit 1; }
+echo "[run] uv: $(uv --version)"
+uv python install 3.10 >/dev/null 2>&1
+uv venv --python 3.10 "$SANDBOX/venv" >/dev/null 2>&1 || { echo "ERROR: uv venv failed" >&2; exit 1; }
+PY="$SANDBOX/venv/bin/python"
+echo "[run] python: $("$PY" --version)"
+VIRTUAL_ENV="$SANDBOX/venv" uv pip install -q -r "$REPO/hpc/detsvsL/requirements-hpc.txt" \
+    || { echo "ERROR: pip install failed" >&2; exit 1; }
 
-# =============================================================================
-#  RUN PARAMETERS  (edit here to rescale)
-#  First HPC TEST: L=2,3 dilute A=1, N_f=4, cores up to 50k, n_runs=4 (matches
-#  the validated laptop config so this isolates the "deeper cores on HPC" variable
-#  that Phase C is blocked on). The per-rung wall cap self-limits large L, so the
-#  ladder climbs toward 50k and stops honestly where the budget runs out (the JSON
-#  records exactly where). PRODUCTION science run bumps n_runs to >=16 (the Phase-D
-#  seed-fragility fix) and adds L=4.
-# =============================================================================
-STAMP="$(date +%Y%m%d-%H%M%S)"
-LABEL="detsvsL_hpc_${STAMP}"
-DIM=3
-L_VALUES="2 3"
-A=1
-N_B=2                 # N_f = 2^n_b = 4  (matches the laptop dilute reference runs)
-EPS="1.0 0.1"         # per-site accuracy targets (MeV/site)
-MAX_CORE=50000
-N_RUNS=4
-N_RUNGS=8
-LADDER_START=500
-MAX_RUNG_SECONDS=3600 # 1 h/rung wall cap -> bounds total wall time
+echo "[run] building mixed_ci C++ hot path..."
+cp "$REPO/classical/trimci/backend_fork/mixed_ci_pybind.cpp" \
+   "$REPO/classical/trimci/backend_fork/mixed_ci.hpp" "$SANDBOX/"
+PYBIND_INC="$("$PY" -c 'import pybind11; print(pybind11.get_include())')"
+PY_INC="$("$PY" -c 'import sysconfig; print(sysconfig.get_path("include"))')"
+EXT="$("$PY" -c 'import sysconfig; print(sysconfig.get_config_var("EXT_SUFFIX"))')"
+c++ -O3 -Wall -shared -std=c++17 -fPIC -I"$PYBIND_INC" -I"$PY_INC" \
+    "$SANDBOX/mixed_ci_pybind.cpp" -o "$SANDBOX/mixed_ci${EXT}" \
+    || { echo "ERROR: C++ build failed" >&2; exit 1; }
+echo "[run] built mixed_ci${EXT}"
+
+# --- run parameters ----------------------------------------------------------
+if [ "$MODE" = "test" ]; then
+  DIM=1; LVALUES="2"; A=2; NB=1; EPS="1.0"; MAXCORE=400; NRUNS=2; NRUNGS=3; LADDER0=100; RUNGCAP=120
+else
+  DIM=3; LVALUES="2 3"; A=1; NB=2; EPS="1.0 0.1"; MAXCORE=50000; NRUNS=4; NRUNGS=8; LADDER0=500; RUNGCAP=3600
+fi
+STAMP="$(date +%Y%m%d-%H%M%S)"; LABEL="detsvsL_hpc_${MODE}_${STAMP}"
 # -----------------------------------------------------------------------------
 
-LOG="data/classical/${LABEL}.log"
-echo "[run] host=$(hostname) cpus=$cpus"
-echo "[run] label=$LABEL"
-echo "[run] dim=$DIM L=[$L_VALUES] A=$A N_f=$((1<<N_B)) max_core=$MAX_CORE n_runs=$N_RUNS rung_cap=${MAX_RUNG_SECONDS}s"
-
-"$PY" -m misc.run_dets_vs_L --hpc \
-    --dim "$DIM" --L $L_VALUES --A "$A" --n_b "$N_B" \
-    --eps $EPS --max-core "$MAX_CORE" --n_runs "$N_RUNS" \
-    --n-rungs "$N_RUNGS" --ladder-start "$LADDER_START" \
-    --max-rung-seconds "$MAX_RUNG_SECONDS" --label "$LABEL" \
-    > "$LOG" 2>&1
+export PYTHONPATH="$SANDBOX:$REPO"    # $SANDBOX has the freshly-built mixed_ci.so
+cd "$RUNDIR"                          # driver writes data/classical/ here -> returned
+echo "[run] dim=$DIM L=[$LVALUES] A=$A N_f=$((1<<NB)) max_core=$MAXCORE n_runs=$NRUNS cap=${RUNGCAP}s label=$LABEL"
+"$PY" -m misc.run_dets_vs_L --hpc --dim "$DIM" --L $LVALUES --A "$A" --n_b "$NB" \
+    --eps $EPS --max-core "$MAXCORE" --n_runs "$NRUNS" --n-rungs "$NRUNGS" \
+    --ladder-start "$LADDER0" --max-rung-seconds "$RUNGCAP" --label "$LABEL" \
+    > "${LABEL}.log" 2>&1
 status=$?
-
-cat "$LOG"    # mirror the driver's console output into the Condor stdout
-
-# --- return compact artifacts inside the rundir (durable copies stay in data/) --
-for ext in json png log; do
-    f="data/classical/${LABEL}.${ext}"
-    [ -f "$f" ] && cp "$f" "$SANDBOX/"
-done
-
-echo "[run] done (status=$status); artifacts: data/classical/${LABEL}.{json,png,log}"
+echo "[run] driver exit=$status"; tail -25 "${LABEL}.log" 2>/dev/null
+echo "[run] rundir outputs: $(ls data/classical/ 2>/dev/null | tr '\n' ' ')"
 exit "$status"
