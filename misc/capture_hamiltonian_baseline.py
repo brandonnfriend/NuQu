@@ -144,7 +144,7 @@ def _capture_one(L, dim, A, pion_basis, cutoff_method, n_b_override, include_ful
 
 def main():
     parser = argparse.ArgumentParser(description='Capture Hamiltonian-construction baselines.')
-    parser.add_argument('--out', default='data/2026-05-26/hamiltonian_baseline.json',
+    parser.add_argument('--out', default='data/quantum/2026-05-26/hamiltonian_baseline.json',
                         help='Output path for the consolidated baseline JSON.')
     args = parser.parse_args()
 

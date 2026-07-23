@@ -261,7 +261,7 @@ def plot_basis_comparison(filepaths, save_dir=None, save_basename=None):
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
 
     if save_dir is None:
-        save_dir = os.path.join("data", datetime.now().strftime("%Y-%m-%d"))
+        save_dir = os.path.join("data", "quantum", datetime.now().strftime("%Y-%m-%d"))
     os.makedirs(save_dir, exist_ok=True)
     if save_basename is None:
         save_basename = f"basis_comparison_L{L_for_title}_{dim_for_title}D"
@@ -388,7 +388,7 @@ def plot_basis_comparison_total_qpe(filepaths, delta_E=1.0, e=0.1, E_kin=10, Cp=
     plt.tight_layout()
 
     if save_dir is None:
-        save_dir = os.path.join("data", datetime.now().strftime("%Y-%m-%d"))
+        save_dir = os.path.join("data", "quantum", datetime.now().strftime("%Y-%m-%d"))
     os.makedirs(save_dir, exist_ok=True)
     if save_basename is None:
         save_basename = f"basis_comparison_total_qpe_L{L_for_title}_{dim_for_title}D"
@@ -481,7 +481,7 @@ def plot_encoder_comparison_total_qpe(filepaths, delta_E=1.0, x_axis='n_b',
     plt.tight_layout()
 
     if save_dir is None:
-        save_dir = os.path.join("data", datetime.now().strftime("%Y-%m-%d"))
+        save_dir = os.path.join("data", "quantum", datetime.now().strftime("%Y-%m-%d"))
     os.makedirs(save_dir, exist_ok=True)
     if save_basename is None:
         save_basename = f"encoder_comparison_total_qpe_L{L_for_title}_{dim_for_title}D"
@@ -564,7 +564,7 @@ def plot_total_tcost_comparison(filepath, delta_E=1.0, e=0.1, E_kin=10, Cp=1e-3)
 
     # --- 4. Setup Directories & Save JSON ---
     date_str = datetime.now().strftime("%Y-%m-%d")
-    save_dir = os.path.join("data", date_str)
+    save_dir = os.path.join("data", "quantum", date_str)
     os.makedirs(save_dir, exist_ok=True)
     
     base_filename = f"total_costs_L{L}_{dim}D"
@@ -726,7 +726,7 @@ def plot_multi_L_total_tcost_comparison(filepaths, delta_E=1.0, e=0.1, E_kin=10,
 
     # --- 5. Setup Directories & Save JSON ---
     date_str = datetime.now().strftime("%Y-%m-%d")
-    save_dir = os.path.join("data", date_str)
+    save_dir = os.path.join("data", "quantum", date_str)
     os.makedirs(save_dir, exist_ok=True)
     
     base_filename = f"multi_L_total_costs_{dim_for_title}D"
@@ -863,7 +863,7 @@ def plot_tcost_vs_L_for_chosen_A(filepaths, target_A_vals=[1, 10, 60, 100], delt
 
     # 5. Export JSON and Save Plot
     date_str = datetime.now().strftime("%Y-%m-%d")
-    save_dir = os.path.join("data", date_str)
+    save_dir = os.path.join("data", "quantum", date_str)
     os.makedirs(save_dir, exist_ok=True)
     
     base_filename = f"tcost_vs_L_comparison_{dim_for_title}D"
@@ -899,7 +899,7 @@ def plot_tcost_vs_L_for_chosen_A(filepaths, target_A_vals=[1, 10, 60, 100], delt
 
 if __name__ == "__main__":
     file_list = [
-        "data/2026-05-22/sweep_L2_3D_amplitude_165018.json",
-        "data/2026-05-22/sweep_L2_3D_fock_165517.json",
+        "data/quantum/2026-05-22/sweep_L2_3D_amplitude_165018.json",
+        "data/quantum/2026-05-22/sweep_L2_3D_fock_165517.json",
     ]
     plot_basis_comparison_total_qpe(file_list)

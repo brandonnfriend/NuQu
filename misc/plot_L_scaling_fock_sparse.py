@@ -2,7 +2,7 @@
 Plot total QPE T-cost vs L from the fock/sparse L-scaling data, overlaid
 against the Watson Trotter resource estimate at the same fixed A.
 
-Reads `data/2026-06-03/L_scaling_fock_sparse_A10.json` (consolidated driver
+Reads `data/quantum/2026-06-03/L_scaling_fock_sparse_A10.json` (consolidated driver
 output). Writes the plot + a JSON of the curve data into
 `data/<today>/L_scaling_fock_sparse_A10_with_trotter.{png,json}`.
 
@@ -27,7 +27,7 @@ import numpy as np
 from src_PI.trotter_theory.TrotterCost import get_total_trotter_cost
 
 
-SRC = 'data/2026-06-03/L_scaling_fock_sparse_A10.json'
+SRC = 'data/quantum/2026-06-03/L_scaling_fock_sparse_A10.json'
 DELTA_E = 1.0   # MeV — matches the post-processing ΔE saved in the consolidated file
 TROTTER_E = 0.1
 TROTTER_EKIN = 10

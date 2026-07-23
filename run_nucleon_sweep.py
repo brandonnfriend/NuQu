@@ -62,6 +62,9 @@ def get_sweep_config(**overrides):
         # both bases at the same n_b.
         'n_b_override': None,
         'extras': {},
+        # Optional short human tag folded into the saved run-id folder, so an
+        # important run is easy to find later (e.g. 'paperfig', 'L4-highA').
+        'label': None,
     }
     defaults.update(overrides)
     return defaults
@@ -177,7 +180,8 @@ def run_sweep(**overrides):
         # Save using the first iteration's L (sweeps with L=L(A) are reflected
         # per-entry; metadata captures the *file-naming* L).
         first_L = sweep_results[0]['L']
-        saved_filepath = save_sweep_data(first_L, dim, params, sweep_results, config=config)
+        saved_filepath = save_sweep_data(first_L, dim, params, sweep_results,
+                                         config=config, label=run_cfg['label'])
 
         # Post-process: compute and save the total QPE cost
         # (QPE_Total_T_Count = Total_T_Count · √2·π·Λ/ΔE) into the same file,
@@ -204,4 +208,11 @@ def run_sweep(**overrides):
 
 
 if __name__ == '__main__':
-    run_sweep()
+    import argparse
+    ap = argparse.ArgumentParser(
+        description="Run the nucleon resource-estimation sweep.")
+    ap.add_argument('--label', default=None,
+                    help="Optional short tag folded into the saved run-id "
+                         "folder (e.g. 'paperfig', 'L4-highA').")
+    args = ap.parse_args()
+    run_sweep(label=args.label)

@@ -12,7 +12,7 @@ Sparse scales freely; we show it both at fixed n_b=3 (direct overlap
 with PauliLCU on the same Hamiltonian) and at heuristic n_b (realistic
 scaling).
 
-Output: `data/2026-05-27/sparse_vs_paulilcu_C4.png`.
+Output: `data/quantum/2026-05-27/sparse_vs_paulilcu_C4.png`.
 """
 
 import json

@@ -33,19 +33,19 @@ from plot_sweep_data import plot_basis_comparison_total_qpe
 # matches chronological order for the HHMMSS naming).
 PER_L_INPUTS = {
     2: [
-        ('amp/energy_bound (legacy)', 'data/2026-04-21/sweep_L2_3D_164215.json'),
-        ('amp/ns',                    'data/2026-05-26/sweep_L2_3D_amplitude_ns_112706.json'),
-        ('fock/sparse',               'data/2026-05-30/sweep_L2_3D_fock_*.json'),
+        ('amp/energy_bound (legacy)', 'data/quantum/2026-04-21/sweep_L2_3D_164215.json'),
+        ('amp/ns',                    'data/quantum/2026-05-26/sweep_L2_3D_amplitude_ns_112706.json'),
+        ('fock/sparse',               'data/quantum/2026-05-30/sweep_L2_3D_fock_*.json'),
     ],
     3: [
-        ('amp/energy_bound (legacy, synth)', 'data/2026-04-04/sweep_L3_3D_amplitude_energy_bound_synth.json'),
-        ('amp/ns',                           'data/2026-05-30/sweep_L3_3D_amplitude_ns_*.json'),
-        ('fock/sparse',                      'data/2026-05-30/sweep_L3_3D_fock_*.json'),
+        ('amp/energy_bound (legacy, synth)', 'data/quantum/2026-04-04/sweep_L3_3D_amplitude_energy_bound_synth.json'),
+        ('amp/ns',                           'data/quantum/2026-05-30/sweep_L3_3D_amplitude_ns_*.json'),
+        ('fock/sparse',                      'data/quantum/2026-05-30/sweep_L3_3D_fock_*.json'),
     ],
     4: [
-        ('amp/energy_bound (legacy)', 'data/2026-04-06/L4_3D.json'),
-        ('amp/ns',                    'data/2026-05-30/sweep_L4_3D_amplitude_ns_*.json'),
-        ('fock/sparse',               'data/2026-05-30/sweep_L4_3D_fock_*.json'),
+        ('amp/energy_bound (legacy)', 'data/quantum/2026-04-06/L4_3D.json'),
+        ('amp/ns',                    'data/quantum/2026-05-30/sweep_L4_3D_amplitude_ns_*.json'),
+        ('fock/sparse',               'data/quantum/2026-05-30/sweep_L4_3D_fock_*.json'),
     ],
 }
 
