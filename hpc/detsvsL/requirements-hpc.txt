@@ -1,0 +1,22 @@
+# Minimal runtime for the classical dets-vs-L HPC run (Python 3.10).
+# Pinned to the exact versions the laptop reference runs were validated against.
+#
+# This is DELIBERATELY minimal — empirically the only packages the dets-vs-L
+# solver loads end to end (verified by blocking everything else and re-running):
+#   * openfermion  -> builds the EFT Hamiltonian (pulls cirq==1.4.0 as a dep)
+#   * numpy/scipy  -> arrays + sparse eigsh diagonalization (ARPACK)
+#   * matplotlib   -> the N*-vs-L plot (headless Agg; guarded, so a JSON still
+#                     saves even if it were absent)
+#   * pybind11     -> BUILD-TIME ONLY: compiles the mixed_ci C++ hot path
+#
+# NOT needed on the cluster (and intentionally omitted to keep the env light and
+# robust): pyLIQTR (quantum estimator, not the classical path), the official
+# `trimci` pip package + its jax/netket/flax/numba deps (we diagonalize with
+# scipy eigsh instead of the official C++ Davidson — same answer, one less heavy
+# dependency tree), pyscf, block2.
+numpy==1.26.4
+scipy==1.12.0
+openfermion==1.6.1
+cirq==1.4.0
+matplotlib==3.10.9
+pybind11==3.0.4

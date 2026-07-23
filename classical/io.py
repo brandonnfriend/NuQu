@@ -102,7 +102,8 @@ def _states_arrays(result):
 def save_classical_run(result, H, A, *, runtime_s, solver_params=None,
                        method="TrimCI", transform=TRANSFORM_BARE,
                        exact_reference=None, params=None, data_root=DATA_ROOT,
-                       label=None, save_hamiltonian=True, convergence=None):
+                       label=None, save_hamiltonian=True, convergence=None,
+                       hpc=False):
     """Save a classical ground-state run as a self-describing folder.
 
     Args:
@@ -175,7 +176,10 @@ def save_classical_run(result, H, A, *, runtime_s, solver_params=None,
         "convergence": history,
         "exact_reference": exact_reference,
         "files": {"groundstate": "groundstate.npz", "hamiltonian": ham_file},
-        "code": {"git_commit": _git_commit()},
+        # provenance: git commit + where it ran (hpc flag distinguishes cluster
+        # runs from laptop runs when JSONs are pooled).
+        "code": {"git_commit": _git_commit(), "hpc": bool(hpc),
+                 "host": __import__("platform").node()},
     }
     with open(os.path.join(run_dir, "metadata.json"), "w") as f:
         json.dump(metadata, f, indent=2)

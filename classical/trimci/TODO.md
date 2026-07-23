@@ -3,6 +3,23 @@
 Working notes for getting a TrimCI ground-state solve running on the dynamical-pion
 EFT. Sketch, not a contract — reorder freely.
 
+## 2026-07-23 — first HPC job package (dets-vs-L) + None-reference crash fix
+The Phase-C dets-vs-L exponent is the top classical HPC priority (needs cores past the
+laptop's ~16k, where every point is still only a bound). Packaged the first real cluster
+run under `hpc/detsvsL/` (`setup_env.sh` + `run_detsvsL.sh` + `submit_detsvsL.sh` +
+pinned `requirements-hpc.txt` + `README.md`): L=2,3 dilute 3D, cores→50k, n_runs=4,
+qis-pinned, reads code+venv from the shared `/nfs_scratch` checkout, **scipy-eigsh path**
+(no official trimci / jax / netket / pyLIQTR — verified minimal by blocking them and
+re-running). Provenance: runs now carry an `hpc` tag in the saved JSON/metadata
+(`dets_vs_L_at_fixed_accuracy(hpc=)`, `--hpc` CLI, `save_classical_run(hpc=)`).
+- **Bug fixed:** `dets_vs_L_at_fixed_accuracy` crashed (`float - NoneType`) when a per-L
+  ladder was too shallow to extrapolate E_inf (E_inf=None) — exactly the case a wall-capped
+  large-L HPC ladder hits. Now `_extract_nstar` returns a `"no_reference"` bound and the
+  caller skips the E_inf±σ arithmetic: honest bound, never loses a multi-hour run.
+- `build_mixed_ci.sh` made OS-portable (Linux drops the Darwin-only `-undefined
+  dynamic_lookup`; venv python found relative to the script; still no `-march=native`, so
+  the `.so` runs on heterogeneous execute nodes).
+
 ## 2026-07-10 (Phase D) — honesty & robustness guards
 The layer that makes the Phase-C chain read honestly: surface (and where possible veto)
 the ways each estimate can lie. New module `classical/trimci/robustness.py` (pure

@@ -750,7 +750,13 @@ def _extract_nstar(rungs, E_inf, sites, eps, energy_key="E_pt2"):
       * "bracketed"   — N* lies in (n_lo, n_hi]; n_star = sqrt(n_lo*n_hi) (a fit point).
       * "upper_bound" — even the smallest core is within eps (N* <= n_hi = that core).
       * "lower_bound" — the largest core still fails (N* > n_lo = that core; not reached).
+      * "no_reference"— E_inf is None (the ladder was too shallow to extrapolate a
+        reference), so N* is undefined. Reported as a bound; NEVER crashes — an
+        expensive large-L ladder that self-limits early must not lose the whole run.
     """
+    if E_inf is None:
+        return {"status": "no_reference", "n_star": None, "n_lo": None, "n_hi": None,
+                "gap_at_max": None, "note": "no extrapolated E_inf (ladder too shallow)"}
     rs = sorted(rungs, key=lambda r: r["core"])
     cores = [r["core"] for r in rs]
     gaps = [abs(r[energy_key] - E_inf) / sites for r in rs]
@@ -830,7 +836,7 @@ def dets_vs_L_at_fixed_accuracy(dim=3, L_values=(2, 3, 4), A=1, n_b=2, N_f=None,
                                 max_rung_seconds=120, sigma_frac=0.3, cross_frac=1.0,
                                 n_runs=4, seed=0, transform="bare",
                                 cache_bytes=128 << 20, arrays=True, out_dir=None,
-                                label=None, verbose=True):
+                                label=None, hpc=False, verbose=True):
     """PHASE C — the headline dets-vs-L measurement.
 
     For each L (and each per-site accuracy target eps), find N*(L; eps) = the smallest
@@ -855,6 +861,7 @@ def dets_vs_L_at_fixed_accuracy(dim=3, L_values=(2, 3, 4), A=1, n_b=2, N_f=None,
     FIXED FILLING A = round(filling * sites). Writes a JSON summary + the N*-vs-L plot.
     """
     import json
+    import platform
     from classical.plotting import plot_dets_vs_L
 
     if label is None:
@@ -885,9 +892,14 @@ def dets_vs_L_at_fixed_accuracy(dim=3, L_values=(2, 3, 4), A=1, n_b=2, N_f=None,
             pinned = ref["targets"][eps]["pinned"]
             base = _extract_nstar(ref["rungs"], E_inf, sites, eps, "E_pt2")
             base_var = _extract_nstar(ref["rungs"], E_inf, sites, eps, "E_var")
-            # propagate the reference sigma into a horizontal bracket on N*
-            lo = _extract_nstar(ref["rungs"], E_inf - sig, sites, eps, "E_pt2")
-            hi = _extract_nstar(ref["rungs"], E_inf + sig, sites, eps, "E_pt2")
+            # propagate the reference sigma into a horizontal bracket on N* — but only
+            # when E_inf exists; a bound reference (E_inf is None) has no E_inf +/- sigma
+            # to shift, so don't do None arithmetic (it would crash the whole sweep).
+            if E_inf is None:
+                lo = hi = base
+            else:
+                lo = _extract_nstar(ref["rungs"], E_inf - sig, sites, eps, "E_pt2")
+                hi = _extract_nstar(ref["rungs"], E_inf + sig, sites, eps, "E_pt2")
             reprs = [r for r in (_nstar_repr(base), _nstar_repr(lo), _nstar_repr(hi))
                      if r is not None]
             eps_out[str(eps)] = {
@@ -957,6 +969,9 @@ def dets_vs_L_at_fixed_accuracy(dim=3, L_values=(2, 3, 4), A=1, n_b=2, N_f=None,
         "kind": "dets_vs_L", "dim": dim, "A": A, "filling": filling,
         "L_values": list(L_values), "eps_persite_targets": list(eps_persite_targets),
         "label": label, "per_L": per_L, "fits": fits, "robustness": robustness,
+        # provenance: where this ran. `hpc` distinguishes cluster runs (deep cores /
+        # big ensembles) from laptop smoke runs when the JSONs are pooled later.
+        "hpc": bool(hpc), "host": platform.node(),
     }
 
     if out_dir is None:

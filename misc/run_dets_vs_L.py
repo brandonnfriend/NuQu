@@ -45,6 +45,8 @@ def main():
     ap.add_argument("--n_runs", type=int, default=4)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--label", type=str, default=None)
+    ap.add_argument("--hpc", action="store_true",
+                    help="tag the saved JSON as an HPC/cluster run (provenance)")
     args = ap.parse_args()
 
     t0 = time.time()
@@ -53,7 +55,7 @@ def main():
         eps_persite_targets=tuple(args.eps), filling=args.filling,
         ladder_start=args.ladder_start, n_rungs=args.n_rungs, max_core=args.max_core,
         max_rung_seconds=args.max_rung_seconds, n_runs=args.n_runs, seed=args.seed,
-        label=args.label)
+        label=args.label, hpc=args.hpc)
     # compact result read-out
     print(f"\n  total wall: {(time.time() - t0) / 60:.1f} min")
     for eps in args.eps:
