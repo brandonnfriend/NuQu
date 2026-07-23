@@ -253,9 +253,15 @@ def _load_cpp():
 
 
 def cpp_available():
+    """True if the mixed_ci C++ hot path (connections / expand / build_context) is
+    importable. Deliberately does NOT require the official TrimCI Davidson: when it
+    is absent, the selected-CI subspace is diagonalized with scipy eigsh over the
+    mixed_ci C++ CSC (see _diagonalize_arrays_scipy) — no dense fallback, no jax/
+    netket-dragging `trimci` package. The official Davidson is still used when
+    present (faster at small N); that capability is has_sparse_davidson()."""
     try:
         _load_cpp()
-        return has_sparse_davidson()
+        return True
     except ImportError:
         return False
 
@@ -361,6 +367,58 @@ def _diagonalize_arrays_davidson(H, ferm, bos):
     if nrm > 0:
         v /= nrm
     return E0, v
+
+
+def _diagonalize_arrays_scipy(H, ferm, bos, tol=1e-8):
+    """Lowest eigenpair over the (ferm, bos) states using ONLY the mixed_ci C++
+    module — no official TrimCI Davidson. Dense numpy.eigh for tiny N (instant +
+    robust; unavoidable in selected-CI's early rounds), scipy eigsh over the C++
+    complex CSC (build_context) for everything larger. The scipy-only counterpart
+    of _diagonalize_arrays_davidson, so the selected-CI solver scales with just
+    openfermion + scipy + mixed_ci."""
+    import scipy.sparse as sp
+    from scipy.sparse.linalg import eigsh, LinearOperator
+    ferm = np.ascontiguousarray(ferm, dtype=np.uint64)
+    bos = np.ascontiguousarray(bos, dtype=np.uint16)
+    N = ferm.shape[0]
+    if N == 0:
+        return float("inf"), np.zeros(0, dtype=complex)
+    prov = _cpp_provider(H)
+    if N < 32:                          # tiny: dense is instant + robust
+        rows, cols, re, im = prov.build_coo(ferm, bos)
+        Hc = sp.csr_matrix((np.asarray(re) + 1j * np.asarray(im),
+                            (np.asarray(rows), np.asarray(cols))),
+                           shape=(N, N), dtype=complex).toarray()
+        evals, evecs = np.linalg.eigh(0.5 * (Hc + Hc.conj().T))
+        return float(evals[0].real), evecs[:, 0]
+    ctx = prov.build_context(ferm, bos)   # complex CSC in C++, no 2N embedding
+
+    def _mv(v):
+        v = np.asarray(v, dtype=complex)
+        or_, oi_ = ctx.matvec(np.ascontiguousarray(v.real, dtype=np.float64),
+                              np.ascontiguousarray(v.imag, dtype=np.float64))
+        return np.asarray(or_) + 1j * np.asarray(oi_)
+
+    op = LinearOperator((N, N), matvec=_mv, dtype=complex)
+    diag = np.asarray(ctx.diagonal(), dtype=np.float64)
+    v0 = np.zeros(N, dtype=complex)
+    v0[int(np.argmin(diag))] = 1.0
+    vals, vecs = eigsh(op, k=1, which="SA", tol=tol, v0=v0, maxiter=max(300, N))
+    E0 = float(vals[0].real)
+    v = vecs[:, 0]
+    nrm = np.linalg.norm(v)
+    if nrm > 0:
+        v = v / nrm
+    return E0, v
+
+
+def _arrays_small_diag(H, ferm, bos):
+    """Small-N / eigsh-fallback diagonalizer: the official C++ sparse Davidson when
+    it's available (fast at small N), else the scipy-only path over the mixed_ci
+    CSC. Both are exact for the selected subspace; the choice is speed only."""
+    if has_sparse_davidson():
+        return _diagonalize_arrays_davidson(H, ferm, bos)
+    return _diagonalize_arrays_scipy(H, ferm, bos)
 
 
 def cpp_diagonalize(H, states):
@@ -493,16 +551,20 @@ def cpp_diagonalize_matfree(H, states, tol=1e-10):
 
 
 def cpp_diagonalize_smart(H, states):
-    """Auto-select between sparse Davidson and matfree eigsh based on N.
-
-    For N < _MATFREE_N: cpp_diagonalize (sparse Davidson, faster for small N).
-    For N >= _MATFREE_N: cpp_diagonalize_matfree (C++ CSC + eigsh, 2x less memory,
-    no scipy assembly overhead, scales to 100k+ states).
+    """Lowest eigenpair of the projected H (the PT2 re-diagonalizer), auto-selecting
+    the method. With the official TrimCI Davidson present: sparse Davidson for
+    N < _MATFREE_N, matfree eigsh above. Without it: the scipy-only path over the
+    mixed_ci C++ CSC for all N (dense for tiny N, eigsh above) — no official TrimCI.
     """
-    N = len(states) if not isinstance(states, int) else states
-    if N < _MATFREE_N:
-        return cpp_diagonalize(H, states)
-    return cpp_diagonalize_matfree(H, states)
+    states = list(states)
+    N = len(states)
+    if has_sparse_davidson():
+        if N < _MATFREE_N:
+            return cpp_diagonalize(H, states)
+        return cpp_diagonalize_matfree(H, states)
+    ferm, bos = _states_to_arrays(states, _ferm_words(H))
+    E0, v = _diagonalize_arrays_scipy(H, ferm, bos)
+    return E0, {s: v[k] for k, s in enumerate(states)}
 
 
 # ---------------------------------------------------------------------------
@@ -589,11 +651,11 @@ def cpp_diagonalize_matfree_arrays(H, ferm, bos, tol=1e-8):
     prov = _cpp_provider(H)
 
     if N < _MATFREE_N:
-        # Small N: the fast official sparse Davidson over the 2N real embedding
-        # (same primitive the object path uses) — the 2N memory cost is trivial
-        # here, and it's far faster than dense eigh. Only above _MATFREE_N does
-        # the 2N embedding's memory matter enough to switch to matrix-free eigsh.
-        return _diagonalize_arrays_davidson(H, ferm, bos)
+        # Small N: official sparse Davidson over the 2N real embedding when TrimCI
+        # is present (trivial 2N memory here, faster than dense eigh); otherwise the
+        # scipy-only path over the mixed_ci CSC. Above _MATFREE_N the 2N embedding's
+        # memory matters enough to switch to the matrix-free eigsh below.
+        return _arrays_small_diag(H, ferm, bos)
 
     from scipy.sparse.linalg import eigsh, LinearOperator
     ctx = prov.build_context(ferm, bos)
@@ -613,8 +675,9 @@ def cpp_diagonalize_matfree_arrays(H, ferm, bos, tol=1e-8):
         vals, vecs = eigsh(op, k=1, which="SA", tol=tol, v0=v0,
                            maxiter=max(300, N))
     except Exception:
-        # Fall back to the sparse Davidson build on ARPACK convergence failure.
-        return _diagonalize_arrays_davidson(H, ferm, bos)
+        # ARPACK convergence failure -> official Davidson build if present, else
+        # the scipy-only path (dense for tiny N, a re-seeded eigsh otherwise).
+        return _arrays_small_diag(H, ferm, bos)
 
     E0 = float(vals[0].real)
     v = vecs[:, 0]

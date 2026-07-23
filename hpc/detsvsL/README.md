@@ -32,9 +32,17 @@ sandbox and are discarded; only the small **rundir** (JSON + PNG + log) transfer
 | `submit_detsvsL.sh` | mint rundir + write submit + `condor_submit`; `sh submit_detsvsL.sh [test\|full]` | submit (`ssh hep-submit`) |
 
 **`test`** = L=2 1D, cores→400 (~30s; a full provisioning + build + solve shakedown).
-**`full`** = L=2,3 dilute 3D, N_f=4, cores→50k, `n_runs=4`, 1 h/rung wall cap (self-limits;
-the JSON records where it stopped). Production bumps `n_runs`≥16 (Phase-D seed-fragility
-fix) and adds L=4 — edit the `full` branch in `run_detsvsL.sh`.
+**`full`** = L=2,3 dilute 3D, N_f=4, **large-core rungs 8k→64k** (×2/rung), `n_runs=4`,
+1 h/rung wall cap. HPC does the cores the laptop can't reach; the cheap small-core rungs
+run locally and are **combined post-hoc** (must match dim/A/N_f/n_runs) — the 8k/16k
+overlap cross-validates the two datasets. Production bumps `n_runs`≥16 (Phase-D
+seed-fragility fix) and adds L=4 — edit the `full` branch in `run_detsvsL.sh`.
+
+> The selected-CI subspace is diagonalized with **scipy eigsh over the `mixed_ci` C++
+> matvec** (no dense build, no official TrimCI). This path is exact-equal to the official
+> C++ Davidson (validated to 9e-13 vs Lanczos) and is what makes the large-core runs
+> possible without dragging jax/netket onto the cluster — see `backend.cpp_available` /
+> `_diagonalize_arrays_scipy`.
 
 ## Workflow
 

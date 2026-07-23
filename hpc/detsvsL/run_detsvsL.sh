@@ -52,7 +52,10 @@ echo "[run] built mixed_ci${EXT}"
 if [ "$MODE" = "test" ]; then
   DIM=1; LVALUES="2"; A=2; NB=1; EPS="1.0"; MAXCORE=400; NRUNS=2; NRUNGS=3; LADDER0=100; RUNGCAP=120
 else
-  DIM=3; LVALUES="2 3"; A=1; NB=2; EPS="1.0 0.1"; MAXCORE=50000; NRUNS=4; NRUNGS=8; LADDER0=500; RUNGCAP=3600
+  # HPC does the LARGE-core rungs the laptop can't reach: 8k -> 64k (x2/rung). Small
+  # cores are cheap locally and combined post-hoc (must match dim/A/N_f/n_runs). The
+  # 8k/16k overlap with the laptop ladder cross-validates that the two datasets agree.
+  DIM=3; LVALUES="2 3"; A=1; NB=2; EPS="1.0 0.1"; MAXCORE=64000; NRUNS=4; NRUNGS=4; LADDER0=8000; RUNGCAP=3600
 fi
 STAMP="$(date +%Y%m%d-%H%M%S)"; LABEL="detsvsL_hpc_${MODE}_${STAMP}"
 # -----------------------------------------------------------------------------

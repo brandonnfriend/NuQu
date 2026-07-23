@@ -16,6 +16,17 @@ re-running). Provenance: runs now carry an `hpc` tag in the saved JSON/metadata
   ladder was too shallow to extrapolate E_inf (E_inf=None) — exactly the case a wall-capped
   large-L HPC ladder hits. Now `_extract_nstar` returns a `"no_reference"` bound and the
   caller skips the E_inf±σ arithmetic: honest bound, never loses a multi-hour run.
+- **Solver decoupled from official TrimCI (the load-bearing HPC fix):** `cpp_available()`
+  now means "mixed_ci C++ built", NOT "official TrimCI Davidson present". Without the
+  official package the selected-CI subspace is diagonalized by **scipy eigsh over the
+  mixed_ci C++ CSC** (`_diagonalize_arrays_scipy`; dense numpy.eigh only for N<32) instead
+  of silently dropping to the pure-Python DENSE solver (capped at 6000 states, ~55× slower
+  — which killed the first HPC run at 6188 dets). Exact-equal to the official Davidson
+  (E=2349.578936 both at 10k dets; 9e-13 vs Lanczos) and same wall-clock; the official path
+  is still used when present (comparison switch, `has_sparse_davidson()`). ⇒ the classical
+  baseline scales to large cores with just openfermion + scipy + mixed_ci — no jax/netket.
+- HPC division of labor: the cluster runs the LARGE-core rungs (8k→64k) the laptop can't
+  reach; small cores stay local and are combined post-hoc (matching dim/A/N_f/n_runs).
 - `build_mixed_ci.sh` made OS-portable (Linux drops the Darwin-only `-undefined
   dynamic_lookup`; venv python found relative to the script; still no `-march=native`, so
   the `.so` runs on heterogeneous execute nodes).
