@@ -28,8 +28,43 @@ sandbox and are discarded; only the small **rundir** (JSON + PNG + log) transfer
 | file | role | run on |
 |---|---|---|
 | `requirements-hpc.txt` | pinned minimal runtime (installed on the node) | — |
-| `run_detsvsL.sh` | Condor executable — self-provisions env + runs driver; `arg1 = test\|full` | execute node |
-| `submit_detsvsL.sh` | mint rundir + write submit + `condor_submit`; `sh submit_detsvsL.sh [test\|full]` | submit (`ssh hep-submit`) |
+| `run_detsvsL.sh` | single-job runner (shakedown / one-shot); `arg1 = test\|full` | execute node |
+| `submit_detsvsL.sh` | mint rundir + submit the single job; `sh submit_detsvsL.sh [test\|full]` | submit |
+| **`run_detsvsL_shard.sh`** | **one (L, seed) shard** of the parallel campaign; `args: L seed campaign` | execute node |
+| **`submit_detsvsL_campaign.sh`** | **build the (L,seed) grid + submit all shards**; `sh submit_detsvsL_campaign.sh [n_seeds] "[L list]"` | submit |
+| `misc/run_detsvsL_shard.py` | one shard's ladder (n_runs=1, frame) → per-shard JSON | (driver) |
+| `misc/combine_detsvsL.py` | min-over-seeds → per-L reference → exponent fit | laptop, post-hoc |
+
+## Production: parallel (L, seed) campaign, in the compacting frame
+
+The n_runs ensemble is parallelised across jobs — **1 shard = 1 (L, seed), n_runs=1,
+full ladder** — so wall-clock is the *single slowest shard* (~L=4 one seed, a few
+hours), not the ~50 h serial sum. Default grid = **3 L × 16 seeds = 48 shards**.
+Combine takes the **min over seeds per (L, core)** to reconstruct the ensemble, then
+extrapolates and fits — identical result to n_runs=16 in-process, and it keeps the
+independent-random-init requirement (each seed is its own job, no warm starts).
+
+Every shard runs in the **per-mode analytic squeeze frame** (`transform=gaussian`,
+auto `-r*`). Measured win (L=2 3D): the framed basis at **1000 dets beats the bare
+basis at 16000** (>16× determinant compaction) and has ~⅓ the terms (~3–10× faster
+per solve) — so the study **pins the reference at modest cores** where the bare basis
+only ever gave lower bounds. Because N\* is now small, the ladder starts low (**250→128k**)
+to *bracket* it (low rungs are instant in the frame; high rungs pin E∞).
+
+```sh
+# submit (ssh hep-submit), then combine on the laptop when done
+cd /nfs_scratch/bfriend3/NuQu/NuQu && git pull && cd hpc/detsvsL
+sh submit_detsvsL_campaign.sh 16 "2 3 4"          # 48 shards; prints CAMPAIGN id
+# monitor:  condor_q <cluster> -af JobStatus | sort | uniq -c
+# retrieve + combine (laptop):
+rsync -av hep:/nfs_scratch/bfriend3/NuQu/NuQu/hpc/detsvsL/campaign_<id>/shards/ /tmp/sh/
+python -m misc.combine_detsvsL --shard-dir /tmp/sh --label detsvsL_hpc_<id>
+```
+
+Shards write per-`(L,seed)` JSON directly to `campaign_<id>/shards/` on `/nfs_scratch`
+(nothing transfers back); a shared uv cache/interpreter (`.uvcache`/`.uvpy`, in-project)
+means only the first shard downloads. If a first-wave shard fails on a cold-cache race,
+just resubmit it — combine tolerates missing seeds (min over whatever completed).
 
 **`test`** = L=2 1D, cores→400 (~30s; a full provisioning + build + solve shakedown).
 **`full`** = L=2,3 dilute 3D, N_f=4, **large-core rungs 8k→64k** (×2/rung), `n_runs=4`,

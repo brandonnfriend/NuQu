@@ -186,8 +186,15 @@ def build_from_eft(L, dim, n_b, params=None, transform="bare", frame_params=None
     if transform == "gaussian":
         # frame_params={"bogoliubov": True} -> full multi-mode Bogoliubov (STEP 2b,
         # also kills cross-mode pairs); else the per-mode squeeze (STEP 1/2).
+        # With NO explicit "r" (or {"auto": True}) the per-mode ANALYTIC squeeze r* is
+        # computed from H's boson quadratic form and applied with the COMPACTING sign
+        # (-r*): the closed-form, ED-free default the frame studies use (misc/run_frame_*).
         if fp.pop("bogoliubov", False):
             return frame.multimode_squeeze_terms(H, **fp)
+        if fp.pop("auto", False) or "r" not in fp:
+            fp.pop("phi", None)
+            r, phi = frame.analytic_squeeze(H)
+            return frame.squeeze_terms(H, -r, phi, **fp)
         return frame.squeeze_terms(H, **fp)
     if transform == "LF":
         # Lang-Firsov polaron frame (STEP 3). frame_params: lambdas (required; scalar

@@ -37,3 +37,10 @@ classical/trimci/backend_fork/*.so
 # block2 DMRG scratch (default + ours)
 nodex/
 .block2_scratch/
+
+# HPC dets-vs-L campaign artifacts (outputs, uv cache, sandboxes) — keep tracked scripts, ignore runtime
+hpc/detsvsL/campaign_*/
+hpc/detsvsL/rundir-*/
+hpc/detsvsL/probe/
+hpc/detsvsL/.uvcache/
+hpc/detsvsL/.uvpy/

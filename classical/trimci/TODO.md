@@ -3,6 +3,26 @@
 Working notes for getting a TrimCI ground-state solve running on the dynamical-pion
 EFT. Sketch, not a contract — reorder freely.
 
+## 2026-07-24 — parallel dets-vs-L campaign + frame-in-runs (production harness)
+The production dets-vs-L run: **parallelise the n_runs ensemble across Condor jobs** —
+1 shard = 1 (L, seed), n_runs=1, full ladder (`misc/run_detsvsL_shard.py`,
+`hpc/detsvsL/run_detsvsL_shard.sh` + `submit_detsvsL_campaign.sh`). Wall-clock = slowest
+single shard (~few h) not the ~50 h serial sum; keeps independent random inits (no warm
+starts). Combine (`misc/combine_detsvsL.py`) takes the min over seeds per (L, core) →
+per-L reference (report_energies) → N*(eps) → exponent fit, output matching
+`dets_vs_L_at_fixed_accuracy` (plot + combine-with-laptop compatible). Tolerates missing
+seeds. Default grid 3 L × 16 seeds = 48 shards.
+- **Frame in the runs (always-on):** `build_from_eft(transform="gaussian")` now
+  AUTO-applies the per-mode analytic squeeze with the compacting sign (`-r*`, closed-form,
+  no ED) when no explicit `r` is given — the pattern every `misc/run_frame_*` used
+  by hand. **Measured win (L=2 3D):** framed@1000 dets beats bare@16000 (>16× det
+  compaction), ~⅓ the terms (~3-10× faster/solve), converged by ~4-16k where bare is
+  still falling. ⇒ the study should PIN the reference (and give a real exponent γ) at
+  modest cores, where the bare basis only ever gave lower bounds. Because N* is now small,
+  the shard ladder starts low (250→128k) to BRACKET it.
+- Shards self-provision (shared uv cache/interpreter `.uvcache`/`.uvpy` in-project, so only
+  the first downloads); write per-(L,seed) JSON to `campaign_<id>/shards/` on /nfs_scratch.
+
 ## 2026-07-23 — first HPC job package (dets-vs-L) + None-reference crash fix
 The Phase-C dets-vs-L exponent is the top classical HPC priority (needs cores past the
 laptop's ~16k, where every point is still only a bound). Packaged the first real cluster
