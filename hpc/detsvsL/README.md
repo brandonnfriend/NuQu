@@ -62,9 +62,11 @@ python -m misc.combine_detsvsL --shard-dir /tmp/sh --label detsvsL_hpc_<id>
 ```
 
 Shards write per-`(L,seed)` JSON directly to `campaign_<id>/shards/` on `/nfs_scratch`
-(nothing transfers back); a shared uv cache/interpreter (`.uvcache`/`.uvpy`, in-project)
-means only the first shard downloads. If a first-wave shard fails on a cold-cache race,
-just resubmit it — combine tolerates missing seeds (min over whatever completed).
+(nothing transfers back). Each shard provisions its **own** env in its sandbox — a
+shared NFS uv dir corrupts the managed interpreter under many-way concurrent cold
+`uv python install` (NFS locking is too weak), so isolation beats deduplication here.
+If a shard fails, just resubmit — combine tolerates missing seeds (min over whatever
+completed).
 
 **`test`** = L=2 1D, cores→400 (~30s; a full provisioning + build + solve shakedown).
 **`full`** = L=2,3 dilute 3D, N_f=4, **large-core rungs 8k→64k** (×2/rung), `n_runs=4`,

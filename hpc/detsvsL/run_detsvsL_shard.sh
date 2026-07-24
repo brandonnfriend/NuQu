@@ -17,9 +17,12 @@ cpus="${_CONDOR_REQUEST_CPUS:-2}"
 export OMP_NUM_THREADS="$cpus" MKL_NUM_THREADS="$cpus" OPENBLAS_NUM_THREADS="$cpus" \
        BLIS_NUM_THREADS="$cpus" NUMEXPR_NUM_THREADS="$cpus" MPLBACKEND=Agg
 export HOME="$SANDBOX" UV_INSTALL_DIR="$SANDBOX/uvbin"
-# SHARED cache + interpreter (persistent, in-project) — first shard populates, rest reuse
-export UV_CACHE_DIR="$REPO/hpc/detsvsL/.uvcache"
-export UV_PYTHON_INSTALL_DIR="$REPO/hpc/detsvsL/.uvpy"
+# Per-shard cache + interpreter IN THE SANDBOX (full isolation). A shared /nfs_scratch
+# dir corrupts under many-way concurrent cold `uv python install` (NFS locking is too
+# weak): the shared interpreter's _sysconfigdata gets truncated and every pip install
+# then fails. Each shard downloads its own (~30-60s); reliable > deduplicated.
+export UV_CACHE_DIR="$SANDBOX/uvcache"
+export UV_PYTHON_INSTALL_DIR="$SANDBOX/uvpy"
 export PATH="$UV_INSTALL_DIR:$SANDBOX/.local/bin:$PATH"
 
 echo "[shard] host=$(hostname) L=$L seed=$SEED campaign=$CAMPAIGN cpus=$cpus"
