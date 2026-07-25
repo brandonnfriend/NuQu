@@ -20,7 +20,9 @@ mkdir -p "$DIR/logs"
 # per-shard list: "L seed mem" (memory grows with L so small-L shards pack densely)
 : > "$DIR/shards.txt"
 for L in $LLIST; do
-  case "$L" in 2) MEM=8G ;; 3) MEM=16G ;; 4) MEM=32G ;; *) MEM=24G ;; esac
+  # L=4/128k spikes past 32G on ~1/5 of seeds (deep-core PT2 external space on 64 sites);
+  # 48G covers the outliers. A rare persistent spike: condor_qedit <c> RequestMemory 65536 + release.
+  case "$L" in 2) MEM=8G ;; 3) MEM=16G ;; 4) MEM=48G ;; *) MEM=24G ;; esac
   s=0
   while [ "$s" -lt "$NSEEDS" ]; do
     echo "$L $s $MEM" >> "$DIR/shards.txt"
