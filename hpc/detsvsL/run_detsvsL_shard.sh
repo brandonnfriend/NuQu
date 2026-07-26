@@ -1,6 +1,6 @@
 #!/bin/sh
 # Condor executable for ONE (L, seed) shard of the parallel dets-vs-L campaign.
-# args: $1=L  $2=seed  $3=campaign_id
+# args: $1=L  $2=seed  $3=campaign_id  $4=max_core (optional, default 128000)
 #
 # Self-provisions in the Condor sandbox, but shares uv's cache + managed CPython on
 # /nfs_scratch (within the project) across shards, so only the first shard downloads
@@ -8,7 +8,7 @@
 # the shared campaign dir (nothing transfers back). Runs in the compacting per-mode
 # squeeze frame (transform=gaussian). Combine with misc/combine_detsvsL.py afterward.
 set -u
-L="$1"; SEED="$2"; CAMPAIGN="$3"
+L="$1"; SEED="$2"; CAMPAIGN="$3"; MAXCORE="${4:-128000}"
 REPO=/nfs_scratch/bfriend3/NuQu/NuQu
 SANDBOX="$(pwd)"
 [ -r "$REPO/misc/run_detsvsL_shard.py" ] || { echo "ERROR: cannot read repo at $REPO" >&2; exit 1; }
@@ -25,7 +25,7 @@ export UV_CACHE_DIR="$SANDBOX/uvcache"
 export UV_PYTHON_INSTALL_DIR="$SANDBOX/uvpy"
 export PATH="$UV_INSTALL_DIR:$SANDBOX/.local/bin:$PATH"
 
-echo "[shard] host=$(hostname) L=$L seed=$SEED campaign=$CAMPAIGN cpus=$cpus"
+echo "[shard] host=$(hostname) L=$L seed=$SEED campaign=$CAMPAIGN cpus=$cpus max_core=$MAXCORE"
 curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null 2>&1 || { echo "ERROR: uv install failed" >&2; exit 1; }
 command -v uv >/dev/null 2>&1 || { echo "ERROR: uv not on PATH" >&2; exit 1; }
 uv python install 3.10 >/dev/null 2>&1
@@ -47,8 +47,10 @@ c++ -O3 -Wall -shared -std=c++17 -fPIC -I"$PYBIND_INC" -I"$PY_INC" \
 OUTDIR="$REPO/hpc/detsvsL/campaign_${CAMPAIGN}/shards"
 mkdir -p "$OUTDIR"
 export PYTHONPATH="$SANDBOX:$REPO"
+# n-rungs 11 so ladder_start=250 x2^k reaches 256k (250..256000); max-core caps per L.
 "$PY" -m misc.run_detsvsL_shard --L "$L" --seed "$SEED" --dim 3 --A 1 --n_b 2 \
-    --transform gaussian --out "$OUTDIR/L${L}_s${SEED}.json"
+    --transform gaussian --ladder-start 250 --n-rungs 11 --max-core "$MAXCORE" \
+    --out "$OUTDIR/L${L}_s${SEED}.json"
 status=$?
 echo "[shard] done status=$status -> $OUTDIR/L${L}_s${SEED}.json"
 exit "$status"

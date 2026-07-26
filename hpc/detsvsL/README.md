@@ -38,8 +38,11 @@ sandbox and are discarded; only the small **rundir** (JSON + PNG + log) transfer
 ## Production: parallel (L, seed) campaign, in the compacting frame
 
 The n_runs ensemble is parallelised across jobs — **1 shard = 1 (L, seed), n_runs=1,
-full ladder** — so wall-clock is the *single slowest shard* (~L=4 one seed, a few
-hours), not the ~50 h serial sum. Default grid = **3 L × 16 seeds = 48 shards**.
+full ladder** — so wall-clock is the *single slowest shard*, not the ~50 h serial sum.
+Default grid = **4 L (L=2–5) × 16 seeds = 64 shards**. Per-L memory + ladder depth are
+sized in `submit_detsvsL_campaign.sh`: L=2→128k/8G, L=3→256k/48G, L=4→256k/128G,
+L=5→128k/128G (L=5 stays at 128k — it's the load-bearing 4th point and 256k on 125
+sites risks an OOM that would lose the whole shard, which saves only at the end).
 Combine takes the **min over seeds per (L, core)** to reconstruct the ensemble, then
 extrapolates and fits — identical result to n_runs=16 in-process, and it keeps the
 independent-random-init requirement (each seed is its own job, no warm starts).
@@ -54,7 +57,7 @@ to *bracket* it (low rungs are instant in the frame; high rungs pin E∞).
 ```sh
 # submit (ssh hep-submit), then combine on the laptop when done
 cd /nfs_scratch/bfriend3/NuQu/NuQu && git pull && cd hpc/detsvsL
-sh submit_detsvsL_campaign.sh 16 "2 3 4"          # 48 shards; prints CAMPAIGN id
+sh submit_detsvsL_campaign.sh 16 "2 3 4 5"        # 64 shards; prints CAMPAIGN id
 # monitor:  condor_q <cluster> -af JobStatus | sort | uniq -c
 # retrieve + combine (laptop):
 rsync -av hep:/nfs_scratch/bfriend3/NuQu/NuQu/hpc/detsvsL/campaign_<id>/shards/ /tmp/sh/
