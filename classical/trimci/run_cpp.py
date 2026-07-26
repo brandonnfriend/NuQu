@@ -514,13 +514,17 @@ def _solve_ladder(H, A, cores, solver, pt2_diag, n_runs=4, seed=0, pt2=True,
 
 def _adaptive_ladder_solve(H, A, ladder_start, n_rungs, solver, pt2_diag,
                            max_core=None, max_rung_seconds=None,
-                           n_runs=4, seed=0, verbose=True):
+                           n_runs=4, seed=0, verbose=True, on_rung=None):
     """Geometric core ladder (ladder_start x2 each rung) with LAPTOP GUARDS: stop
     early once a rung's wall-clock exceeds `max_rung_seconds` (so the next, ~4x
     costlier rung isn't attempted) or the next core would exceed `max_core`. Returns
     the same rung dicts as `_solve_ladder` (PT2 always on), each with an added
     `wall_s`. With both guards None it reproduces `_solve_ladder` over the fixed
-    n_rungs geometric ladder (the backward-compatible default)."""
+    n_rungs geometric ladder (the backward-compatible default).
+
+    `on_rung(rung, res)`, if given, is called after each rung completes (rung dict +
+    the raw GroundStateResult) — used for INCREMENTAL SAVE on deep HPC runs, so a
+    shard that OOMs/times-out at the next rung still keeps every rung it finished."""
     from .pt2 import pt2_from_result
     rungs = []
     r = int(ladder_start)
@@ -540,6 +544,8 @@ def _adaptive_ladder_solve(H, A, ladder_start, n_rungs, solver, pt2_diag,
         if verbose:
             print(f"  core={rung['core']:>6}  E_var={rung['E_var']:12.5f} MeV  "
                   f"dE_PT2={rung['dE_pt2']:+.4f} (n_ext={rung['n_ext']})  [{wall:.1f}s]")
+        if on_rung is not None:
+            on_rung(rung, res)
         if max_rung_seconds is not None and wall > max_rung_seconds:
             if verbose:
                 print(f"  (rung wall {wall:.0f}s > budget {max_rung_seconds:.0f}s "

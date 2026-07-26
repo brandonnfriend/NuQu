@@ -84,6 +84,26 @@ seed-fragility fix) and adds L=4 — edit the `full` branch in `run_detsvsL.sh`.
 > possible without dragging jax/netket onto the cluster — see `backend.cpp_available` /
 > `_diagonalize_arrays_scipy`.
 
+## Deep-dilute (1M) and frame×filling runs — the unified frame shard
+
+Both use `run_frame_shard.sh` → `misc/run_frame_shard.py`, which builds any FRAME
+(`bare | gaussian | coo | gaussian+coo | bogoliubov`; COO = fermionic orbital
+optimization via `frame_workflow._build_frame`), runs the ladder for one seed, and
+**saves incrementally after every rung** (a shard that OOMs/times-out at a deep rung
+keeps everything it finished — the `on_rung` hook in `_adaptive_ladder_solve`).
+
+- **`submit_deep_dilute.sh [n_seeds]`** — Task 1: L=2–5, A=1, gaussian, ladder → **1,024,000**
+  states so each L *certainly converges* (removes the L-dependent extrapolation bias that
+  muddied the 4-point exponent). Per-L RAM up to 640 G (qis ≈ 1 TB); big-L shards stop at
+  the deepest rung they finish.
+- **`submit_frame_filling.sh [filling] [n_seeds] "[L list]"`** — Task 2: `{bare, gaussian,
+  coo, gaussian+coo} × L × seeds` at fixed **filling** (A = filling·sites, dense fermion
+  sector). Tests whether a **fermionic** frame (COO) helps where boson squeezing can't —
+  the strong-interaction regime blocked at laptop sizes.
+
+Combine is frame-aware: `python -m misc.combine_detsvsL --shard-dir <dir> [--by-frame] --label <l>`
+(one result per frame with `--by-frame`), then `misc/analyze_detsvsL.py` per frame.
+
 ## Workflow
 
 Keep the checkout current, then submit — everything else is on the node:
