@@ -6,8 +6,8 @@
 #
 # Run from $REPO/hpc/detsvsL/ on ssh hep-submit:  sh submit_deep_dilute.sh [n_seeds]
 set -eu
-NSEEDS="${1:-16}"
-LLIST="2 3 4 5"
+NSEEDS="${1:-4}"   # grow mode does a 64-seed Phase-0 ensemble PER shard; few outer seeds
+LLIST="${2:-2 3 4 5}"
 CAMPAIGN="$(date +%Y%m%d-%H%M%S)"
 DIR="campaign_${CAMPAIGN}"
 mkdir -p "$DIR/logs"

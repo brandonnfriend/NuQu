@@ -26,7 +26,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from classical.trimci import build_from_eft, frame_workflow, frame
-from classical.trimci.run_cpp import _adaptive_ladder_solve, _pick_solver
+from classical.trimci.run_cpp import _adaptive_ladder_solve, _pick_solver, growing_ladder
 
 
 def _mean_occupation(res, n_bos):
@@ -51,18 +51,25 @@ def main():
     ap.add_argument("--dim", type=int, default=3)
     ap.add_argument("--n_b", type=int, default=2)
     ap.add_argument("--frame", default="gaussian",
-                    help="bare | gaussian | coo | gaussian+coo | bogoliubov")
+                    help="bare | gaussian | coo | gaussian+coo | lf | gaussian+lf | "
+                         "gaussian+coo+lf | bogoliubov")
     ap.add_argument("--A", type=int, default=1, help="nucleon count (dilute)")
     ap.add_argument("--filling", type=float, default=None,
                     help="if set, A = round(filling * sites) (overrides --A)")
-    ap.add_argument("--ladder-start", type=int, default=250)
-    ap.add_argument("--n-rungs", type=int, default=13, help="250 x2^12 -> 1,024,000")
+    ap.add_argument("--ladder-mode", default="grow", choices=["grow", "independent"],
+                    help="'grow' = Phase-0 heavy ensemble then warm-start growth (default); "
+                         "'independent' = the old from-scratch solve per rung")
+    ap.add_argument("--ladder-start", type=int, default=1000,
+                    help="smallest core = the Phase-0 ensemble core (grow mode)")
+    ap.add_argument("--n-rungs", type=int, default=11, help="1000 x2^10 -> 1,024,000")
     ap.add_argument("--max-core", type=int, default=1024000)
     ap.add_argument("--max-rung-seconds", type=float, default=14400.0, help="4h/rung cap")
-    # COO orbital-optimization (Phase-0) knobs — ignored by the analytic boson frames
-    ap.add_argument("--phase0-core", type=int, default=2000)
-    ap.add_argument("--phase0-runs", type=int, default=8)
-    ap.add_argument("--orbopt-cycles", type=int, default=8)
+    ap.add_argument("--phase0-runs", type=int, default=64,
+                    help="Phase-0 ensemble seeds (heavy small-core search; grow mode)")
+    # frame-optimization (COO orbopt / LF displacement) knobs
+    ap.add_argument("--phase0-core", type=int, default=2000, help="frame-opt core")
+    ap.add_argument("--frame-runs", type=int, default=16, help="COO orbopt num_runs")
+    ap.add_argument("--orbopt-cycles", type=int, default=10)
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
 
@@ -73,29 +80,39 @@ def main():
     # bare H, then the frame
     Hbare = build_from_eft(args.L, args.dim, args.n_b, transform="bare")
     solver, pt2_diag, _ = _pick_solver(arrays=True)
-    if args.frame in ("lf", "gaussian+lf"):
-        # projector-conditioned Lang-Firsov: the polaron displacement that removes the
-        # LINEAR fermion-boson coupling (H_AV), variationally optimized via selected-CI
-        # (scales past ED). "gaussian+lf" squeezes the bosons FIRST, then applies LF.
+    fr = args.frame
+    if fr in ("lf", "gaussian+lf", "gaussian+coo+lf"):
+        # Lang-Firsov (polaron) frames: projector-conditioned displacement that removes
+        # the LINEAR fermion-boson coupling H_AV, amplitude optimized via selected-CI.
+        # squeeze the bosons FIRST (all but pure "lf"); "+coo" then rotates the fermion
+        # orbitals on the squeezed+displaced H -> all three transforms stacked.
         Hb = Hbare
-        combined = (args.frame == "gaussian+lf")
-        if combined:
+        if fr != "lf":
             r, phi = frame.analytic_squeeze(Hbare)
             Hb = frame.squeeze_terms(Hbare, -r, phi)
         best = frame.optimize_displacement(Hb, A, core=args.phase0_core, seed=args.seed)
-        H_frame = frame.displace_terms(Hb, lambdas=best["scale"], gen=best["gen"])
-        finfo = {"method": "projector-LF" + (" (squeeze+polaron)" if combined else " (polaron)"),
-                 "lf_scale": best["scale"], "lf_opt_energy": best["energy"]}
+        Hlf = frame.displace_terms(Hb, lambdas=best["scale"], gen=best["gen"])
+        if fr == "gaussian+coo+lf":
+            oo = frame_workflow.coo_orbopt(Hlf, A, core=args.phase0_core,
+                                           num_runs=args.frame_runs, cycles=args.orbopt_cycles,
+                                           seed=args.seed, solve=solver)
+            H_frame = oo["H_frame"]
+            method = "squeeze + projector-LF + COO (all three)"
+        else:
+            H_frame = Hlf
+            method = "projector-LF" + (" (squeeze+polaron)" if fr == "gaussian+lf" else " (polaron)")
+        finfo = {"method": method, "lf_scale": best["scale"]}
     else:
         H_frame, finfo = frame_workflow._build_frame(
-            Hbare, A, args.frame, phase0_core=args.phase0_core, phase0_runs=args.phase0_runs,
+            Hbare, A, fr, phase0_core=args.phase0_core, phase0_runs=args.frame_runs,
             orbopt_cycles=args.orbopt_cycles, seed=args.seed, verbose=True, solve=solver)
 
     out = {
         "kind": "frame_shard", "L": args.L, "dim": args.dim, "A": A,
         "filling": args.filling, "frame": args.frame, "seed": args.seed,
         "n_b": args.n_b, "N_f": H_frame.N_f, "sites": sites,
-        "n_terms": len(H_frame.terms),
+        "n_terms": len(H_frame.terms), "ladder_mode": args.ladder_mode,
+        "phase0_runs": args.phase0_runs,
         "frame_info": {k: v for k, v in finfo.items()
                        if isinstance(v, (str, int, float, bool))},
         "rungs": [], "done": False,
@@ -111,17 +128,26 @@ def main():
     save()  # header immediately: even a shard that dies in Phase-0 leaves a record
 
     def on_rung(rung, res):
-        r = {k: rung[k] for k in ("core", "E_var", "dE_pt2", "E_pt2", "n_ext", "wall_s")
+        r = {k: rung[k] for k in ("core", "E_var", "dE_pt2", "E_pt2", "n_ext", "wall_s", "phase")
              if k in rung}
         r["mean_occ"] = _mean_occupation(res, H_frame.n_bos_modes)
         out["rungs"].append(r)
         out["wall_s"] = time.time() - t0
         save()   # INCREMENTAL: survive an OOM/timeout on the next (deeper) rung
 
-    _adaptive_ladder_solve(
-        H_frame, A, args.ladder_start, args.n_rungs, solver, pt2_diag,
-        max_core=args.max_core, max_rung_seconds=args.max_rung_seconds,
-        n_runs=1, seed=args.seed, verbose=True, on_rung=on_rung)
+    if args.ladder_mode == "grow":
+        rungs, r = [], args.ladder_start
+        while r <= args.max_core:
+            rungs.append(r)
+            r *= 2
+        growing_ladder(H_frame, A, rungs, phase0_runs=args.phase0_runs, seed=args.seed,
+                       pt2_diag=pt2_diag, verbose=True, on_rung=on_rung,
+                       max_rung_seconds=args.max_rung_seconds)
+    else:
+        _adaptive_ladder_solve(
+            H_frame, A, args.ladder_start, args.n_rungs, solver, pt2_diag,
+            max_core=args.max_core, max_rung_seconds=args.max_rung_seconds,
+            n_runs=1, seed=args.seed, verbose=True, on_rung=on_rung)
 
     out["done"] = True
     out["wall_s"] = time.time() - t0

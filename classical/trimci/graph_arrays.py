@@ -127,7 +127,7 @@ def ground_state_arrays(H, n_elec, n_dets=200, n_init=20, pool_factor=3,
                         num_groups=5, local_keep_ratio=4, max_rounds=12,
                         tol=1e-9, seed=None, boson_init_mean=0.5, verbose=False,
                         max_n_dets=None, conv_tol_rel=None, conv_patience=2,
-                        target_gs_rel=None,
+                        target_gs_rel=None, initial_core=None,
                         # accepted + ignored for drop-in parity with the object
                         # path (which threads diag_fn/expand_fn hooks):
                         diag_fn=None, expand_fn=None):
@@ -148,11 +148,18 @@ def ground_state_arrays(H, n_elec, n_dets=200, n_init=20, pool_factor=3,
         max_rounds = max(max_rounds, need)
 
     rng = np.random.default_rng(seed)
-    core_ferm, core_bos = random_core_arrays(H, n_elec, n_init, rng,
-                                             boson_init_mean=boson_init_mean)
+    if initial_core is not None:
+        # WARM START: grow from a given (ferm, bos) core (the previous rung's core)
+        # instead of a fresh random seed — the "grow, don't redo" ladder. `target`
+        # then continues the x1.5 ramp from the warm core size, not from n_init.
+        core_ferm = np.ascontiguousarray(initial_core[0], dtype=np.uint64)
+        core_bos = np.ascontiguousarray(initial_core[1], dtype=np.uint16)
+    else:
+        core_ferm, core_bos = random_core_arrays(H, n_elec, n_init, rng,
+                                                 boson_init_mean=boson_init_mean)
     energy, coeffs = cpp_diagonalize_matfree_arrays(H, core_ferm, core_bos)
     history = [(core_ferm.shape[0], energy)]
-    target = max(n_init, 1)
+    target = max(n_init, core_ferm.shape[0])
     sector = _sector_size(H, n_elec)
     below = 0
     cap_round = None

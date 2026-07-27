@@ -42,9 +42,10 @@ export PYTHONPATH="$SANDBOX:$REPO"
 FILL_ARG=""
 [ "$FILLING" != "none" ] && FILL_ARG="--filling $FILLING"
 OUT="$OUTDIR/${FRAME}_L${L}_s${SEED}.json"
+# grow mode: Phase-0 heavy ensemble (64 seeds) at 1000, then warm-start growth to MAXCORE.
 "$PY" -m misc.run_frame_shard --L "$L" --seed "$SEED" --dim 3 --n_b 2 --frame "$FRAME" \
-    --A "$A" $FILL_ARG --ladder-start 250 --n-rungs 13 --max-core "$MAXCORE" \
-    --max-rung-seconds 14400 --out "$OUT"
+    --A "$A" $FILL_ARG --ladder-mode grow --ladder-start 1000 --max-core "$MAXCORE" \
+    --phase0-runs 64 --max-rung-seconds 14400 --out "$OUT"
 status=$?
 echo "[shard] done status=$status -> $OUT"
 exit "$status"

@@ -9,12 +9,12 @@
 #   sh submit_frame_filling.sh [filling] [n_seeds] "[L list]"     (default 1.0, 8, "2 3")
 set -eu
 FILLING="${1:-1.0}"
-NSEEDS="${2:-8}"
+NSEEDS="${2:-4}"   # grow mode does a 64-seed Phase-0 ensemble PER shard, so few outer seeds
 LLIST="${3:-2 3}"
 # full frame set: bare, boson-squeeze, fermionic-COO, squeeze+COO, Lang-Firsov polaron
-# (targets the fermion-boson coupling H_AV), and squeeze+LF. Pass $4 to run a subset,
-# e.g. "lf gaussian+lf" to add the LF frames to an existing comparison.
-FRAMES="${4:-bare gaussian coo gaussian+coo lf gaussian+lf}"
+# (targets the fermion-boson coupling H_AV), squeeze+LF, and all-three squeeze+COO+LF.
+# Pass $4 to run a subset, e.g. "gaussian+coo+lf" to add one frame to an existing set.
+FRAMES="${4:-bare gaussian coo gaussian+coo lf gaussian+lf gaussian+coo+lf}"
 CAMPAIGN="$(date +%Y%m%d-%H%M%S)"
 DIR="campaign_${CAMPAIGN}"
 mkdir -p "$DIR/logs"

@@ -555,6 +555,56 @@ def _adaptive_ladder_solve(H, A, ladder_start, n_rungs, solver, pt2_diag,
     return rungs
 
 
+def growing_ladder(H, A, rungs, phase0_runs=64, seed=0, pt2_diag=None,
+                   verbose=True, on_rung=None, max_rung_seconds=None):
+    """The 'grow, don't redo' core ladder (TrimCI / COO 3-phase workflow):
+
+      Phase 0 — heavy ENSEMBLE at the smallest rung: `phase0_runs` independent random
+        inits (e.g. 64-100), keep the best. Cheap at small core, and a better variational
+        energy at small core is a strong predictor of the large-core result (the frame
+        is already optimized upstream), so we spend the search budget HERE.
+      Phase 1/2 — GROW the best core through the remaining rungs, WARM-STARTING each rung
+        from the previous one's core (no from-scratch redo), a single run per rung.
+
+    PT2 + checkpoint at every rung; `on_rung(rung, res)` fires per rung for incremental
+    save. Far cheaper than independent per-rung solves (each large rung adds only the
+    delta) and reaches the large cores that actually converge. Tradeoff: it replaces the
+    per-rung ensemble with a Phase-0 ensemble + growth — reliable when the frame makes
+    convergence smooth (verified for the squeeze frame); the old independent ladder
+    (`_adaptive_ladder_solve`) stays available as the comparison switch."""
+    from .pt2 import pt2_from_result
+    from .graph_arrays import ground_state_arrays, ground_state_ensemble_arrays
+    rungs = sorted(set(int(r) for r in rungs))
+    core, out = None, []
+    for i, r in enumerate(rungs):
+        t = time.time()
+        if i == 0:                                   # Phase 0: heavy ensemble
+            res = ground_state_ensemble_arrays(H, n_elec=A, n_runs=phase0_runs,
+                                               n_dets=r, seed=seed)
+        else:                                        # grow, warm-started from prev core
+            res = ground_state_arrays(H, n_elec=A, n_dets=r, initial_core=core,
+                                      seed=seed + i)
+        wall = time.time() - t
+        core = (res.ferm_arr, res.bos_arr)
+        pr = pt2_from_result(H, res, diag_fn=pt2_diag)
+        rung = {"core": int(res.n_dets), "E_var": float(pr["E_var"]),
+                "dE_pt2": float(pr["dE_pt2"]),
+                "E_pt2": float(pr["E_var"]) + float(pr["dE_pt2"]),
+                "n_ext": pr["n_ext"], "wall_s": wall,
+                "phase": "0-ensemble" if i == 0 else "grow"}
+        out.append(rung)
+        if verbose:
+            print(f"  [{rung['phase']:>10}] core={rung['core']:>7}  "
+                  f"E_var={rung['E_var']:12.5f} MeV  dE_PT2={rung['dE_pt2']:+.4f}  [{wall:.0f}s]")
+        if on_rung is not None:
+            on_rung(rung, res)
+        if max_rung_seconds is not None and wall > max_rung_seconds:
+            if verbose:
+                print(f"  (rung wall {wall:.0f}s > {max_rung_seconds:.0f}s — stop growing)")
+            break
+    return out
+
+
 def solve_and_report(L=2, dim=1, A=1, n_b=2, N_f=None,
                      cores=(250, 500, 1000, 2000), n_runs=4, seed=0,
                      transform="bare", frame_params=None, pt2=True,
