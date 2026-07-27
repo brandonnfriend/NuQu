@@ -25,7 +25,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from classical.trimci import build_from_eft, frame_workflow
+from classical.trimci import build_from_eft, frame_workflow, frame
 from classical.trimci.run_cpp import _adaptive_ladder_solve, _pick_solver
 
 
@@ -70,12 +70,26 @@ def main():
     A = max(1, round(args.filling * sites)) if args.filling is not None else args.A
     t0 = time.time()
 
-    # bare H, then the frame (COO does an iterative orbopt using the same solver)
+    # bare H, then the frame
     Hbare = build_from_eft(args.L, args.dim, args.n_b, transform="bare")
     solver, pt2_diag, _ = _pick_solver(arrays=True)
-    H_frame, finfo = frame_workflow._build_frame(
-        Hbare, A, args.frame, phase0_core=args.phase0_core, phase0_runs=args.phase0_runs,
-        orbopt_cycles=args.orbopt_cycles, seed=args.seed, verbose=True, solve=solver)
+    if args.frame in ("lf", "gaussian+lf"):
+        # projector-conditioned Lang-Firsov: the polaron displacement that removes the
+        # LINEAR fermion-boson coupling (H_AV), variationally optimized via selected-CI
+        # (scales past ED). "gaussian+lf" squeezes the bosons FIRST, then applies LF.
+        Hb = Hbare
+        combined = (args.frame == "gaussian+lf")
+        if combined:
+            r, phi = frame.analytic_squeeze(Hbare)
+            Hb = frame.squeeze_terms(Hbare, -r, phi)
+        best = frame.optimize_displacement(Hb, A, core=args.phase0_core, seed=args.seed)
+        H_frame = frame.displace_terms(Hb, lambdas=best["scale"], gen=best["gen"])
+        finfo = {"method": "projector-LF" + (" (squeeze+polaron)" if combined else " (polaron)"),
+                 "lf_scale": best["scale"], "lf_opt_energy": best["energy"]}
+    else:
+        H_frame, finfo = frame_workflow._build_frame(
+            Hbare, A, args.frame, phase0_core=args.phase0_core, phase0_runs=args.phase0_runs,
+            orbopt_cycles=args.orbopt_cycles, seed=args.seed, verbose=True, solve=solver)
 
     out = {
         "kind": "frame_shard", "L": args.L, "dim": args.dim, "A": A,

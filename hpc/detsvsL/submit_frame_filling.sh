@@ -11,7 +11,10 @@ set -eu
 FILLING="${1:-1.0}"
 NSEEDS="${2:-8}"
 LLIST="${3:-2 3}"
-FRAMES="bare gaussian coo gaussian+coo"
+# full frame set: bare, boson-squeeze, fermionic-COO, squeeze+COO, Lang-Firsov polaron
+# (targets the fermion-boson coupling H_AV), and squeeze+LF. Pass $4 to run a subset,
+# e.g. "lf gaussian+lf" to add the LF frames to an existing comparison.
+FRAMES="${4:-bare gaussian coo gaussian+coo lf gaussian+lf}"
 CAMPAIGN="$(date +%Y%m%d-%H%M%S)"
 DIR="campaign_${CAMPAIGN}"
 mkdir -p "$DIR/logs"
@@ -22,7 +25,7 @@ mkdir -p "$DIR/logs"
 : > "$DIR/shards.txt"
 for FR in $FRAMES; do
   for L in $LLIST; do
-    case "$L" in 2) MEM=64G ;; 3) MEM=256G ;; 4) MEM=640G ;; *) MEM=128G ;; esac
+    case "$L" in 2) MEM=64G ;; 3) MEM=384G ;; 4) MEM=640G ;; *) MEM=128G ;; esac
     s=0
     while [ "$s" -lt "$NSEEDS" ]; do echo "$FR $L $s $MEM" >> "$DIR/shards.txt"; s=$((s + 1)); done
   done
