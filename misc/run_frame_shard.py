@@ -26,7 +26,8 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from classical.trimci import build_from_eft, frame_workflow, frame
-from classical.trimci.run_cpp import _adaptive_ladder_solve, _pick_solver, growing_ladder
+from classical.trimci.run_cpp import (_adaptive_ladder_solve, _pick_solver,
+                                      three_phase_growing_run)
 
 
 def _mean_occupation(res, n_bos):
@@ -77,41 +78,23 @@ def main():
     A = max(1, round(args.filling * sites)) if args.filling is not None else args.A
     t0 = time.time()
 
-    # bare H, then the frame
+    # bare H. The FRAME (any mix of squeeze/LF/COO) is a SINGLE optimization operation fit
+    # INSIDE the 3-phase run (Phase 0 discovery + Phase 1 co-evolution); nothing is
+    # pre-applied here. A run is just defined by WHICH transforms its frame contains.
     Hbare = build_from_eft(args.L, args.dim, args.n_b, transform="bare")
     solver, pt2_diag, _ = _pick_solver(arrays=True)
     fr = args.frame
-    if fr in ("lf", "gaussian+lf", "gaussian+coo+lf"):
-        # Lang-Firsov (polaron) frames: projector-conditioned displacement that removes
-        # the LINEAR fermion-boson coupling H_AV, amplitude optimized via selected-CI.
-        # squeeze the bosons FIRST (all but pure "lf"); "+coo" then rotates the fermion
-        # orbitals on the squeezed+displaced H -> all three transforms stacked.
-        Hb = Hbare
-        if fr != "lf":
-            r, phi = frame.analytic_squeeze(Hbare)
-            Hb = frame.squeeze_terms(Hbare, -r, phi)
-        best = frame.optimize_displacement(Hb, A, core=args.phase0_core, seed=args.seed)
-        Hlf = frame.displace_terms(Hb, lambdas=best["scale"], gen=best["gen"])
-        if fr == "gaussian+coo+lf":
-            oo = frame_workflow.coo_orbopt(Hlf, A, core=args.phase0_core,
-                                           num_runs=args.frame_runs, cycles=args.orbopt_cycles,
-                                           seed=args.seed, solve=solver)
-            H_frame = oo["H_frame"]
-            method = "squeeze + projector-LF + COO (all three)"
-        else:
-            H_frame = Hlf
-            method = "projector-LF" + (" (squeeze+polaron)" if fr == "gaussian+lf" else " (polaron)")
-        finfo = {"method": method, "lf_scale": best["scale"]}
-    else:
-        H_frame, finfo = frame_workflow._build_frame(
-            Hbare, A, fr, phase0_core=args.phase0_core, phase0_runs=args.frame_runs,
-            orbopt_cycles=args.orbopt_cycles, seed=args.seed, verbose=True, solve=solver)
+    has_gaussian, has_lf, has_coo = "gaussian" in fr, "lf" in fr, "coo" in fr
+    finfo = {"has_gaussian": has_gaussian, "has_lf": has_lf, "has_coo": has_coo,
+             "method": "bare" if fr == "bare" else " + ".join(
+                 x for x in ("squeeze" if has_gaussian else "",
+                             "projector-LF" if has_lf else "", "COO" if has_coo else "") if x)}
 
     out = {
         "kind": "frame_shard", "L": args.L, "dim": args.dim, "A": A,
         "filling": args.filling, "frame": args.frame, "seed": args.seed,
-        "n_b": args.n_b, "N_f": H_frame.N_f, "sites": sites,
-        "n_terms": len(H_frame.terms), "ladder_mode": args.ladder_mode,
+        "n_b": args.n_b, "N_f": Hbare.N_f, "sites": sites,
+        "n_terms": len(Hbare.terms), "ladder_mode": args.ladder_mode,
         "phase0_runs": args.phase0_runs,
         "frame_info": {k: v for k, v in finfo.items()
                        if isinstance(v, (str, int, float, bool))},
@@ -130,22 +113,30 @@ def main():
     def on_rung(rung, res):
         r = {k: rung[k] for k in ("core", "E_var", "dE_pt2", "E_pt2", "n_ext", "wall_s", "phase")
              if k in rung}
-        r["mean_occ"] = _mean_occupation(res, H_frame.n_bos_modes)
+        r["mean_occ"] = _mean_occupation(res, Hbare.n_bos_modes)
         out["rungs"].append(r)
         out["wall_s"] = time.time() - t0
         save()   # INCREMENTAL: survive an OOM/timeout on the next (deeper) rung
 
     if args.ladder_mode == "grow":
-        rungs, r = [], args.ladder_start
+        # Phase 2 rungs = 16k up to max_core (Phase 0 ~1k + Phase 1 2k/4k/8k are internal).
+        p2, r = [], 16000
         while r <= args.max_core:
-            rungs.append(r)
+            p2.append(r)
             r *= 2
-        growing_ladder(H_frame, A, rungs, phase0_runs=args.phase0_runs, seed=args.seed,
-                       pt2_diag=pt2_diag, verbose=True, on_rung=on_rung,
-                       max_rung_seconds=args.max_rung_seconds)
+        three_phase_growing_run(
+            Hbare, A, has_gaussian, has_lf, has_coo, phase0_core=1000,
+            phase0_runs=args.phase0_runs, phase0_cycles=args.orbopt_cycles,
+            phase1_cores=(2000, 4000, 8000), phase1_runs=args.frame_runs, phase1_cycles=3,
+            phase2_rungs=p2, pt2_diag=pt2_diag, seed=args.seed, verbose=True, on_rung=on_rung,
+            max_rung_seconds=args.max_rung_seconds)
     else:
+        # comparison switch: fit the frame ONCE (Phase-0 only) then independent solves
+        Hind, _ = frame_workflow.optimize_frame(
+            Hbare, A, args.phase0_core, has_gaussian=has_gaussian, has_lf=has_lf,
+            has_coo=has_coo, num_runs=args.frame_runs, cycles=args.orbopt_cycles, seed=args.seed)
         _adaptive_ladder_solve(
-            H_frame, A, args.ladder_start, args.n_rungs, solver, pt2_diag,
+            Hind, A, args.ladder_start, args.n_rungs, solver, pt2_diag,
             max_core=args.max_core, max_rung_seconds=args.max_rung_seconds,
             n_runs=1, seed=args.seed, verbose=True, on_rung=on_rung)
 

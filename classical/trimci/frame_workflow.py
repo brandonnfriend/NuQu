@@ -85,6 +85,7 @@ def coo_orbopt(H, n_elec, core=500, num_runs=32, cycles=10, seed=0, margin=0.0,
     res = solve(H_cur, n_elec=n_elec, n_dets=core, seed=seed, n_runs=num_runs)
     E_prev = float(res.energy)
     coeffs, farr, barr = res.coeffs, res.ferm_arr, res.bos_arr
+    accepted_res = res                 # the solved core in the CURRENT (accepted) basis
     occ = None
     history = [{"cycle": 0, "energy": E_prev, "accepted": True}]
     cycles_run = 0
@@ -108,10 +109,39 @@ def coo_orbopt(H, n_elec, core=500, num_runs=32, cycles=10, seed=0, margin=0.0,
             break
         H_cur, E_prev = H_new, E_new
         coeffs, farr, barr = res.coeffs, res.ferm_arr, res.bos_arr
+        accepted_res = res
         R_total = R_total @ R_cyc
         cycles_run = c
     return {"R": R_total, "H_frame": H_cur, "energy": E_prev, "cycles_run": cycles_run,
-            "occ": occ, "history": history}
+            "occ": occ, "history": history, "res": accepted_res}
+
+
+def optimize_frame(H_bare, n_elec, core, has_gaussian=False, has_lf=False, has_coo=False,
+                   num_runs=8, cycles=3, seed=0, solve=None, verbose=False):
+    """ONE frame-optimization step — fit the WHOLE frame (any mix of squeeze / Lang-Firsov
+    polaron / COO orbital rotation) against a determinant space of size `core`. Uniform for
+    every frame; absent components are skipped:
+      squeeze : analytic r* from the boson quadratic form (core-independent);
+      LF      : polaron displacement amplitude, optimized at THIS core;
+      COO     : fermion orbitals, optimized at THIS core (coo_orbopt).
+    Applied identically at Phase 0 (small core) and repeated at each Phase-1 core, so the
+    frame CO-EVOLVES with the growing det space. Returns (H_frame, res) — res is the solved
+    core in the framed basis (for PT2 + warm-starting the next phase)."""
+    if solve is None:
+        solve = _solver(True)
+    H = H_bare
+    if has_gaussian:
+        r, phi = frame.analytic_squeeze(H_bare)
+        H = frame.squeeze_terms(H_bare, -r, phi)
+    if has_lf:
+        best = frame.optimize_displacement(H, n_elec, core=core, seed=seed)
+        H = frame.displace_terms(H, lambdas=best["scale"], gen=best["gen"])
+    if has_coo:
+        oo = coo_orbopt(H, n_elec, core=core, num_runs=num_runs, cycles=cycles,
+                        seed=seed, solve=solve, verbose=verbose)
+        return oo["H_frame"], oo["res"]
+    res = solve(H, n_elec=n_elec, n_dets=core, n_runs=num_runs, seed=seed)
+    return H, res
 
 
 def _build_frame(H, n_elec, frame_spec, phase0_core, phase0_runs, orbopt_cycles,

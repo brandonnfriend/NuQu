@@ -605,6 +605,77 @@ def growing_ladder(H, A, rungs, phase0_runs=64, seed=0, pt2_diag=None,
     return out
 
 
+def three_phase_growing_run(H_bare, A, has_gaussian, has_lf, has_coo, *,
+                            phase0_core=1000, phase0_runs=64, phase0_cycles=10,
+                            phase1_cores=(2000, 4000, 8000), phase1_runs=8, phase1_cycles=3,
+                            phase2_rungs=(), pt2_diag=None, seed=0, verbose=True,
+                            on_rung=None, max_rung_seconds=None):
+    """The TrimCI 3-phase run over a GROWING determinant space, with a SINGLE, uniform
+    frame-optimization operation (whatever mix of squeeze/LF/COO the run uses):
+
+      Phase 0 — DISCOVERY: `optimize_frame` fits the whole frame at a small core with a
+        heavy stochastic search (phase0_runs, and cycles for the iterative parts). This is
+        where the search budget goes (cheap at small core; a good small-core energy predicts
+        the large-core one).
+      Phase 1 — REFINEMENT: grow the det space (phase1_cores) and RE-FIT the same frame at
+        each larger core, so it CO-EVOLVES with the core (each step changes basis -> solved
+        fresh). Only runs when the frame has a core-DEPENDENT part (LF and/or COO); an
+        analytic squeeze is core-independent so there is nothing to refine.
+      Phase 2 — EXPANSION: freeze the frame, WARM-START-grow to the target (phase2_rungs),
+        PT2 at each. Fast (no frame overhead).
+
+    PT2 + `on_rung` checkpoint at EVERY rung; phases are tagged. (The COO piece is the 1-RDM
+    natural-orbital proxy for TrimCI's 2-RDM energy-gradient BFGS orbopt.)"""
+    from .pt2 import pt2_from_result
+    from .graph_arrays import ground_state_arrays
+    from .frame_workflow import optimize_frame
+    out = []
+    fkw = dict(has_gaussian=has_gaussian, has_lf=has_lf, has_coo=has_coo, seed=seed)
+
+    def _checkpoint(H, res, phase, wall):
+        pr = pt2_from_result(H, res, diag_fn=pt2_diag)
+        rung = {"core": int(res.n_dets), "E_var": float(pr["E_var"]),
+                "dE_pt2": float(pr["dE_pt2"]),
+                "E_pt2": float(pr["E_var"]) + float(pr["dE_pt2"]),
+                "n_ext": pr["n_ext"], "wall_s": wall, "phase": phase}
+        out.append(rung)
+        if verbose:
+            print(f"  [{phase:>11}] core={rung['core']:>7}  E_var={rung['E_var']:12.5f} MeV"
+                  f"  dE_PT2={rung['dE_pt2']:+.4f}  [{wall:.0f}s]")
+        if on_rung is not None:
+            on_rung(rung, res)
+        return rung
+
+    t = time.time()                                          # ---- Phase 0: discovery ----
+    H, res = optimize_frame(H_bare, A, phase0_core, num_runs=phase0_runs,
+                            cycles=phase0_cycles, **fkw)
+    _checkpoint(H, res, "0-discovery", time.time() - t)
+    core = (res.ferm_arr, res.bos_arr)
+
+    if has_lf or has_coo:                                    # ---- Phase 1: refine/co-evolve ----
+        for c in phase1_cores:
+            if c <= core[0].shape[0]:
+                continue
+            t = time.time()
+            H, res = optimize_frame(H_bare, A, c, num_runs=phase1_runs,
+                                    cycles=phase1_cycles, **fkw)
+            _checkpoint(H, res, "1-refine", time.time() - t)
+            core = (res.ferm_arr, res.bos_arr)
+
+    for r in sorted(phase2_rungs):                           # ---- Phase 2: freeze + grow ----
+        if r <= core[0].shape[0]:
+            continue
+        t = time.time()
+        res = ground_state_arrays(H, n_elec=A, n_dets=r, initial_core=core, seed=seed)
+        rung = _checkpoint(H, res, "2-grow", time.time() - t)
+        core = (res.ferm_arr, res.bos_arr)
+        if max_rung_seconds is not None and rung["wall_s"] > max_rung_seconds:
+            if verbose:
+                print(f"  (rung wall {rung['wall_s']:.0f}s > {max_rung_seconds:.0f}s — stop)")
+            break
+    return out
+
+
 def solve_and_report(L=2, dim=1, A=1, n_b=2, N_f=None,
                      cores=(250, 500, 1000, 2000), n_runs=4, seed=0,
                      transform="bare", frame_params=None, pt2=True,
