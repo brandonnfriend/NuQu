@@ -1,6 +1,8 @@
 #!/bin/sh
 # Condor executable for ONE frame shard (deep dilute run + frame x filling comparison).
 # args: $1=L $2=seed $3=campaign $4=frame $5=A $6=filling(none|float) $7=max_core
+#       $8=ladder_mode(grow|independent) $9=runs(64) $10=orbopt_cycles(10)
+#       $11=phase0_core(2000) $12=max_rung_seconds(14400)
 #
 # Self-provisions per-sandbox (a shared NFS uv dir corrupts under concurrency), builds
 # the mixed_ci C++ hot path, then runs misc/run_frame_shard.py which builds the frame
@@ -8,6 +10,8 @@
 # saving (a shard that OOMs/times-out at a deep rung keeps everything it finished).
 set -u
 L="$1"; SEED="$2"; CAMPAIGN="$3"; FRAME="$4"; A="$5"; FILLING="$6"; MAXCORE="${7:-1024000}"
+LADDER_MODE="${8:-grow}"; RUNS="${9:-64}"; ORBOPTCYCLES="${10:-10}"
+PHASE0CORE="${11:-2000}"; MAXRUNGSEC="${12:-14400}"
 REPO=/nfs_scratch/bfriend3/NuQu/NuQu
 SANDBOX="$(pwd)"
 [ -r "$REPO/misc/run_frame_shard.py" ] || { echo "ERROR: cannot read repo at $REPO" >&2; exit 1; }
@@ -41,11 +45,22 @@ mkdir -p "$OUTDIR"
 export PYTHONPATH="$SANDBOX:$REPO"
 FILL_ARG=""
 [ "$FILLING" != "none" ] && FILL_ARG="--filling $FILLING"
-OUT="$OUTDIR/${FRAME}_L${L}_s${SEED}.json"
-# grow mode: Phase-0 heavy ensemble (64 seeds) at 1000, then warm-start growth to MAXCORE.
-"$PY" -m misc.run_frame_shard --L "$L" --seed "$SEED" --dim 3 --n_b 2 --frame "$FRAME" \
-    --A "$A" $FILL_ARG --ladder-mode grow --ladder-start 1000 --max-core "$MAXCORE" \
-    --phase0-runs 64 --max-rung-seconds 14400 --out "$OUT"
+FTAG=""; [ "$FILLING" != "none" ] && FTAG="_f${FILLING}"   # keep multi-filling shards distinct
+OUT="$OUTDIR/${FRAME}_L${L}${FTAG}_s${SEED}.json"
+# grow: Phase-0 ensemble + Phase-1 co-evolution + warm-start growth (deep/convergence runs).
+# independent: fit the frame ONCE (cheap; NO Phase-1 co-evolution, which is the 60+ min
+# cost) then grow a FROZEN frame -- for cheap frame COMPARISONS at equal footing.
+if [ "$LADDER_MODE" = "independent" ]; then
+  "$PY" -m misc.run_frame_shard --L "$L" --seed "$SEED" --dim 3 --n_b 2 --frame "$FRAME" \
+      --A "$A" $FILL_ARG --ladder-mode independent --ladder-start 1000 --n-rungs 9 \
+      --max-core "$MAXCORE" --frame-runs "$RUNS" --phase0-core "$PHASE0CORE" \
+      --orbopt-cycles "$ORBOPTCYCLES" --max-rung-seconds "$MAXRUNGSEC" --out "$OUT"
+else
+  "$PY" -m misc.run_frame_shard --L "$L" --seed "$SEED" --dim 3 --n_b 2 --frame "$FRAME" \
+      --A "$A" $FILL_ARG --ladder-mode grow --ladder-start 1000 --max-core "$MAXCORE" \
+      --phase0-runs "$RUNS" --orbopt-cycles "$ORBOPTCYCLES" \
+      --max-rung-seconds "$MAXRUNGSEC" --out "$OUT"
+fi
 status=$?
 echo "[shard] done status=$status -> $OUT"
 exit "$status"
