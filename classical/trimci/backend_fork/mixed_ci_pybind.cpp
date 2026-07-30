@@ -109,22 +109,43 @@ public:
         N_ = (int)N;
         indptr_.resize(N_ + 1);
         indptr_[0] = 0;
-        // Rough reserve to cut reallocation spikes (grows if under-estimated).
-        const size_t guess = (size_t)N_ * 16;
-        row_idx_.reserve(guess);
-        data_re_.reserve(guess);
-        data_im_.reserve(guess);
+        // TWO-PASS build so the (dominant) per-column connection computation runs
+        // across OMP threads. Pass 1 (PARALLEL): each column j independently computes
+        // its in-subspace (row, value) entries. We call the pure `connections()` free
+        // function -- NOT prov.neighbors(), whose cache_ is a shared mutable map and
+        // not thread-safe; `index` is only read here, so concurrent find() is safe.
+        // Result is BIT-IDENTICAL to the serial cached path: same connections, and
+        // Pass 2 concatenates columns in the same fixed order (no cross-thread float
+        // reduction), whether OpenMP is on or off (pragma is a no-op without -fopenmp).
+        std::vector<std::vector<std::pair<int32_t, cdouble>>> col(N_);
+        const std::vector<Term>& terms = prov.terms();
+        const int Nf = prov.N_f();
+        #pragma omp parallel for schedule(dynamic, 64)
         for (int j = 0; j < N_; ++j) {
-            const ConnMap& c = prov.neighbors(states[j]);
+            ConnMap c = connections(terms, states[j], Nf);
+            std::vector<std::pair<int32_t, cdouble>>& cj = col[j];
+            cj.reserve(c.size());
             for (const auto& kv : c) {
                 auto it = index.find(kv.first);
-                if (it != index.end()) {
-                    row_idx_.push_back(it->second);      // < N_ < 2^31
-                    data_re_.push_back(kv.second.real());
-                    data_im_.push_back(kv.second.imag());
-                }
+                if (it != index.end())
+                    cj.emplace_back((int32_t)it->second, kv.second);   // < N_ < 2^31
+            }
+        }
+        // Pass 2 (SERIAL): concatenate columns in order -> CSC. Free each column as we
+        // go so peak stays ~1x the matrix (not the 4x a process-fork would cost).
+        size_t nnz = 0;
+        for (int j = 0; j < N_; ++j) nnz += col[j].size();
+        row_idx_.reserve(nnz);
+        data_re_.reserve(nnz);
+        data_im_.reserve(nnz);
+        for (int j = 0; j < N_; ++j) {
+            for (const auto& e : col[j]) {
+                row_idx_.push_back(e.first);
+                data_re_.push_back(e.second.real());
+                data_im_.push_back(e.second.imag());
             }
             indptr_[j + 1] = (int64_t)row_idx_.size();
+            std::vector<std::pair<int32_t, cdouble>>().swap(col[j]);   // free now
         }
     }
 

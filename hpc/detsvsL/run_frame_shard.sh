@@ -17,12 +17,14 @@ SANDBOX="$(pwd)"
 [ -r "$REPO/misc/run_frame_shard.py" ] || { echo "ERROR: cannot read repo at $REPO" >&2; exit 1; }
 
 cpus="${_CONDOR_REQUEST_CPUS:-2}"
-# We parallelize the TrimCI ENSEMBLE across PROCESSES (NUQU_NUM_WORKERS), so pin each
-# worker to single-thread BLAS/OMP: avoids core oversubscription AND makes fork() safe
-# (multi-thread BLAS + fork can deadlock). This is what actually uses the request_cpus.
-export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
+# Threading = C++ OpenMP inside the mixed_ci H-build. OMP_NUM_THREADS drives those
+# threads (this is what uses request_cpus); BLAS stays single-thread (sparse selected-
+# CI isn't BLAS-bound, and multi-thread BLAS only contends). NUQU_NUM_WORKERS=1 DISABLES
+# the process-fork ensemble -- fork+OpenBLAS deadlocks on Linux and 4x's memory (-> the
+# OOM/stall on 290074); shared-memory threads don't copy H, so no memory blowup.
+export OMP_NUM_THREADS="$cpus" MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
        BLIS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 MPLBACKEND=Agg
-export NUQU_NUM_WORKERS="$cpus"
+export NUQU_NUM_WORKERS=1
 export HOME="$SANDBOX" UV_INSTALL_DIR="$SANDBOX/uvbin" \
        UV_CACHE_DIR="$SANDBOX/uvcache" UV_PYTHON_INSTALL_DIR="$SANDBOX/uvpy"
 export PATH="$UV_INSTALL_DIR:$SANDBOX/.local/bin:$PATH"
@@ -40,7 +42,8 @@ cp "$REPO/classical/trimci/backend_fork/mixed_ci_pybind.cpp" \
 PYBIND_INC="$("$PY" -c 'import pybind11; print(pybind11.get_include())')"
 PY_INC="$("$PY" -c 'import sysconfig; print(sysconfig.get_path("include"))')"
 EXT="$("$PY" -c 'import sysconfig; print(sysconfig.get_config_var("EXT_SUFFIX"))')"
-c++ -O3 -Wall -shared -std=c++17 -fPIC -I"$PYBIND_INC" -I"$PY_INC" \
+# -fopenmp: threads the H-build (Linux g++ on qis supports it natively).
+c++ -O3 -Wall -shared -std=c++17 -fPIC -fopenmp -I"$PYBIND_INC" -I"$PY_INC" \
     "$SANDBOX/mixed_ci_pybind.cpp" -o "$SANDBOX/mixed_ci${EXT}" \
     || { echo "ERROR: C++ build failed" >&2; exit 1; }
 
