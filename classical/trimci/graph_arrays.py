@@ -33,6 +33,8 @@ the array drivers (`backend.cpp_ground_state_*_arrays`, `run_cpp --arrays`).
 from __future__ import annotations
 
 import math
+import multiprocessing as mp
+import os
 
 import numpy as np
 
@@ -240,15 +242,53 @@ def ground_state_arrays(H, n_elec, n_dets=200, n_init=20, pool_factor=3,
     )
 
 
-def ground_state_ensemble_arrays(H, n_elec, n_runs=8, seed=None, **kwargs):
+_FORK_ENSEMBLE_STATE = {}
+
+
+def _ensemble_worker(s):
+    """Runs in a forked child. Reads H/n_elec/kwargs from INHERITED module state so
+    the un-picklable C++-backed H is never sent through the pipe -- only the seed `s`
+    (an int) is pickled. Returns the pure-numpy GroundStateResult (picklable back)."""
+    st = _FORK_ENSEMBLE_STATE
+    return ground_state_arrays(st["H"], st["n_elec"], seed=s, **st["kwargs"])
+
+
+def _ensemble_workers(n_runs):
+    """How many processes to fan the ensemble across. Opt-in via NUQU_NUM_WORKERS
+    (the HPC run script sets it to request_cpus); default 1 = serial (unchanged)."""
+    try:
+        nw = int(os.environ.get("NUQU_NUM_WORKERS", "1"))
+    except ValueError:
+        nw = 1
+    return max(1, min(nw, n_runs))
+
+
+def ground_state_ensemble_arrays(H, n_elec, n_runs=8, seed=None, n_workers=None,
+                                 **kwargs):
     """Array-native ensemble TrimCI: `n_runs` independent random inits, keep the
-    best (lowest energy). Mirrors `graph.ground_state_ensemble`."""
+    best (lowest energy). Mirrors `graph.ground_state_ensemble`.
+
+    The `n_runs` inits are INDEPENDENT (each fully determined by its own seed
+    `base+k`), so they fan across processes when NUQU_NUM_WORKERS>1 -- a ~min(
+    n_runs, cores)x speedup that is BIT-IDENTICAL to the serial path (same seeds ->
+    same random cores -> same energies). Every ensemble solve flows through here
+    (Phase-0 discovery, and each LF-scan / COO-cycle solve), so this one change
+    multithreads essentially all of TrimCI's cost on the cluster."""
     base = 0 if seed is None else int(seed)
+    seeds = [None if seed is None else base + k for k in range(n_runs)]
+    nw = _ensemble_workers(n_runs) if n_workers is None else max(1, min(n_workers, n_runs))
+    if nw == 1 or n_runs == 1:
+        results = [ground_state_arrays(H, n_elec, seed=s, **kwargs) for s in seeds]
+    else:
+        # fork so H (read-only, un-picklable C++ provider inside) is INHERITED, not
+        # pickled -- workers read it from module state set just before the fork; only
+        # the int seed crosses the pipe. BLAS is pinned single-thread -> fork-safe.
+        _FORK_ENSEMBLE_STATE.update(H=H, n_elec=n_elec, kwargs=kwargs)
+        with mp.get_context("fork").Pool(nw) as pool:
+            results = pool.map(_ensemble_worker, seeds)
     best = None
     per_run = []
-    for k in range(n_runs):
-        s = None if seed is None else base + k
-        res = ground_state_arrays(H, n_elec, seed=s, **kwargs)
+    for s, res in zip(seeds, results):
         per_run.append((s, res.energy, res.n_dets))
         if best is None or res.energy < best.energy:
             best = res

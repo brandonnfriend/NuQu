@@ -17,8 +17,12 @@ SANDBOX="$(pwd)"
 [ -r "$REPO/misc/run_frame_shard.py" ] || { echo "ERROR: cannot read repo at $REPO" >&2; exit 1; }
 
 cpus="${_CONDOR_REQUEST_CPUS:-2}"
-export OMP_NUM_THREADS="$cpus" MKL_NUM_THREADS="$cpus" OPENBLAS_NUM_THREADS="$cpus" \
-       BLIS_NUM_THREADS="$cpus" NUMEXPR_NUM_THREADS="$cpus" MPLBACKEND=Agg
+# We parallelize the TrimCI ENSEMBLE across PROCESSES (NUQU_NUM_WORKERS), so pin each
+# worker to single-thread BLAS/OMP: avoids core oversubscription AND makes fork() safe
+# (multi-thread BLAS + fork can deadlock). This is what actually uses the request_cpus.
+export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
+       BLIS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 MPLBACKEND=Agg
+export NUQU_NUM_WORKERS="$cpus"
 export HOME="$SANDBOX" UV_INSTALL_DIR="$SANDBOX/uvbin" \
        UV_CACHE_DIR="$SANDBOX/uvcache" UV_PYTHON_INSTALL_DIR="$SANDBOX/uvpy"
 export PATH="$UV_INSTALL_DIR:$SANDBOX/.local/bin:$PATH"

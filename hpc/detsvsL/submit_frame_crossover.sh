@@ -17,14 +17,14 @@
 # Run from $REPO/hpc/detsvsL/ on `ssh hep-submit`:
 #   sh submit_frame_crossover.sh ["fillings"] [n_seeds] ["frames"] [max_core]
 set -eu
-FILLINGS="${1:-0.5 0.75 1.0 1.5 2.0}"     # A = filling*8; 1.0=quarter, 2.0=half-filling
+FILLINGS="${1:-0.5 0.75 1.0 1.5 2.0}"     # A = filling*sites; 1.0=quarter, 2.0=half-filling
 NSEEDS="${2:-2}"
 FRAMES="${3:-bare gaussian lf gaussian+lf gaussian+coo}"
 MAXCORE="${4:-64000}"
-L=2
-MEM=24G
+L="${5:-2}"                                # L=3 robustness check: is the crossover finite-size?
+case "$L" in 2) MEM=24G ;; 3) MEM=64G ;; *) MEM=96G ;; esac
 LADDER_MODE=independent
-FRAME_RUNS=3          # ensemble runs inside the one-shot frame fit
+FRAME_RUNS=4          # ensemble runs inside the one-shot frame fit (=request_cpus: 1 core/run)
 ORBOPT_CYCLES=3       # COO/LF optimization cycles
 PHASE0_CORE=1000      # core at which the frame is fit (small = cheap)
 MAXRUNGSEC=1800       # 30 min/rung cap
