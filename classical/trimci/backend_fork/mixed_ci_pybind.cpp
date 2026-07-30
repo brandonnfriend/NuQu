@@ -159,10 +159,32 @@ public:
         auto vr = vr_arr.unchecked<1>();
         auto vi = vi_arr.unchecked<1>();
         std::vector<double> or_(N_, 0.0), oi_(N_, 0.0);
+#ifdef _OPENMP
+        // PARALLEL SpMV over columns. Each column scatters into arbitrary rows -> race,
+        // so each thread accumulates into thread-local outputs, then reduces. The cross-
+        // thread reduction reorders the adds -> a sub-1e-10 float drift that eigsh
+        // absorbs (documented tolerance). if(N_>=4096) keeps tiny subspaces (frame-fit
+        // at core~1000) serial -- not worth the thread overhead.
+        #pragma omp parallel if(N_ >= 4096)
+        {
+            std::vector<double> lor(N_, 0.0), loi(N_, 0.0);
+            #pragma omp for schedule(dynamic, 256) nowait
+            for (int j = 0; j < N_; ++j) {
+                const double vjr = vr(j), vji = vi(j);
+                if (vjr == 0.0 && vji == 0.0) continue;   // skip cold scatter
+                for (int64_t k = indptr_[j]; k < indptr_[j + 1]; ++k) {
+                    const int i = row_idx_[k];
+                    lor[i] += data_re_[k] * vjr - data_im_[k] * vji;
+                    loi[i] += data_re_[k] * vji + data_im_[k] * vjr;
+                }
+            }
+            #pragma omp critical
+            for (int i = 0; i < N_; ++i) { or_[i] += lor[i]; oi_[i] += loi[i]; }
+        }
+#else
+        // Serial reference: original in-place scatter (bit-identical).
         for (int j = 0; j < N_; ++j) {
             const double vjr = vr(j), vji = vi(j);
-            // Skip exact zeros to avoid touching cold cache lines in or_/oi_
-            // (CSC column j might scatter to many rows).
             if (vjr == 0.0 && vji == 0.0) continue;
             for (int64_t k = indptr_[j]; k < indptr_[j + 1]; ++k) {
                 const int i = row_idx_[k];
@@ -171,6 +193,7 @@ public:
                 oi_[i] += data_re_[k] * vji + data_im_[k] * vjr;
             }
         }
+#endif
         return py::make_tuple(to_np(or_), to_np(oi_));
     }
 
@@ -432,11 +455,21 @@ public:
             core[k] = std::move(d);
         }
 
+        // Parallelize the (dominant) connection computation, but keep the score
+        // reduction in the ORIGINAL j-order -> BIT-IDENTICAL to serial (the scores map,
+        // hence top-k tie-breaking, is order-sensitive). Pass 1 (parallel): each core
+        // column's connections (pure free fn, no shared cache). Pass 2 (serial, same
+        // order as before): max-reduce |H_ij c_j| into `scores`.
+        const std::vector<Term>& terms = provider_->terms();
+        const int Nf = provider_->N_f();
+        std::vector<ConnMap> conns(N);
+        #pragma omp parallel for schedule(dynamic, 64)
+        for (size_t j = 0; j < N; ++j)
+            conns[j] = mixedci::connections(terms, core[j], Nf);
         std::unordered_map<MixedDet, double, MixedDetHash> scores;
         for (size_t j = 0; j < N; ++j) {
             const cdouble cj(cr(j), ci(j));
-            const ConnMap& c = provider_->neighbors(core[j]);
-            for (const auto& kv : c) {
+            for (const auto& kv : conns[j]) {
                 if (core_set.count(kv.first)) continue;
                 const double s = std::abs(kv.second * cj);
                 auto it = scores.find(kv.first);
@@ -498,11 +531,21 @@ public:
             core[k] = std::move(d);
         }
 
+        // Parallelize the (dominant) connection computation, but keep the score
+        // reduction in the ORIGINAL j-order -> BIT-IDENTICAL to serial (the scores map,
+        // hence top-k tie-breaking, is order-sensitive). Pass 1 (parallel): each core
+        // column's connections (pure free fn, no shared cache). Pass 2 (serial, same
+        // order as before): max-reduce |H_ij c_j| into `scores`.
+        const std::vector<Term>& terms = provider_->terms();
+        const int Nf = provider_->N_f();
+        std::vector<ConnMap> conns(N);
+        #pragma omp parallel for schedule(dynamic, 64)
+        for (size_t j = 0; j < N; ++j)
+            conns[j] = mixedci::connections(terms, core[j], Nf);
         std::unordered_map<MixedDet, double, MixedDetHash> scores;
         for (size_t j = 0; j < N; ++j) {
             const cdouble cj(cr(j), ci(j));
-            const ConnMap& c = provider_->neighbors(core[j]);
-            for (const auto& kv : c) {
+            for (const auto& kv : conns[j]) {
                 if (core_set.count(kv.first)) continue;
                 const double s = std::abs(kv.second * cj);
                 auto it = scores.find(kv.first);

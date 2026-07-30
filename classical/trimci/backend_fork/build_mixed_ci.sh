@@ -25,17 +25,18 @@ fi
 
 # OpenMP threads the H-build. Linux g++ takes -fopenmp directly; macOS clang needs
 # libomp and often lacks it -> detect and fall back to a (correct) serial build.
-OMP_FLAGS=()
+# string (not array) so an empty value is safe under `set -u`.
+OMP_FLAG=""
 if echo 'int main(){return 0;}' | c++ -fopenmp -x c++ - -o /dev/null 2>/dev/null; then
-    OMP_FLAGS+=(-fopenmp); echo "  (OpenMP enabled)"
+    OMP_FLAG="-fopenmp"; echo "  (OpenMP enabled)"
 else
     echo "  (OpenMP unavailable on this compiler -> serial build)"
 fi
 
-c++ -O3 -Wall -shared -std=c++17 -fPIC "${OMP_FLAGS[@]}" \
+c++ -O3 -Wall -shared -std=c++17 -fPIC $OMP_FLAG \
     -I"$PYBIND_INC" -I"$PY_INC" \
     "$HERE/mixed_ci_pybind.cpp" \
     -o "$HERE/mixed_ci${EXT}" \
-    "${LINK_FLAGS[@]}"
+    ${LINK_FLAGS[@]+"${LINK_FLAGS[@]}"}
 
 echo "built $HERE/mixed_ci${EXT}  (python: $PY)"
