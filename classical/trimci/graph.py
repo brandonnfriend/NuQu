@@ -151,6 +151,21 @@ def boson_occupation_weights(N_f, mean_occ):
     return w / w.sum()
 
 
+def _random_ferm_det(n_modes, n_elec, rng):
+    """A random A=n_elec fermion determinant, sampled DIRECTLY: pick n_elec distinct
+    occupied modes and set those bits. O(n_elec) -- never enumerates the
+    C(n_modes, n_elec) sector, which is astronomically large at high filling / large L
+    (the old `list(fermion_determinants(...))` made those infeasible: e.g. C(108,13)
+    ~1e15 at L=3). Uniform over the A-sector, so distribution-equivalent to the old
+    `rng.choice(list(fermion_determinants(...)))`."""
+    occ = 0
+    k = min(int(n_elec), int(n_modes))
+    if k > 0:
+        for p in rng.choice(n_modes, size=k, replace=False):
+            occ |= (1 << int(p))
+    return occ
+
+
 def random_core(H, n_elec, n_init, rng, boson_init_mean=0.5):
     """Sample `n_init` random mixed determinants from the A=n_elec sector.
 
@@ -169,18 +184,18 @@ def random_core(H, n_elec, n_init, rng, boson_init_mean=0.5):
     rather than being seeded there.
     """
     uniform = boson_init_mean is None
-    ferm_pool = list(fermion_determinants(H.n_ferm_modes, n_elec))
+    n_modes = H.n_ferm_modes
     weights = boson_occupation_weights(H.N_f, boson_init_mean)
     states = set()
-    # Anchor: a fermion determinant on the boson vacuum. Skipped for the uniform
-    # (unbiased) init so vacuum gets no special seeding.
-    if ferm_pool and not uniform:
-        states.add(MixedState(int(rng.choice(ferm_pool)),
+    # Anchor: a random fermion determinant on the boson vacuum. Skipped for the
+    # uniform (unbiased) init so vacuum gets no special seeding.
+    if 0 <= n_elec <= n_modes and not uniform:
+        states.add(MixedState(_random_ferm_det(n_modes, n_elec, rng),
                               tuple([0] * H.n_bos_modes)))
     guard = 0
     while len(states) < n_init and guard < 50 * n_init:
         guard += 1
-        occ = int(rng.choice(ferm_pool)) if ferm_pool else 0
+        occ = _random_ferm_det(n_modes, n_elec, rng)
         bos = tuple(int(x) for x in
                     rng.choice(H.N_f, size=H.n_bos_modes, p=weights))
         states.add(MixedState(occ, bos))
