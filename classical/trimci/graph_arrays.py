@@ -254,13 +254,25 @@ def _ensemble_worker(s):
 
 
 def _ensemble_workers(n_runs):
-    """How many processes to fan the ensemble across. Opt-in via NUQU_NUM_WORKERS
-    (the HPC run script sets it to request_cpus); default 1 = serial (unchanged)."""
+    """How many processes to fan the ensemble across -- picked ADAPTIVELY from the
+    resources the job actually has. Priority: NUQU_NUM_WORKERS (explicit override) ->
+    _CONDOR_REQUEST_CPUS (the Condor cpu allocation) -> the cores this process may use
+    (sched_getaffinity / cpu_count). Capped at n_runs (no point in more workers than
+    independent inits). Set NUQU_NUM_WORKERS=1 to force serial. NOTE: qis is 48
+    physical cores + 2-way SMT (96 logical); compute-bound solves scale on physical
+    cores, so request up to ~48 -- past that the SMT siblings add little."""
+    for var in ("NUQU_NUM_WORKERS", "_CONDOR_REQUEST_CPUS"):
+        val = os.environ.get(var)
+        if val:
+            try:
+                return max(1, min(int(val), n_runs))
+            except ValueError:
+                pass
     try:
-        nw = int(os.environ.get("NUQU_NUM_WORKERS", "1"))
-    except ValueError:
-        nw = 1
-    return max(1, min(nw, n_runs))
+        avail = len(os.sched_getaffinity(0))        # cores in this job's cpuset
+    except AttributeError:
+        avail = os.cpu_count() or 1                  # macOS: no sched_getaffinity
+    return max(1, min(avail, n_runs))
 
 
 def ground_state_ensemble_arrays(H, n_elec, n_runs=8, seed=None, n_workers=None,

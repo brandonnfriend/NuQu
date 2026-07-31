@@ -17,14 +17,15 @@ SANDBOX="$(pwd)"
 [ -r "$REPO/misc/run_frame_shard.py" ] || { echo "ERROR: cannot read repo at $REPO" >&2; exit 1; }
 
 cpus="${_CONDOR_REQUEST_CPUS:-2}"
-# Threading = C++ OpenMP inside the mixed_ci H-build. OMP_NUM_THREADS drives those
-# threads (this is what uses request_cpus); BLAS stays single-thread (sparse selected-
-# CI isn't BLAS-bound, and multi-thread BLAS only contends). NUQU_NUM_WORKERS=1 DISABLES
-# the process-fork ensemble -- fork+OpenBLAS deadlocks on Linux and 4x's memory (-> the
-# OOM/stall on 290074); shared-memory threads don't copy H, so no memory blowup.
-export OMP_NUM_THREADS="$cpus" MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
+# Parallelism = the TrimCI ENSEMBLE across fork'd worker processes (the independent
+# random-init solves). Pin ALL numeric libs to 1 thread/process: no core over-
+# subscription, and single-thread BLAS is fork-safe (no thread pool to corrupt). The
+# earlier fork "stall/OOM" on 290074 was actually random_core hanging on C(108,A)
+# enumeration (fixed in d8d43d2), NOT a fork deadlock; the fork ensemble is validated
+# bit-identical + ~3-4x. Worker count is adaptive in Python (reads _CONDOR_REQUEST_CPUS).
+export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
        BLIS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 MPLBACKEND=Agg
-export NUQU_NUM_WORKERS=1
+export NUQU_NUM_WORKERS="$cpus"
 export HOME="$SANDBOX" UV_INSTALL_DIR="$SANDBOX/uvbin" \
        UV_CACHE_DIR="$SANDBOX/uvcache" UV_PYTHON_INSTALL_DIR="$SANDBOX/uvpy"
 export PATH="$UV_INSTALL_DIR:$SANDBOX/.local/bin:$PATH"
