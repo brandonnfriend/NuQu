@@ -37,8 +37,8 @@ import functools
 import math
 
 import numpy as np
-from openfermion import jordan_wigner
 
+from src_PI.estimation.sparse_oracle.jw_cache import jordan_wigner_cached
 from src_PI.hamiltonians.core.MixedHamiltonian import MixedHamiltonian
 
 
@@ -149,7 +149,7 @@ def _pauli_lambda_for_fermion_op(fermion_op):
     """
     if not fermion_op.terms:
         return 0.0, 0.0
-    q = jordan_wigner(fermion_op)
+    q = jordan_wigner_cached(fermion_op)
     return _qubit_op_one_norm(q), _qubit_op_identity_coeff(q)
 
 

@@ -47,7 +47,7 @@ the "C3d.3 future-polish notes" subsection):
 import functools
 import math
 
-from openfermion import jordan_wigner
+from src_PI.estimation.sparse_oracle.jw_cache import jordan_wigner_cached
 
 from pyLIQTR.qubitization.qubitized_gates import QubitizedWalkOperator
 from pyLIQTR.utils.resource_analysis import estimate_resources
@@ -124,7 +124,7 @@ def estimate_sparse_resources(mh, n_b, num_sites):
     fermion_Cl = 0
     fermion_terms = 0
     if len(mh.fermion_part.terms) > 0:
-        f_q = jordan_wigner(mh.fermion_part)
+        f_q = jordan_wigner_cached(mh.fermion_part)
         for pauli_term, _coeff in _pauli_strings(f_q):
             weight = len(pauli_term)
             fermion_T += 4 * weight               # controlled-Pauli Toffoli decomp
@@ -145,7 +145,7 @@ def estimate_sparse_resources(mh, n_b, num_sites):
     mixed_Cl = 0
     mixed_terms_count = 0
     for mt in mh.mixed_terms:
-        f_q = jordan_wigner(mt.fermion_factor)
+        f_q = jordan_wigner_cached(mt.fermion_factor)
         # T_F: PauliLCU sub-encoder cost. Approximate as Σ_p 4·weight T;
         # alias-sampling PREP overhead is small and folded into the
         # global PREP estimate below.
