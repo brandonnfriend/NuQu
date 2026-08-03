@@ -22,7 +22,7 @@ NSEEDS="${2:-2}"
 FRAMES="${3:-bare gaussian lf gaussian+lf gaussian+coo}"
 MAXCORE="${4:-64000}"
 L="${5:-2}"                                # L=3 robustness check: is the crossover finite-size?
-case "$L" in 2) MEM=24G ;; 3) MEM=64G ;; *) MEM=96G ;; esac
+case "$L" in 2) MEM=24G ;; 3) MEM=128G ;; 4) MEM=192G ;; *) MEM=96G ;; esac
 LADDER_MODE=independent
 FRAME_RUNS=4          # ensemble runs inside the one-shot frame fit (=request_cpus: 1 core/run)
 ORBOPT_CYCLES=3       # COO/LF optimization cycles
