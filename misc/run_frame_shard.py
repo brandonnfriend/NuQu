@@ -26,6 +26,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from classical.trimci import build_from_eft, frame_workflow, frame
+from classical.trimci.frame_qpe import warmstart_overlap
 from classical.trimci.run_cpp import (_adaptive_ladder_solve, _pick_solver,
                                       three_phase_growing_run)
 
@@ -114,6 +115,15 @@ def main():
         r = {k: rung[k] for k in ("core", "E_var", "dE_pt2", "E_pt2", "n_ext", "wall_s", "phase")
              if k in rung}
         r["mean_occ"] = _mean_occupation(res, Hbare.n_bos_modes)
+        # QPE warm-start overlap p0 = |c_dominant|^2 of this (framed) core — the
+        # quantity the frame->QPE bridge (task 34, I1) needs to fold ~1/p0 QPE
+        # repetitions into the cost. Emitting it per-rung means future cluster
+        # frame runs carry the warm-start data natively (the core itself is
+        # discarded once the shard finishes). Best-effort.
+        try:
+            r["p0"] = warmstart_overlap(res.coeffs)
+        except Exception:
+            r["p0"] = None
         out["rungs"].append(r)
         out["wall_s"] = time.time() - t0
         save()   # INCREMENTAL: survive an OOM/timeout on the next (deeper) rung
