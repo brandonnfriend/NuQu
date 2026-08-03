@@ -180,7 +180,50 @@ needed for correctness; both are speedups for the deepest convergence tests.
 
 ---
 
-*This file is the standing HPC reference. The classical dets-vs-L / frame-crossover specifics
-(scripts, campaign IDs, results) are tracked in the agent's project memory and the `data/` repo;
-the quantum resource-estimation runs should reuse this same workflow with their own submit/run
-scripts.*
+## 10. Quantum resource-estimation harness (`hpc/quantum/`) — 2026-08
+
+The quantum counterpart of `hpc/detsvsL/` (submit/run/combine + `run_quantum_shard.py`). It
+reuses everything above (launch-approval loop, qis1–4 pin, per-sandbox uv self-provision, write
+to `/nfs_scratch`, incremental save) with three deliberate differences and several hard-won
+lessons from first light (smoke tests 290356–290358, campaign 290367).
+
+- **No C++ build; threads pinned to 1.** `evaluate_resources` is pure-Python/numpy *symbolic*
+  counting (Pauli/T tallies), not a BLAS-bound solve — so the classical `mixed_ci` compile step
+  and the OMP/fork-ensemble machinery are dropped. One shard = one `(L, series[, frame_occ])`.
+- **Smoke-test the deps on a qis node FIRST.** `sh submit_quantum_sweep.sh test` submits ONE job
+  that imports pyLIQTR via a real L=2 estimate. The pyLIQTR tree is heavier/riskier than the
+  classical one; run this before any campaign. It caught every issue below in single cheap jobs.
+- **Dependency pins are load-bearing** (`requirements-hpc-quantum.txt`) — pyLIQTR 1.3.4 under-pins
+  its tree, so an unpinned install silently resolves broken versions:
+  - `qualtran==0.4.0` — pyLIQTR doesn't pin qualtran; a newer one has a *slotted* `CtrlSpec`
+    (no `__dict__`) that breaks `functools.cached_property` in the walk `t_complexity`
+    (`TypeError: No '__dict__' attribute on 'CtrlSpec'`). Λ computes, then the T-count dies.
+  - `cirq-core==1.4.0` — NOT the `cirq` metapackage. The metapackage drags in
+    `cirq-rigetti → pyquil → attrs>=20,<22`, unsatisfiable against the modern attrs qualtran
+    pulls. The laptop env has only cirq-core; match it.
+  - `scipy` — the `tong` cutoff series import `classical.trimci.tong_bound`, whose package
+    `__init__` needs numpy+scipy at import (the compiled `mixed_ci` backend + official `trimci`
+    /jax/netket stay lazy and are never pulled — verified). Without scipy the tong series won't
+    import on a quantum-only node.
+  - **Validate `requirements-hpc-quantum.txt` with `uv pip compile` locally before pushing** — it
+    does a full resolve and surfaces conflicts in seconds, saving a commit→push→submit round-trip.
+- **The server reconciles to the CAMPAIGN BRANCH, not `main`.** The quantum harness lives on a
+  feature branch (not merged), so §2's `git reset --hard origin/main` is wrong here — use
+  `git checkout <branch> && git reset --hard origin/<branch>`. (`git_dirty:true` in a run's
+  manifest is usually just the untracked `campaign_*/` dirs, not real changes.)
+- **Condor `queue <vars> from file` splits columns on COMMAS as well as whitespace.** A comma-list
+  in a column (e.g. an A-grid `1,2,4,8`) is silently tokenized across the queue variables →
+  `RequestMemory = 4,8,16,...` → submit parse error (transactional: it rolls back, 0 jobs queued).
+  Use a comma-free separator (`+`) in the shards file and normalize it back (`tr '+' ','`) in the
+  run script.
+- **Calibrate per-series cost locally before sizing the grid** (profile-before-scaling, again).
+  Key facts: `sparse`/fock/tong is cheap and **A-flat** (tong → n_b A-independent → the whole
+  A-sweep is *one* unique estimate; one representative A suffices), reaching L=10 in ~20–30 min;
+  `ns`/amplitude ~L=6; `watson` (Watson Lemma-5 baseline, n_b 19–25, Λ~10¹⁰–10¹¹) is the expensive
+  one, ~L=4–5. A only moves the estimate for the n_b-growing series (watson, sparse_heuristic).
+
+---
+
+*This file is the standing HPC reference. The classical dets-vs-L / frame-crossover and the
+quantum resource-estimation campaign specifics (scripts, campaign IDs, results) are tracked in
+the agent's project memory and the `data/` repo.*
