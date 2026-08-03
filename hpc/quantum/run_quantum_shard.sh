@@ -12,6 +12,9 @@
 # run this once on a qis node before launching a campaign.
 set -u
 L="$1"; SERIES="$2"; CAMPAIGN="$3"; AVALS="${4:-1,2,4}"; MODE="${5:-run}"
+# $6 = per-mode boson occupation <n> -> frame-reduced Fock register (task 34 seam a).
+# "-" / "none" / empty = no frame reduction (use the series' own cutoff).
+FRAMEOCC="${6:-}"
 REPO=/nfs_scratch/bfriend3/NuQu/NuQu
 SANDBOX="$(pwd)"
 [ -r "$REPO/misc/run_quantum_shard.py" ] || { echo "ERROR: cannot read repo at $REPO" >&2; exit 1; }
@@ -49,8 +52,16 @@ fi
 
 OUTDIR="$REPO/hpc/quantum/campaign_${CAMPAIGN}/shards"
 mkdir -p "$OUTDIR"
+FOCC_ARG=""
+FOCC_TAG=""
+case "$FRAMEOCC" in
+    ""|"-"|"none"|"None") : ;;
+    *) FOCC_ARG="--frame-occupation $FRAMEOCC"; FOCC_TAG="_focc${FRAMEOCC}" ;;
+esac
+OUT="$OUTDIR/L${L}_${SERIES}${FOCC_TAG}.json"
+# shellcheck disable=SC2086
 "$PY" -m misc.run_quantum_shard --L "$L" --series "$SERIES" --dim 3 \
-    --A-values "$AVALS" --out "$OUTDIR/L${L}_${SERIES}.json"
+    --A-values "$AVALS" $FOCC_ARG --out "$OUT"
 status=$?
-echo "[qshard] done status=$status -> $OUTDIR/L${L}_${SERIES}.json"
+echo "[qshard] done status=$status -> $OUT"
 exit "$status"
