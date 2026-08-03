@@ -12,6 +12,10 @@
 # run this once on a qis node before launching a campaign.
 set -u
 L="$1"; SERIES="$2"; CAMPAIGN="$3"; AVALS="${4:-1,2,4}"; MODE="${5:-run}"
+# A-values accept '+' as a comma-free separator (Condor's `queue ... from file`
+# splits columns on commas, so a multi-value A-grid must avoid literal commas in
+# the shards file; the overnight submit uses '+'). Normalize back to commas here.
+AVALS="$(printf '%s' "$AVALS" | tr '+' ',')"
 # $6 = per-mode boson occupation <n> -> frame-reduced Fock register (task 34 seam a).
 # "-" / "none" / empty = no frame reduction (use the series' own cutoff).
 FRAMEOCC="${6:-}"

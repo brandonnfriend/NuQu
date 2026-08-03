@@ -40,6 +40,9 @@ mem_for_L() {
 # row per (L, series, frameocc) -> unique output file. For the n_b-growing series
 # (watson, sparse_heuristic) the A-grid rows at low L already cover A=4, so there's
 # no separate A=4-only row there (it would collide on the filename).
+# NOTE: A-values use '+' (not ',') as the separator -- Condor's `queue ... from`
+# splits columns on commas, so a comma-list in a column breaks the parse. The run
+# script normalizes '+' back to ',' for --A-values.
 PLAN="
 2 sparse 4 -
 3 sparse 4 -
@@ -51,13 +54,13 @@ PLAN="
 3 ns 4 -
 4 ns 4 -
 6 ns 4 -
-2 watson 1,2,4,8,16,32,64 -
-3 watson 1,2,4,8,16 -
+2 watson 1+2+4+8+16+32+64 -
+3 watson 1+2+4+8+16 -
 4 watson 4 -
 5 watson 4 -
-2 sparse_heuristic 1,2,4,8,16,32,64,100 -
-3 sparse_heuristic 1,2,4,8,16,32,64 -
-4 sparse_heuristic 1,2,4,8,16,32 -
+2 sparse_heuristic 1+2+4+8+16+32+64+100 -
+3 sparse_heuristic 1+2+4+8+16+32+64 -
+4 sparse_heuristic 1+2+4+8+16+32 -
 6 sparse_heuristic 4 -
 8 sparse_heuristic 4 -
 2 sparse 4 0.045
