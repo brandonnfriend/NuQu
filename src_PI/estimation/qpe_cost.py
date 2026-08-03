@@ -56,6 +56,23 @@ def total_qpe_t_count(total_t_count, physical_lambda, delta_E=DEFAULT_DELTA_E_ME
     return total_t_count * walk_queries(physical_lambda, delta_E)
 
 
+def recommended_n_b_from_occupation(mean_n_per_mode, margin_sigmas=5.0):
+    """Fock register size `n_b` (bits/mode) justified by a measured mean per-mode
+    boson occupation `⟨n⟩`.
+
+    The single source of truth for the frame->QPE bridge's boson-cutoff reduction
+    (task 34, I1 seam a): a frame that lowers ⟨n⟩ needs a smaller Fock cutoff. The
+    cutoff keeps a Poisson-ish safety margin above the mean —
+    `N_cut = ⟨n⟩ + margin_sigmas·√(⟨n⟩+1)` — and `n_b = ⌈log₂(N_cut + 1)⌉`. For the
+    verified near-vacuum ground state (`⟨n⟩≈0.045`) this lands at the small,
+    honest cutoff that Tier 1 of the campaign's three-tier story rests on.
+
+    `frame_qpe.qpe_payoff` calls this so the bridge and the sweep agree on the map.
+    """
+    cutoff = mean_n_per_mode + margin_sigmas * math.sqrt(mean_n_per_mode + 1.0)
+    return max(1, math.ceil(math.log2(cutoff + 1.0)))
+
+
 def compute_total_qpe_cost(filepath, delta_E=DEFAULT_DELTA_E_MEV, write=True):
     """Read a sweep JSON, compute the total QPE cost per result entry, write back.
 

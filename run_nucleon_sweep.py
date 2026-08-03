@@ -3,7 +3,9 @@ import time
 import numpy as np
 
 from src_PI.estimation.EstimateResources import evaluate_resources
-from src_PI.estimation.qpe_cost import compute_total_qpe_cost, DEFAULT_DELTA_E_MEV
+from src_PI.estimation.qpe_cost import (
+    compute_total_qpe_cost, recommended_n_b_from_occupation, DEFAULT_DELTA_E_MEV,
+)
 from src_PI.hamiltonians.core.EFTParameters import (
     calculate_dynamic_cutoffs,
     calculate_ns_cutoffs,
@@ -61,6 +63,14 @@ def get_sweep_config(**overrides):
         # tiny register, and for direct-comparison runs where you want
         # both bases at the same n_b.
         'n_b_override': None,
+        # Frame->QPE bridge seam (task 34, I1): if set to a measured per-mode
+        # boson occupation ⟨n⟩ (e.g. from a squeeze/gaussian+lf core, or the
+        # verified bare-basis ~0.045), the Fock/NS register n_b is reduced to the
+        # cutoff that occupation justifies (recommended_n_b_from_occupation). This
+        # is how a frame's ⟨n⟩ reduction turns into fewer boson qubits. Saved into
+        # metadata so the driving occupation is reproducible. n_b_override still
+        # wins over this (hard smoke-test override).
+        'frame_occupation': None,
         'extras': {},
         # Optional short human tag folded into the saved run-id folder, so an
         # important run is easy to find later (e.g. 'paperfig', 'L4-highA').
@@ -105,6 +115,12 @@ def _compute_cutoffs(L, dim, A, params, run_cfg, config):
             L, dim, A, params, epsilon_cut=eps, E_bound=E_max,
             boson_cutoff_method=bcm,
         )
+    # Frame->QPE seam (task 34, I1 seam a): a measured per-mode ⟨n⟩ reduces the
+    # boson register to the cutoff it justifies. Applied to the register size
+    # (n_b) only; pi_max/Pi_max keep their base values (diagnostic for Fock).
+    if run_cfg.get('frame_occupation') is not None:
+        n_b = recommended_n_b_from_occupation(float(run_cfg['frame_occupation']))
+    # Hard override wins last (smoke tests / matched-n_b comparison runs).
     if run_cfg.get('n_b_override') is not None:
         n_b = int(run_cfg['n_b_override'])
     return n_b, pi_max, Pi_max
@@ -113,13 +129,25 @@ def _compute_cutoffs(L, dim, A, params, run_cfg, config):
 def run_sweep(**overrides):
     """Run a single sweep with the given run-config overrides."""
     run_cfg = get_sweep_config(**overrides)
+
+    # Reproducibility: the run-level numeric knobs (epsilon_cut, E_bound,
+    # n_b_override, delta_E, frame_occupation) are NOT part of Config and so were
+    # invisible in the saved sweep JSON. Fold them into config.extras (which IS
+    # persisted via config.to_dict) so every sweep file is self-describing about
+    # the exact parameters it ran with (task 34, I1/I3).
+    provenance = {k: run_cfg[k] for k in
+                  ('epsilon_cut', 'E_bound_per_A_MeV', 'n_b_override',
+                   'delta_E_MeV', 'frame_occupation')
+                  if run_cfg.get(k) is not None}
+    extras = {**run_cfg['extras'], **provenance}
+
     config = Config(
         pion_basis=run_cfg['pion_basis'],
         walk_mode=run_cfg['walk_mode'],
         cutoff_method=run_cfg['cutoff_method'],
         boson_cutoff_method=run_cfg['boson_cutoff_method'],
         block_encoder=run_cfg['block_encoder'],
-        extras=run_cfg['extras'],
+        extras=extras,
     )
 
     print("========================================================")

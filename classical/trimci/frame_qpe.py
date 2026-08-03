@@ -99,7 +99,9 @@ def qpe_payoff(*, p0_bare, p0_frame, mean_n_bare, mean_n_frame,
     at a ONE-TIME state-prep cost `T_prep` (this module). Returns the factors + the
     net QPE-T ratio and the (tiny) prep overhead. `physical_lambda`, `t_step` are that
     system's block-encoding Λ and per-walk-step T-count (from a sweep JSON)."""
-    from src_PI.estimation.qpe_cost import walk_queries
+    from src_PI.estimation.qpe_cost import (
+        recommended_n_b_from_occupation as n_b_needed, walk_queries,
+    )
     n_walk = walk_queries(physical_lambda, delta_E)
     qpe_cold = t_step * n_walk / max(p0_bare, 1e-15)
     qpe_warm = t_step * n_walk / max(p0_frame, 1e-15)
@@ -107,10 +109,8 @@ def qpe_payoff(*, p0_bare, p0_frame, mean_n_bare, mean_n_frame,
                             squeeze=("squeeze" in frame_layers),
                             displace=("displace" in frame_layers),
                             orbital=("orbital" in frame_layers), eps_synth=eps_synth)
-    # boson-qubit saving: cutoff ~ ⟨n⟩ with a Poisson-ish margin (⟨n⟩ + 5√(⟨n⟩+1))
-    def n_b_needed(mean_n):
-        cutoff = mean_n + 5.0 * math.sqrt(mean_n + 1.0)
-        return max(1, math.ceil(math.log2(cutoff + 1)))
+    # boson-qubit saving: cutoff ~ ⟨n⟩ with a Poisson-ish margin (shared with the
+    # sweep via qpe_cost.recommended_n_b_from_occupation).
     return {
         "N_walk": n_walk,
         "p0_gain": p0_frame / max(p0_bare, 1e-15),
