@@ -38,24 +38,8 @@ import math
 
 import numpy as np
 
-from src_PI.estimation.sparse_oracle.jw_cache import jordan_wigner_cached
+from src_PI.estimation.sparse_oracle.fermion_jw_stats import fermion_jw_stats
 from src_PI.hamiltonians.core.MixedHamiltonian import MixedHamiltonian
-
-
-def _qubit_op_one_norm(qubit_op):
-    """Sum of |coeff| across the QubitOperator's non-identity terms."""
-    total = 0.0
-    for term, coeff in qubit_op.terms.items():
-        if term == ():
-            continue
-        total += abs(coeff)
-    return total
-
-
-def _qubit_op_identity_coeff(qubit_op):
-    """The identity-term coefficient (real part)."""
-    coeff = qubit_op.terms.get((), 0.0)
-    return complex(coeff).real
 
 
 @functools.lru_cache(maxsize=None)
@@ -146,11 +130,14 @@ def _pauli_lambda_for_fermion_op(fermion_op):
     The fermion side of a sparse / LOBE encoder still goes through
     pyLIQTR's PauliLCU per task 26 line 102, so the per-term λ here is
     the standard Pauli 1-norm (sum of |coeff| over non-identity Paulis).
+
+    Uses `fermion_jw_stats`, which computes the 1-norm and identity coefficient
+    analytically for one-body (hopping/number) operators — the mixed-term factors
+    — and falls back to the cached openfermion transform for higher forms (the
+    quartic-contact `fermion_part`). Bit-identical either way (task 34, I2).
     """
-    if not fermion_op.terms:
-        return 0.0, 0.0
-    q = jordan_wigner_cached(fermion_op)
-    return _qubit_op_one_norm(q), _qubit_op_identity_coeff(q)
+    stats = fermion_jw_stats(fermion_op)
+    return stats['one_norm'], stats['identity_coeff']
 
 
 def compute_native_lambda(mixed_hamiltonian, n_b):

@@ -47,7 +47,7 @@ the "C3d.3 future-polish notes" subsection):
 import functools
 import math
 
-from src_PI.estimation.sparse_oracle.jw_cache import jordan_wigner_cached
+from src_PI.estimation.sparse_oracle.fermion_jw_stats import fermion_jw_stats
 
 from pyLIQTR.qubitization.qubitized_gates import QubitizedWalkOperator
 from pyLIQTR.utils.resource_analysis import estimate_resources
@@ -73,14 +73,6 @@ def single_mode_walk_cost(n_b: int):
     walk = QubitizedWalkOperator(be)
     results = estimate_resources(walk)
     return results['T'], results['Clifford'], results['LogicalQubits']
-
-
-def _pauli_strings(qubit_op):
-    """Iterate over non-identity Pauli strings in a `QubitOperator`."""
-    for term, coeff in qubit_op.terms.items():
-        if term == ():
-            continue
-        yield term, coeff
 
 
 def _ladder_factor_count(monomial):
@@ -124,12 +116,10 @@ def estimate_sparse_resources(mh, n_b, num_sites):
     fermion_Cl = 0
     fermion_terms = 0
     if len(mh.fermion_part.terms) > 0:
-        f_q = jordan_wigner_cached(mh.fermion_part)
-        for pauli_term, _coeff in _pauli_strings(f_q):
-            weight = len(pauli_term)
-            fermion_T += 4 * weight               # controlled-Pauli Toffoli decomp
-            fermion_Cl += 8 * weight
-            fermion_terms += 1
+        fstats = fermion_jw_stats(mh.fermion_part)
+        fermion_T = 4 * fstats['total_weight']    # controlled-Pauli Toffoli decomp
+        fermion_Cl = 8 * fstats['total_weight']
+        fermion_terms = fstats['n_pauli_terms']
 
     # --- 3. Mixed contribution (H_AV, H_WT — each carries native F · B factors) ---
     # Each `MixedTerm` is treated as ONE LCU summand whose block-encoding is
@@ -145,12 +135,12 @@ def estimate_sparse_resources(mh, n_b, num_sites):
     mixed_Cl = 0
     mixed_terms_count = 0
     for mt in mh.mixed_terms:
-        f_q = jordan_wigner_cached(mt.fermion_factor)
+        fstats = fermion_jw_stats(mt.fermion_factor)
         # T_F: PauliLCU sub-encoder cost. Approximate as Σ_p 4·weight T;
         # alias-sampling PREP overhead is small and folded into the
         # global PREP estimate below.
-        T_F = sum(4 * len(p) for p, _ in _pauli_strings(f_q))
-        Cl_F = sum(8 * len(p) for p, _ in _pauli_strings(f_q))
+        T_F = 4 * fstats['total_weight']
+        Cl_F = 8 * fstats['total_weight']
         # T_B: multi-mode sparse sub-encoder cost. Sum over boson monomials
         # (each contributes its P-factor Gilyén product cost).
         T_B = 0
