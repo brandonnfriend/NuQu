@@ -19,9 +19,19 @@
 # (the compiled mixed_ci backend and the official `trimci` package are lazy,
 # function-level, and never triggered by the pure-math cutoff call). openfermion
 # pulls scipy transitively anyway; pinning it keeps the tong import deterministic.
+# qualtran/attrs/cachetools MUST be pinned. pyLIQTR==1.3.4 does not pin qualtran,
+# so an unpinned install resolves a NEWER qualtran whose `CtrlSpec` is a slotted
+# attrs class with no __dict__ -> `functools.cached_property` on `.shapes` raises
+# `TypeError: No '__dict__' attribute on 'CtrlSpec' instance to cache 'shapes'`
+# inside the walk-operator t_complexity estimate. Smoke test 290356 (2026-08-03)
+# hit exactly this on qis3: Lambda computed fine, then the T-complexity step died.
+# These are the versions the laptop reference runs use (qualtran 0.4.0 works).
 pyLIQTR==1.3.4
+qualtran==0.4.0
 openfermion==1.6.1
 numpy==1.26.4
 scipy==1.12.0
 cirq==1.4.0
+attrs==26.1.0
+cachetools==7.1.1
 matplotlib==3.10.9
