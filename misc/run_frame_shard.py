@@ -72,11 +72,21 @@ def main():
     ap.add_argument("--phase0-core", type=int, default=2000, help="frame-opt core")
     ap.add_argument("--frame-runs", type=int, default=16, help="COO orbopt num_runs")
     ap.add_argument("--orbopt-cycles", type=int, default=10)
+    ap.add_argument("--ladder-n-runs", type=int, default=1,
+                    help="ensemble runs PER LADDER RUNG (independent mode); >1 gives robust "
+                         "convergence, needed when the boson init is unbiased")
+    ap.add_argument("--boson-init-mean", default=None,
+                    help="boson init: a float (truncated-geometric mean ~vacuum) or 'none' "
+                         "(UNIFORM over [0,N_f), no vacuum anchor = the unbiased control). "
+                         "Default keeps the solver's 0.5.")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
 
     sites = args.L ** args.dim
     A = max(1, round(args.filling * sites)) if args.filling is not None else args.A
+    bim = 0.5   # solver default (near-vacuum truncated-geometric)
+    if args.boson_init_mean is not None:
+        bim = None if str(args.boson_init_mean).lower() == "none" else float(args.boson_init_mean)
     t0 = time.time()
 
     # bare H. The FRAME (any mix of squeeze/LF/COO) is a SINGLE optimization operation fit
@@ -96,7 +106,8 @@ def main():
         "filling": args.filling, "frame": args.frame, "seed": args.seed,
         "n_b": args.n_b, "N_f": Hbare.N_f, "sites": sites,
         "n_terms": len(Hbare.terms), "ladder_mode": args.ladder_mode,
-        "phase0_runs": args.phase0_runs,
+        "phase0_runs": args.phase0_runs, "ladder_n_runs": args.ladder_n_runs,
+        "boson_init_mean": ("none" if bim is None else bim),
         "frame_info": {k: v for k, v in finfo.items()
                        if isinstance(v, (str, int, float, bool))},
         "rungs": [], "done": False,
@@ -148,7 +159,8 @@ def main():
         _adaptive_ladder_solve(
             Hind, A, args.ladder_start, args.n_rungs, solver, pt2_diag,
             max_core=args.max_core, max_rung_seconds=args.max_rung_seconds,
-            n_runs=1, seed=args.seed, verbose=True, on_rung=on_rung)
+            n_runs=args.ladder_n_runs, seed=args.seed, verbose=True, on_rung=on_rung,
+            boson_init_mean=bim)
 
     out["done"] = True
     out["wall_s"] = time.time() - t0

@@ -125,9 +125,18 @@ Learned the hard way; don't repeat the detours.
 - **SSH drops during a `sleep` inside a poll** (idle disconnect). Two robust patterns:
   (a) run the `sleep` **locally** in a background task, then a *fresh* `ssh` for the one-shot
   check; or (b) `ssh -o ServerAliveInterval=20 -o ServerAliveCountMax=20`.
-- **`RemoteUserCpu` is NOT a reliable parallelism probe** — it may count only the parent process,
-  not forked children, so a threaded/forked job can read ~1 core while actually using many. The
-  real proof of a speedup is **wall-time** (serial vs parallel, *same config and seed*).
+- **Pull the real job accounting — routinely, not just wall-clock.** `condor_history <cluster>
+  -af RequestCpus RemoteWallClockTime RemoteUserCpu RemoteSysCpu MemoryUsage NumJobStarts`. From it:
+  - **CPU-hours is the true cost metric** (wall-clock is for *your* turnaround). `sum(RemoteUserCpu)/3600`
+    ≈ actual CPU-time used; `sum(RemoteWallClockTime × RequestCpus)/3600` is the allocated upper
+    bound. Advisor's rule of thumb: **under ~100 CPU-hours is cheap** — so reframe "how far can we
+    push" around CPU-h, not wall-clock. (Ref: the whole 60-shard L=3 128k campaign was ~50 CPU-h
+    actual; the L=4/16k smoke ~2 CPU-h — we have large headroom to go deeper/bigger.)
+  - `RemoteUserCpu` for a *completed* job DOES count the forked children (it can exceed wall when
+    >1 core ran); it's only unreliable mid-run or for a *stuck* job (the earlier ~0 reading was
+    `random_core` hung). For a clean speedup number, still prefer **wall-time, same config+seed**.
+  - `MemoryUsage` = **peak RSS** → right-size `request_memory`. We've been over-requesting badly
+    (peaks ~24–46 GB against 128–192 GB requests); trim toward peak + headroom to schedule better.
 - Confirm completion with `condor_history <cluster> -af ExitCode` (want all `0`) **and** by
   grepping `'"done": true'` in the shard JSONs — a job can exit 0 while a shard capped early.
 - A shard sitting at **0 rungs forever** is usually *stuck*, not slow — historically that was the
@@ -159,6 +168,15 @@ at L=3, which *hung* every L=3/high-filling job. Fixing it (direct O(A) sampling
 speedup and unblocked L=3 entirely — far bigger than any parallelization. When a job is "slow"
 or "single-threaded," profile a representative solve first; the bottleneck is often not where you
 assume.
+
+Follow-up (2026-08): re-profiling a *large-core* solve after the random_core fix showed **no
+second jam** — the cost is the genuine C++ H-build + `eigsh` + `expand` (compute-bound, scales
+~linearly with core, per the L=4 ladder). So reaching 1M+ cores is a *time* cost, not a wall,
+and it's affordable in CPU-hours. Two levers if we want it faster: (a) `_MATFREE_N=2000` means
+the cluster runs **scipy `eigsh` for all real cores** (no official Davidson in the self-provisioned
+env) — a C++ Davidson would cut the eigensolve; (b) the dormant C++ OpenMP on the H-build/expand
+helps *large* cores (unlike the overhead-bound small L=2 solves where it was ~1×). Neither is
+needed for correctness; both are speedups for the deepest convergence tests.
 
 ---
 

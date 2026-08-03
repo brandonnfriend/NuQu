@@ -514,7 +514,8 @@ def _solve_ladder(H, A, cores, solver, pt2_diag, n_runs=4, seed=0, pt2=True,
 
 def _adaptive_ladder_solve(H, A, ladder_start, n_rungs, solver, pt2_diag,
                            max_core=None, max_rung_seconds=None,
-                           n_runs=4, seed=0, verbose=True, on_rung=None):
+                           n_runs=4, seed=0, verbose=True, on_rung=None,
+                           boson_init_mean=0.5):
     """Geometric core ladder (ladder_start x2 each rung) with LAPTOP GUARDS: stop
     early once a rung's wall-clock exceeds `max_rung_seconds` (so the next, ~4x
     costlier rung isn't attempted) or the next core would exceed `max_core`. Returns
@@ -533,7 +534,8 @@ def _adaptive_ladder_solve(H, A, ladder_start, n_rungs, solver, pt2_diag,
             break
         mr = max(12, int(np.ceil(np.log(max(r, 2) / 20.0) / np.log(1.5))) + 4)
         t = time.time()
-        res = solver(H, n_elec=A, n_runs=n_runs, n_dets=r, seed=seed, max_rounds=mr)
+        res = solver(H, n_elec=A, n_runs=n_runs, n_dets=r, seed=seed, max_rounds=mr,
+                     boson_init_mean=boson_init_mean)
         wall = time.time() - t
         pr = pt2_from_result(H, res, diag_fn=pt2_diag)
         rung = {"core": int(res.n_dets), "E_var": float(pr["E_var"]),
