@@ -2,6 +2,8 @@ import os
 import json
 from datetime import datetime
 
+from src_PI.utils.manifest import build_manifest
+
 
 def save_sweep_data(L, dim, params, sweep_results, config=None, label=None,
                     data_root=None):
@@ -58,6 +60,9 @@ def save_sweep_data(L, dim, params, sweep_results, config=None, label=None,
         "timestamp": current_time,
         "date": current_date,
         "label": label,
+        # Commit-pinned reproducibility manifest (task 34, I3): every sweep file
+        # records the git commit / dirty flag / host that produced it.
+        "manifest": build_manifest(),
     }
     if config is not None:
         metadata["config"] = config.to_dict()

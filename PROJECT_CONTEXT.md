@@ -21,7 +21,7 @@ Deep context for the NuQu project. Loaded on demand (not every conversation). Fo
 - `plot_sweep_data.py` — loaders + plotters: single-L T-counts/Λ/runtime, qubitization-vs-Trotter total cost vs A, total cost vs L for chosen A. All plots saved under `data/<date>/`.
 - `src_PI/hamiltonians/`
   - `ConstructEFT.py` — assembles `H_pos` and `H_mom` (Jordan–Wigner on the static fermion sector).
-  - `core/DynamicalPion.py` — `H_pion_free`, `H_axial_vector` (H_AV), `H_WT_Logic` (Weinberg–Tomozawa).
+  - `core/pion_basis/{amplitude,fock,fock_native}.py` — the dynamical-pion terms (`H_pion_free`, `H_axial_vector` (H_AV), `H_WT_Logic` (Weinberg–Tomozawa)), now split by pion basis. (Was the single `core/DynamicalPion.py`, removed in the basis refactor; `amplitude.py` = the Watson binary-field path, `fock.py`/`fock_native.py` = the occupation-number path.)
   - `core/StaticTerms.py` — nucleon hopping + on-site + contact (`HC`, `HCI2`).
   - `core/Operators.py` — `Pi_Squared`, `Gradient_Squared`, `Momentum_Squared`, `Nucleon_Transition_JW`.
   - `core/EFTParameters.py` — physical constants, dynamic cutoffs, `T_cross` time scale.
@@ -80,7 +80,7 @@ The Λ audit at L=2, dim=3, A=2 measured **c_Π · Π_max² = 73.25%** of Λ and
 - `utils.py` has a TODO block about generalizing strides/PBC, but the dimension-agnostic helpers in `LatticeGeometry.py` already cover most of it; the `_1D` helpers in `utils.py` are legacy duplicates.
 
 ## Resolved
-- *Logical-qubit count not saving properly* (fixed): two bugs — `EstimateResources.py` was reading the pyLIQTR key as `'Logicalqubits'` while pyLIQTR returns `'LogicalQubits'`; and the `combined // 2` halving was wrong. `estimators.run_qubitization_analysis` now returns `LogicalQubits = max(pos, mom)` plus per-walk diagnostics (`Pos_LogicalQubits`, `Mom_LogicalQubits`); `evaluate_resources` exposes `Logical_Qubits`, `Pos_Walk_Logical_Qubits`, `Mom_Walk_Logical_Qubits`; `run_nucleon_sweep.py` saves all three. Verified by `tests/test_logical_qubits.py` (L=2, dim=2, A=1: pos=245, mom=244, reported=245).
+- *Logical-qubit count not saving properly* (fixed): two bugs — `EstimateResources.py` was reading the pyLIQTR key as `'Logicalqubits'` while pyLIQTR returns `'LogicalQubits'`; and the `combined // 2` halving was wrong. `estimators.run_qubitization_analysis` now returns `LogicalQubits = max(pos, mom)`; `evaluate_resources` exposes `Logical_Qubits`. **Update (basis refactor):** the per-walk diagnostics are no longer the hardcoded `Pos_/Mom_Walk_Logical_Qubits` fields — they're now a generic **`Per_Sub_Walk`** list of `{name, T, Clifford, LogicalQubits, alpha}` dicts (name = `'H_pos'`/`'H_mom'` for the amplitude basis, `'fock'` for the native path), so any number of sub-walks is handled. Verified by `tests/test_logical_qubits.py` (reads `Per_Sub_Walk`; L=2, dim=2, A=1: pos=245, mom=241, reported=245).
 
 ## Live state
 - Venv: Python 3.10.11, `pip install -r requirements.txt` clean. `pypdf` installed in the venv for Claude's use (read `claude/Watson2025.pdf` via `from pypdf import PdfReader` — 120 pages).
