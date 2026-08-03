@@ -52,6 +52,15 @@ Read it before:
 - Reasoning about Watson 2025 lemmas, the split-oracle structure, or qubit-counting conventions.
 - Picking up follow-up work referenced in "Live state" (VC encoding comparison, lambda-reduction levers, etc.).
 
+## Before ANY HPC / cluster run
+**Read `hpc/HPC_WORKFLOW.md` first** — for classical *and* quantum runs. It is the standing
+reference for how the user wants cluster work done. Most important is the **launch-approval loop**:
+you commit and say what changed → **the user pushes** → the user gives an explicit **go-ahead** →
+**then** you `condor_submit` and report the **batch/cluster ID**. Never push, never rsync code to
+the server to launch around the push, never start a run without the go-ahead. The doc also covers
+the qis1–4-only allocation, self-provisioning + fork-ensemble parallelism, memory sizing, and
+monitoring gotchas.
+
 ## Open homework (user-owned tasks)
 Bring up periodically when contextually relevant; don't nag.
 
