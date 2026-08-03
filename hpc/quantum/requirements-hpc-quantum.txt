@@ -1,0 +1,19 @@
+# Minimal runtime for the QUANTUM resource-estimation HPC shards (Python 3.10).
+# Pinned to the versions the laptop reference runs were validated against
+# (mirrors the repo-root requirements.txt quantum stack).
+#
+# This is the quantum counterpart of hpc/detsvsL/requirements-hpc.txt and is a
+# HEAVIER, riskier tree than the classical one — pyLIQTR pulls cirq/qualtran plus
+# juliacall/juliapkg (which can try to auto-provision a Julia runtime on first
+# import) and gmpy2 (needs GMP/MPFR). SMOKE-TEST ON A qis NODE FIRST:
+#     python -m misc.run_quantum_shard --test
+# which imports pyLIQTR through a real L=2 A=1 estimate and surfaces any Julia /
+# GMP provisioning problem before a real campaign is launched.
+#
+# NO C++ build step (unlike the classical shard): evaluate_resources is pure
+# Python/numpy symbolic resource counting — there is no compiled hot path.
+pyLIQTR==1.3.4
+openfermion==1.6.1
+numpy==1.26.4
+cirq==1.4.0
+matplotlib==3.10.9
