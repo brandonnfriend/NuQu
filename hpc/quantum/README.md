@@ -26,7 +26,11 @@ qis1–4 allocation, and the self-provisioning pattern all apply here unchanged.
 ## Launch (on the pinned submit node)
 ```sh
 ssh hep-submit
-cd /nfs_scratch/bfriend3/NuQu/NuQu && git fetch origin -q && git reset --hard origin/main
+# Reconcile to the CAMPAIGN BRANCH (this harness is not on main yet). Untracked
+# campaign_*/ output dirs survive the reset.
+cd /nfs_scratch/bfriend3/NuQu/NuQu && git fetch origin -q \
+  && git checkout quantum-frame-qpe-campaign \
+  && git reset --hard origin/quantum-frame-qpe-campaign
 cd hpc/quantum
 
 # 1) SMOKE TEST FIRST — one job that imports pyLIQTR via a real L=2 A=1 estimate.

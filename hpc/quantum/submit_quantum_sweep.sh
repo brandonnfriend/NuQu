@@ -35,7 +35,7 @@ Log                     = ${DIR}/logs/campaign.log
 requirements = (Machine == "qis1.hep.wisc.edu") || (Machine == "qis2.hep.wisc.edu") || (Machine == "qis3.hep.wisc.edu")
 request_cpus            = 1
 request_memory          = 4G
-request_disk            = 6G
+request_disk            = 10G
 queue
 EOF
   condor_submit "$DIR/campaign.sub"
@@ -74,7 +74,7 @@ Log                     = ${DIR}/logs/campaign.log
 requirements = (Machine == "qis1.hep.wisc.edu") || (Machine == "qis2.hep.wisc.edu") || (Machine == "qis3.hep.wisc.edu")
 request_cpus            = 1
 request_memory          = \$(MEM)
-request_disk            = 6G
+request_disk            = 10G
 queue L,SERIES,MEM from ${DIR}/shards.txt
 EOF
 
