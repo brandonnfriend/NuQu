@@ -64,17 +64,24 @@ def _config_from_series(series):
 
 
 def run_shard(L, series, A_values, dim=3, frame_occupation=None,
-              delta_E=DEFAULT_DELTA_E_MEV, out=None, extra_manifest=None):
+              delta_E=DEFAULT_DELTA_E_MEV, out=None, extra_manifest=None,
+              epsilon_cut=None):
     s = SERIES[series]
     config = _config_from_series(series)
-    run_cfg = get_sweep_config(L=L, dim=dim, frame_occupation=frame_occupation, **s)
+    cfg_kw = dict(L=L, dim=dim, frame_occupation=frame_occupation, **s)
+    # epsilon_cut override (Option A: Watson budget-derived ε_cut for the amplitude
+    # cutoff, so the amplitude n_b matches the Trotter baseline). Only affects the
+    # energy_bound/ns amplitude paths; ignored by fock/tong.
+    if epsilon_cut is not None:
+        cfg_kw['epsilon_cut'] = epsilon_cut
+    run_cfg = get_sweep_config(**cfg_kw)
     params = get_physical_parameters()
 
     out_data = {
         'metadata': {
             'kind': 'quantum_shard', 'L': L, 'dim': dim, 'series': series,
             'series_config': s, 'delta_E_MeV': delta_E,
-            'frame_occupation': frame_occupation,
+            'frame_occupation': frame_occupation, 'epsilon_cut': epsilon_cut,
             'params': params,
             'config': config.to_dict(),
             'manifest': build_manifest(extra=extra_manifest),
@@ -153,6 +160,10 @@ def main():
                     help="comma-separated nucleon counts (default 1,2,4)")
     ap.add_argument('--frame-occupation', type=float, default=None,
                     help="per-mode <n> -> frame-reduced Fock register (task 34 seam a)")
+    ap.add_argument('--epsilon-cut', type=float, default=None,
+                    help="override the amplitude-basis field-cutoff error (Option A: the "
+                         "Watson budget-derived value, e.g. 6.275e-6, so amplitude n_b "
+                         "matches the Trotter baseline). Ignored by fock/tong paths.")
     ap.add_argument('--delta-E', type=float, default=DEFAULT_DELTA_E_MEV)
     ap.add_argument('--out', default=None, help="output JSON path (per-shard)")
     args = ap.parse_args()
@@ -164,7 +175,8 @@ def main():
     A_values = [int(x) for x in args.A_values.split(',') if x.strip()]
     data = run_shard(args.L, args.series, A_values, dim=args.dim,
                      frame_occupation=args.frame_occupation, delta_E=args.delta_E,
-                     out=args.out, extra_manifest={'run_args': vars(args)})
+                     epsilon_cut=args.epsilon_cut, out=args.out,
+                     extra_manifest={'run_args': vars(args)})
     n = len(data['results'])
     print(f"[qshard] done: {n} points, wall={data.get('wall_s', 0):.1f}s -> {args.out}")
 
