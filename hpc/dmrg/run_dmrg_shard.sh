@@ -33,21 +33,21 @@ uv venv --python 3.10 "$SANDBOX/venv" >/dev/null 2>&1 || { echo "ERROR: uv venv 
 PY="$SANDBOX/venv/bin/python"
 VIRTUAL_ENV="$SANDBOX/venv" uv pip install -q -r "$REPO/hpc/dmrg/requirements-hpc.txt" \
     || { echo "ERROR: pip install failed" >&2; exit 1; }
-# block2's wheel bundles libmkl_avx2.so.1 + libmkl_avx512.so.1 but NOT libmkl_def.so.1
-# (verified by inspecting the wheel). MKL ALWAYS loads libmkl_def as its base kernel
-# dispatcher -- even with AVX2 forced -- so on the AMD (Zen4) qis nodes it reaches for the
-# missing def and dies. The MKL kernel libs all export the SAME symbol set (per-ISA
-# implementations), so symlink the absent def to block2's OWN bundled avx2 kernel: MKL's
-# def load then succeeds with a Zen4-valid, ABI-matched kernel from block2's exact build.
-# (Dropping pip's real libmkl_def in instead fails -- its build mismatches block2's
-# hash-renamed vendored core -> "undefined symbol".) Keep AVX2 as the extra ISA too.
+# block2's wheel bundles only AVX2/AVX512 MKL kernels, NOT libmkl_def (verified by
+# inspecting the wheel). On the AMD (Zen4) qis nodes MKL classifies the CPU as generic
+# "type 0" and DEMANDS the def kernel -- symlinking def->avx2 only earns "MKL type 5 not
+# suitable for type 0 processor". Instead LD_PRELOAD the COMPLETE pip mkl==2021.4 runtime
+# (block2's own pinned dep, already installed): it ships a real type-0 libmkl_def that IS
+# suitable for AMD, and preloading its libmkl_rt makes block2 resolve every MKL call
+# against that one consistent install -- no missing def, no undefined-symbol mix from
+# grafting. Generic kernel on AMD is slower but correct, which is all a reference DMRG needs.
 export MKL_ENABLE_INSTRUCTIONS=AVX2
-B2LIBS="$(find "$SANDBOX/venv" -type d -name 'block2.libs' -print -quit 2>/dev/null)"
-if [ -n "$B2LIBS" ] && [ -e "$B2LIBS/libmkl_avx2.so.1" ]; then
-  ln -sf libmkl_avx2.so.1 "$B2LIBS/libmkl_def.so.1"
-  echo "[dmrg-shard] libmkl_def.so.1 -> libmkl_avx2.so.1 (block2 build)"
+MKLRT="$(find "$SANDBOX/venv" -name 'libmkl_rt.so*' -not -path '*block2.libs*' -print -quit 2>/dev/null)"
+if [ -n "$MKLRT" ]; then
+  export LD_PRELOAD="$MKLRT${LD_PRELOAD:+:$LD_PRELOAD}"
+  echo "[dmrg-shard] LD_PRELOAD complete mkl: $MKLRT"
 else
-  echo "WARN: block2.libs or bundled libmkl_avx2.so.1 not found ('$B2LIBS')" >&2
+  echo "WARN: pip libmkl_rt.so.1 not found for preload" >&2
 fi
 
 OUTDIR="$REPO/hpc/dmrg/campaign_${CAMPAIGN}/shards"
