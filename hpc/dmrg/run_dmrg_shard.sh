@@ -34,13 +34,21 @@ PY="$SANDBOX/venv/bin/python"
 VIRTUAL_ENV="$SANDBOX/venv" uv pip install -q -r "$REPO/hpc/dmrg/requirements-hpc.txt" \
     || { echo "ERROR: pip install failed" >&2; exit 1; }
 # block2's wheel bundles libmkl_avx2.so.1 + libmkl_avx512.so.1 but NOT libmkl_def.so.1
-# (verified by inspecting the wheel). MKL's dispatcher picks the generic "def" kernel on
-# non-Intel CPUs -- and the qis nodes are AMD EPYC (Zen4) -- so it reaches for the missing
-# libmkl_def and dies. Force the AVX2 kernel block2 DID bundle (Zen4 supports AVX2): MKL
-# then loads block2.libs/libmkl_avx2.so.1, never touches def, and stays internally
-# consistent (block2's own build). No external-lib surgery -- that gave undefined-symbol
-# errors because pip's def/core were a different build than block2's vendored, hashed set.
+# (verified by inspecting the wheel). MKL ALWAYS loads libmkl_def as its base kernel
+# dispatcher -- even with AVX2 forced -- so on the AMD (Zen4) qis nodes it reaches for the
+# missing def and dies. The MKL kernel libs all export the SAME symbol set (per-ISA
+# implementations), so symlink the absent def to block2's OWN bundled avx2 kernel: MKL's
+# def load then succeeds with a Zen4-valid, ABI-matched kernel from block2's exact build.
+# (Dropping pip's real libmkl_def in instead fails -- its build mismatches block2's
+# hash-renamed vendored core -> "undefined symbol".) Keep AVX2 as the extra ISA too.
 export MKL_ENABLE_INSTRUCTIONS=AVX2
+B2LIBS="$(find "$SANDBOX/venv" -type d -name 'block2.libs' -print -quit 2>/dev/null)"
+if [ -n "$B2LIBS" ] && [ -e "$B2LIBS/libmkl_avx2.so.1" ]; then
+  ln -sf libmkl_avx2.so.1 "$B2LIBS/libmkl_def.so.1"
+  echo "[dmrg-shard] libmkl_def.so.1 -> libmkl_avx2.so.1 (block2 build)"
+else
+  echo "WARN: block2.libs or bundled libmkl_avx2.so.1 not found ('$B2LIBS')" >&2
+fi
 
 OUTDIR="$REPO/hpc/dmrg/campaign_${CAMPAIGN}/shards"
 mkdir -p "$OUTDIR"
