@@ -98,8 +98,13 @@ def build_mpo(H, L, dim, A, N_f, driver=None, iprint=0):
 
 
 def run_dmrg(L, dim, A, N_f=2, n_b=1, bond_dims=(20, 40, 80, 160, 320),
-             n_sweeps_per=4, iprint=0):
-    """DMRG energy vs bond dimension chi for the mixed H. Returns list of dicts."""
+             n_sweeps_per=4, iprint=0, on_chi=None):
+    """DMRG energy vs bond dimension chi for the mixed H. Returns list of dicts.
+
+    `on_chi(dict)`, if given, fires after EACH bond dimension with that rung's
+    result (chi, E, S_max_bond) -- lets an HPC shard save incrementally so a run
+    that times out at a large chi keeps everything it finished (the DMRG cost climbs
+    steeply with chi, so the top rung is exactly where a long run gets cut off)."""
     from classical.trimci import build_from_eft
     H = build_from_eft(L=L, dim=dim, n_b=n_b, N_f=N_f)
     driver, mpo, const = build_mpo(H, L, dim, A, N_f, iprint=iprint)
@@ -118,8 +123,11 @@ def run_dmrg(L, dim, A, N_f=2, n_b=1, bond_dims=(20, 40, 80, 160, 320),
             smax = float(np.max(bd))
         except Exception:
             smax = None
-        out.append({'chi': chi, 'E': float(np.real(e)) + float(np.real(const)),
-                    'S_max_bond': smax})
+        rung = {'chi': chi, 'E': float(np.real(e)) + float(np.real(const)),
+                'S_max_bond': smax}
+        out.append(rung)
+        if on_chi is not None:
+            on_chi(rung)
     return out, H
 
 

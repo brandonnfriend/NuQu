@@ -1,0 +1,10 @@
+# Runtime for the block2-DMRG isospectrality-reference HPC shards (Python 3.10).
+# build_from_eft needs openfermion (pulls cirq); DMRG needs block2 (Linux manylinux
+# wheel, installs clean via uv). The mixed_ci C++ extension is NOT needed here --
+# classical.trimci.backend imports it lazily (try/except), and DMRG uses block2's own
+# MPO, not the TrimCI C++ solver -- so there is no compile step in this workflow.
+numpy==1.26.4
+scipy==1.12.0
+openfermion==1.6.1
+cirq==1.4.0
+block2==0.5.3
