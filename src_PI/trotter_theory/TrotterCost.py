@@ -1,3 +1,13 @@
+"""
+⚠️ LEGACY — LIKELY INCORRECT. DO NOT USE FOR NEW WORK. ⚠️
+
+Wraps the deprecated `trotter_theory.py` model (see its header for the list of
+errors found in task 11). Superseded by `src_PI/trotter_theory/trotter_exact.py`
+(exact Watson Theorem-64 bound, validated against Table IX). Kept only so legacy
+plotting call sites don't break; its `get_total_trotter_cost` numbers are not
+trustworthy.
+"""
+
 import numpy as np
 from src_PI.hamiltonians.core.EFTParameters import get_physical_parameters, calculate_dynamic_cutoffs
 from src_PI.trotter_theory.trotter_theory import DynamicalPion_TrotterStep_Tgates_cost, get_Trotter_steps_cross_time

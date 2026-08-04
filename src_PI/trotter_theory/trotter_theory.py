@@ -1,3 +1,22 @@
+"""
+⚠️ LEGACY — LIKELY INCORRECT. DO NOT USE FOR NEW WORK. ⚠️
+
+This was the project's *first* Trotter-cost model (spring 2026), built before we
+understood Watson (arXiv:2312.05344) well. Task 11 (2026-08) established that it
+has several errors:
+  * a FREE COEFFICIENT `Cp` fit to Watson's L=10 datapoint — it corresponds to the
+    paper's *informal* "very loose" bound (Eq 34/35), not the exact Theorem-64
+    bound their reported numbers actually use;
+  * a spurious explicit `·L³` (double-count: π_max·Π_max already ∝ L³), so the fit
+    mis-scales as (L/10)³;
+  * `log10` where the RUS synthesis constants demand `log₂` (~3.3× per step);
+  * a fixed `ε_cut=0.1` instead of the budget-derived cutoff (wrong n_b).
+
+REPLACED BY `src_PI/trotter_theory/trotter_exact.py`, which implements the exact
+Watson Theorem-64 bound (no free coefficient) and reproduces Table IX. This file
+is kept only as the deprecated comparison path; do not trust its numbers.
+"""
+
 import numpy as np
 from src_PI.hamiltonians.core.EFTParameters import get_physical_parameters, calculate_dynamic_cutoffs, T_cross_MeV
 
