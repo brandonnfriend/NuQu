@@ -101,27 +101,51 @@ def eps_cut_from_budget(budget):
 #  The two tasks
 # ---------------------------------------------------------------------------
 
-def _assemble(L, A, params, eps_cut, eps_prod, t, coeff, dim, E_bound):
-    """Shared assembly: cutoffs → Ξ → r → per-step → total. Returns intermediates."""
-    n_b, pi_max, Pi_max = calculate_dynamic_cutoffs(
+def cutoffs_for_nb(n_b, params, ratio):
+    """(π_max, Π_max) for a *chosen* n_b, from the digitization relation (Eq 78):
+    `2^n_b − 1 = (2·a_L³/π)·π_max·Π_max` ⟹ `π_max·Π_max = (2^n_b − 1)·π/(2·a_L³)`.
+    The product is fixed by n_b; `ratio = Π_max/π_max` (a physical shape, from the
+    Lemma-5 cutoffs at that point) splits it. Since Ξ is ~100% WT–WT ∝ (π_max·Π_max)²,
+    the result depends on n_b essentially through the product alone.
+    """
+    a_L = params['a_L']
+    product = (2.0 ** n_b - 1.0) * np.pi / (2.0 * a_L ** 3)
+    return np.sqrt(product / ratio), np.sqrt(product * ratio)
+
+
+def _assemble(L, A, params, eps_cut, eps_prod, t, coeff, dim, E_bound, n_b_override=None):
+    """Shared assembly: cutoffs → Ξ → r → per-step → total. Returns intermediates.
+
+    `n_b_override`: if given, evaluate the Trotter cost in a Hilbert space with THAT
+    many bits/pion instead of Watson's Lemma-5 choice — the lever for costing Trotter
+    in the same reduced (low-pion-occupation) space we use for qubitization. The
+    Lemma-5 n_b is still reported as `n_b_lemma`.
+    """
+    n_b_lemma, pi_L, Pi_L = calculate_dynamic_cutoffs(
         L, dim, A, params, epsilon_cut=eps_cut, E_bound=E_bound)
+    if n_b_override is None:
+        n_b, pi_max, Pi_max = n_b_lemma, pi_L, Pi_L
+    else:
+        n_b = int(n_b_override)
+        pi_max, Pi_max = cutoffs_for_nb(n_b, params, ratio=Pi_L / pi_L)
     Xi = dynamical_pion_xi(L, A, pi_max, Pi_max, params)
     r = t ** 2 * Xi / (2.0 * eps_prod)
     delta = eps_prod / r                       # per-step synthesis budget (total ε_syn / r)
     t_step, g = per_step_tcost(L, n_b, delta, coeff)
     total_T = r * t_step
-    return dict(n_b=n_b, pi_max=float(pi_max), Pi_max=float(Pi_max), Xi=float(Xi),
-                t=float(t), r=float(r), per_step_T=float(t_step), g=float(g),
+    return dict(n_b=n_b, n_b_lemma=int(n_b_lemma), pi_max=float(pi_max), Pi_max=float(Pi_max),
+                Xi=float(Xi), t=float(t), r=float(r), per_step_T=float(t_step), g=float(g),
                 total_T=float(total_T), eps_cut=float(eps_cut), eps_prod=float(eps_prod))
 
 
 def crossing_time_cost(L, A, params=None, eps_total=0.1, E_kin=10.0,
-                       coeff='statement', dim=3, budget_split=3):
+                       coeff='statement', dim=3, budget_split=3, n_b_override=None):
     """Total Trotter T-cost for the crossing-time task (Watson Table IX), p=1.
 
     Fault-tolerant budget splits ε into `budget_split` equal parts (3 → prod/cut/syn).
     `t = T_cross = a_L·L·√(M_N/2E_kin)` (Eq 136). Validation target at L=10, A=40,
-    eps_total=0.1: Watson reports 1.3e42 T (n_b=39).
+    eps_total=0.1: Watson reports 1.3e42 T (n_b=39). `n_b_override` costs Trotter in a
+    reduced n_b Hilbert space (see `_assemble`).
     """
     if params is None:
         params = get_physical_parameters()
@@ -129,7 +153,7 @@ def crossing_time_cost(L, A, params=None, eps_total=0.1, E_kin=10.0,
     eps_cut = eps_cut_from_budget(budget)
     t = T_cross_MeV(params['a_L'], L, E_kin, params['M_N'])
     E_bound = E_kin * A                         # irrelevant at A≳few (contact term dominates)
-    out = _assemble(L, A, params, eps_cut, budget, t, coeff, dim, E_bound)
+    out = _assemble(L, A, params, eps_cut, budget, t, coeff, dim, E_bound, n_b_override)
     out['task'] = 'crossing_time'
     return out
 
@@ -141,10 +165,12 @@ def qpe_bits(dE, E_max=DEFAULT_E_MAX_MEV):
 
 
 def qpe_cost(L, A, params=None, dE=1.0, E_max=DEFAULT_E_MAX_MEV,
-             coeff='statement', dim=3):
+             coeff='statement', dim=3, n_b_override=None):
     """Total Trotter T-cost for the QPE spectroscopy task (Watson Fig 14), p=1 —
     the headline comparison. `m = ⌈log₂(E_max/ΔE)⌉`; per-source budget
     `√3·π/(3·2^m)`; `ε_cut = budget²/8`; `t = 2π/‖H‖` with ‖H‖=E_max.
+    `n_b_override` costs Trotter in a reduced n_b Hilbert space (the low-occupation
+    space we justify for qubitization) — pass our Fock n_b to compare like-for-like.
     """
     if params is None:
         params = get_physical_parameters()
@@ -152,6 +178,6 @@ def qpe_cost(L, A, params=None, dE=1.0, E_max=DEFAULT_E_MAX_MEV,
     budget = np.sqrt(3.0) * np.pi / (3.0 * 2 ** m)
     eps_cut = eps_cut_from_budget(budget)
     t = 2.0 * np.pi / E_max
-    out = _assemble(L, A, params, eps_cut, budget, t, coeff, dim, E_bound=E_max)
+    out = _assemble(L, A, params, eps_cut, budget, t, coeff, dim, E_max, n_b_override)
     out.update(task='qpe', m=m, dE=dE, E_max=E_max)
     return out
