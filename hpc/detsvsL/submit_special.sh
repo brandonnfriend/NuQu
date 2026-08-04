@@ -13,7 +13,11 @@
 set -eu
 LABEL="$1"; KIND="$2"; VALUES="$3"; FRAMES="$4"; NSEEDS="$5"; MAXCORE="$6"; L="$7"; MEM="$8"
 NB="${9:-2}"; BIM="${10:-}"; LNRUNS="${11:-1}"
-CAMPAIGN="$(date +%Y%m%d-%H%M%S)"; DIR="campaign_${CAMPAIGN}"; mkdir -p "$DIR/logs"
+# LABEL + pid go INTO the campaign id so two studies submitted in the same second get
+# DISTINCT dirs (the earlier nf_nb1/nf_nb2 collision was a timestamp-only dir clobbering
+# shard files). The id is passed verbatim to run_frame_shard.sh, which derives the
+# execute-side OUTDIR from it, so submit-side DIR and execute-side OUTDIR always match.
+CAMPAIGN="${LABEL}-$(date +%Y%m%d-%H%M%S)-$$"; DIR="campaign_${CAMPAIGN}"; mkdir -p "$DIR/logs"
 
 : > "$DIR/shards.txt"
 for FR in $FRAMES; do
@@ -40,7 +44,11 @@ when_to_transfer_output = ON_EXIT
 transfer_input_files    = run_frame_shard.sh
 transfer_output_files   = ""
 requirements = (Machine == "qis1.hep.wisc.edu") || (Machine == "qis2.hep.wisc.edu") || (Machine == "qis3.hep.wisc.edu") || (Machine == "qis4.hep.wisc.edu")
-request_cpus            = 4
+# 8 cpus: the LF frame-fit scan is now a FLAT fork over 17 scales x n_runs seeds (~51
+# tasks; frame.optimize_displacement), so it fans across all requested cpus instead of
+# being capped at the ensemble's n_runs. The deep single-run ladder rungs don't use the
+# extra cpus (peak RAM is unchanged -> MEM stays L-sized), so 8 is a schedulable balance.
+request_cpus            = 8
 request_memory          = ${MEM}
 request_disk            = 8G
 JobPrio                 = 20
@@ -51,4 +59,4 @@ queue FR,A,FILL,SEED from ${DIR}/shards.txt
 EOF
 condor_submit "$DIR/campaign.sub"
 echo "CAMPAIGN=${CAMPAIGN}  label=${LABEL}  jobs=${NJOBS}  L=${L}  max_core=${MAXCORE}  env=[${ENV}]"
-echo "combine: python -m misc.combine_detsvsL --shard-dir ${DIR}/shards --by-frame --label ${LABEL}_${CAMPAIGN}"
+echo "combine: python -m misc.combine_detsvsL --shard-dir ${DIR}/shards --by-frame --label ${CAMPAIGN}"

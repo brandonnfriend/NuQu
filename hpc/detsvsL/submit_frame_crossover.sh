@@ -24,11 +24,11 @@ MAXCORE="${4:-64000}"
 L="${5:-2}"                                # L=3 robustness check: is the crossover finite-size?
 case "$L" in 2) MEM=24G ;; 3) MEM=128G ;; 4) MEM=192G ;; *) MEM=96G ;; esac
 LADDER_MODE=independent
-FRAME_RUNS=4          # ensemble runs inside the one-shot frame fit (=request_cpus: 1 core/run)
+FRAME_RUNS=4          # COO orbopt ensemble runs (the LF scan self-parallelizes, below)
 ORBOPT_CYCLES=3       # COO/LF optimization cycles
 PHASE0_CORE=1000      # core at which the frame is fit (small = cheap)
 MAXRUNGSEC=1800       # 30 min/rung cap
-CAMPAIGN="$(date +%Y%m%d-%H%M%S)"
+CAMPAIGN="$(date +%Y%m%d-%H%M%S)-$$"    # -$$ so back-to-back submits get distinct dirs
 DIR="campaign_${CAMPAIGN}"
 mkdir -p "$DIR/logs"
 
@@ -52,7 +52,10 @@ Output                  = ${DIR}/logs/\$(FR)_f\$(FILL)_s\$(SEED).out
 Error                   = ${DIR}/logs/\$(FR)_f\$(FILL)_s\$(SEED).err
 Log                     = ${DIR}/logs/campaign.log
 requirements = (Machine == "qis1.hep.wisc.edu") || (Machine == "qis2.hep.wisc.edu") || (Machine == "qis3.hep.wisc.edu") || (Machine == "qis4.hep.wisc.edu")
-request_cpus            = 4
+# 8 cpus: the LF frame-fit scan now fans across all cpus (flat fork over ~51 scale x seed
+# tasks in frame.optimize_displacement) instead of being capped at the ensemble n_runs.
+# Deep single-run ladder rungs don't use the extra cpus, so peak RAM (=MEM) is unchanged.
+request_cpus            = 8
 request_memory          = ${MEM}
 request_disk            = 8G
 JobPrio                 = 30
