@@ -22,7 +22,7 @@ NJOBS=$(wc -l < "$DIR/shards.txt")
 
 cat > "$DIR/campaign.sub" <<EOF
 Executable              = ./run_dmrg_shard.sh
-arguments               = \$(L) \$(A) ${CAMPAIGN} ${N_F} ${BOND_DIMS} ${NSWEEPS}
+arguments               = \$(L) \$(A) ${CAMPAIGN} ${N_F} ${BOND_DIMS} ${NSWEEPS} ${CPUS}
 should_transfer_files   = YES
 when_to_transfer_output = ON_EXIT
 transfer_input_files    = run_dmrg_shard.sh

@@ -8,3 +8,8 @@ scipy==1.12.0
 openfermion==1.6.1
 cirq==1.4.0
 block2==0.5.3
+# block2's manylinux wheel links Intel MKL but does NOT vendor the full runtime --
+# it dlopens libmkl_def.so.1 at run time and dies without it. The 2023.x mkl wheel
+# ships the .so.1-versioned libs block2 0.5.3 expects (2024+ moved to .so.2); the run
+# script adds venv/lib to LD_LIBRARY_PATH so the loader finds them.
+mkl==2023.2.0
