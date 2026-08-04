@@ -33,11 +33,19 @@ uv venv --python 3.10 "$SANDBOX/venv" >/dev/null 2>&1 || { echo "ERROR: uv venv 
 PY="$SANDBOX/venv/bin/python"
 VIRTUAL_ENV="$SANDBOX/venv" uv pip install -q -r "$REPO/hpc/dmrg/requirements-hpc.txt" \
     || { echo "ERROR: pip install failed" >&2; exit 1; }
-# the mkl wheel drops its .so libs in venv/lib -> put it on the loader path so block2's
-# dlopen of libmkl_def.so.1 succeeds. Fail loudly here if the lib still isn't present.
-export LD_LIBRARY_PATH="$SANDBOX/venv/lib:${LD_LIBRARY_PATH:-}"
-ls "$SANDBOX/venv/lib/"libmkl_def.so* >/dev/null 2>&1 \
-    || echo "WARN: libmkl_def.so* not found in venv/lib (mkl wheel layout changed?)" >&2
+# MKL loads its kernel libs (libmkl_def/avx/vml.so.1) from the SAME dir as libmkl_core,
+# i.e. block2's vendored block2.libs/ -- but the wheel strips them. Copy the matching
+# mkl==2021.4 wheel's kernel libs into block2.libs/ so the dir-relative load succeeds
+# (LD_LIBRARY_PATH alone is not enough -- MKL builds the path from libmkl_core's dir).
+B2LIBS="$(find "$SANDBOX/venv" -type d -name 'block2.libs' -print -quit 2>/dev/null)"
+MKLSRC="$(find "$SANDBOX/venv" -name 'libmkl_def.so*' -print -quit 2>/dev/null | xargs -r dirname)"
+if [ -n "$MKLSRC" ] && [ -n "$B2LIBS" ]; then
+  cp -n "$MKLSRC"/libmkl_*.so* "$B2LIBS"/ 2>/dev/null || true
+  echo "[dmrg-shard] mkl kernel libs: $MKLSRC -> $B2LIBS"
+else
+  echo "WARN: could not locate mkl libs (MKLSRC='$MKLSRC') or block2.libs ('$B2LIBS')" >&2
+fi
+export LD_LIBRARY_PATH="${MKLSRC:-}:${B2LIBS:-}:${LD_LIBRARY_PATH:-}"
 
 OUTDIR="$REPO/hpc/dmrg/campaign_${CAMPAIGN}/shards"
 mkdir -p "$OUTDIR"
