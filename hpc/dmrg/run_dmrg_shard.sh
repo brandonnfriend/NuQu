@@ -33,22 +33,14 @@ uv venv --python 3.10 "$SANDBOX/venv" >/dev/null 2>&1 || { echo "ERROR: uv venv 
 PY="$SANDBOX/venv/bin/python"
 VIRTUAL_ENV="$SANDBOX/venv" uv pip install -q -r "$REPO/hpc/dmrg/requirements-hpc.txt" \
     || { echo "ERROR: pip install failed" >&2; exit 1; }
-# MKL loads its kernel libs (libmkl_def/avx/vml.so.1) from the SAME dir as libmkl_core,
-# i.e. block2's vendored block2.libs/ -- but the wheel strips them. block2.libs/ therefore
-# has an INCOMPLETE, and (vs the pip wheel) mismatched-build, mkl set: just adding the
-# missing libmkl_def gives "undefined symbol" because core/def come from different builds.
-# Fix: force-overwrite ALL libmkl_*.so* in block2.libs/ with the pinned mkl==2021.4 wheel's
-# libs, so core + rt + def + avx + vml are one consistent install (block2 pins that exact
-# version, so replacing its vendored copies is safe).
-B2LIBS="$(find "$SANDBOX/venv" -type d -name 'block2.libs' -print -quit 2>/dev/null)"
-MKLSRC="$(find "$SANDBOX/venv" -name 'libmkl_def.so*' -print -quit 2>/dev/null | xargs -r dirname)"
-if [ -n "$MKLSRC" ] && [ -n "$B2LIBS" ]; then
-  cp -f "$MKLSRC"/libmkl_*.so* "$B2LIBS"/ 2>/dev/null || true
-  echo "[dmrg-shard] mkl 2021.4 libs -> block2.libs ($(ls "$B2LIBS"/libmkl_*.so* 2>/dev/null | wc -l) libs)"
-else
-  echo "WARN: could not locate mkl libs (MKLSRC='$MKLSRC') or block2.libs ('$B2LIBS')" >&2
-fi
-export LD_LIBRARY_PATH="${MKLSRC:-}:${B2LIBS:-}:${LD_LIBRARY_PATH:-}"
+# block2's wheel bundles libmkl_avx2.so.1 + libmkl_avx512.so.1 but NOT libmkl_def.so.1
+# (verified by inspecting the wheel). MKL's dispatcher picks the generic "def" kernel on
+# non-Intel CPUs -- and the qis nodes are AMD EPYC (Zen4) -- so it reaches for the missing
+# libmkl_def and dies. Force the AVX2 kernel block2 DID bundle (Zen4 supports AVX2): MKL
+# then loads block2.libs/libmkl_avx2.so.1, never touches def, and stays internally
+# consistent (block2's own build). No external-lib surgery -- that gave undefined-symbol
+# errors because pip's def/core were a different build than block2's vendored, hashed set.
+export MKL_ENABLE_INSTRUCTIONS=AVX2
 
 OUTDIR="$REPO/hpc/dmrg/campaign_${CAMPAIGN}/shards"
 mkdir -p "$OUTDIR"

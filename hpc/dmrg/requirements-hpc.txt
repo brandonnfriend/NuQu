@@ -8,8 +8,8 @@ scipy==1.12.0
 openfermion==1.6.1
 cirq==1.4.0
 block2==0.5.3
-# block2 0.5.3 pins mkl==2021.4 (uv would pull it anyway; stated here for clarity). Its
-# wheel vendors libmkl_core/rt into block2.libs/ but STRIPS the dynamically-loaded MKL
-# kernel libs (libmkl_def/avx/vml...), and MKL loads those from the dir where libmkl_core
-# lives -> the run script copies this wheel's kernel libs into block2.libs/ so it works.
+# block2 0.5.3 pins mkl==2021.4 (uv pulls it transitively; stated here for clarity). Its
+# wheel bundles the libmkl_avx2/avx512 kernels but NOT libmkl_def, so on the AMD (Zen4)
+# qis nodes MKL would reach for the missing generic kernel and die -- the run script sets
+# MKL_ENABLE_INSTRUCTIONS=AVX2 to use the bundled AVX2 kernel instead (no lib surgery).
 mkl==2021.4
