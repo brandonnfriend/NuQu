@@ -31,6 +31,9 @@ def main():
     ap.add_argument("--bond-dims", default="100,200,400,800",
                     help="comma-separated chi schedule (warm-started in order)")
     ap.add_argument("--n-sweeps-per", type=int, default=6)
+    ap.add_argument("--max-chi-seconds", type=float, default=None,
+                    help="stop before the next chi if a chi step exceeds this (block2 "
+                         "cost ~chi^3, so a slow chi means the next never finishes)")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
 
@@ -62,7 +65,8 @@ def main():
               f"S_max={rung['S_max_bond']}  ({out['wall_s']:.0f}s)", flush=True)
 
     run_dmrg(args.L, args.dim, args.A, N_f=args.N_f, n_b=args.n_b,
-             bond_dims=bond_dims, n_sweeps_per=args.n_sweeps_per, on_chi=on_chi)
+             bond_dims=bond_dims, n_sweeps_per=args.n_sweeps_per, on_chi=on_chi,
+             max_chi_seconds=args.max_chi_seconds)
 
     out["done"] = True
     out["wall_s"] = time.time() - t0

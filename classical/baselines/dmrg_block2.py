@@ -98,13 +98,20 @@ def build_mpo(H, L, dim, A, N_f, driver=None, iprint=0):
 
 
 def run_dmrg(L, dim, A, N_f=2, n_b=1, bond_dims=(20, 40, 80, 160, 320),
-             n_sweeps_per=4, iprint=0, on_chi=None):
+             n_sweeps_per=4, iprint=0, on_chi=None, max_chi_seconds=None):
     """DMRG energy vs bond dimension chi for the mixed H. Returns list of dicts.
 
     `on_chi(dict)`, if given, fires after EACH bond dimension with that rung's
-    result (chi, E, S_max_bond) -- lets an HPC shard save incrementally so a run
-    that times out at a large chi keeps everything it finished (the DMRG cost climbs
-    steeply with chi, so the top rung is exactly where a long run gets cut off)."""
+    result (chi, E, S_max_bond, wall_s) -- lets an HPC shard save incrementally so a
+    run that times out at a large chi keeps everything it finished (the DMRG cost
+    climbs steeply with chi, so the top rung is exactly where a long run gets cut off).
+
+    `max_chi_seconds`: if a chi step takes LONGER than this, STOP before the next
+    (larger, even slower) chi -- the block2 sweep cost grows ~chi^3, so once one chi
+    blows the budget the next never finishes. This is the automatic 'L-appropriate chi
+    ceiling' (measured: L=3 N_f=4 chi=400 took ~15 h, chi=800 would be days), and it
+    keeps a shard from grinding for days / blocking a fat memory reservation."""
+    import time
     from classical.trimci import build_from_eft
     H = build_from_eft(L=L, dim=dim, n_b=n_b, N_f=N_f)
     driver, mpo, const = build_mpo(H, L, dim, A, N_f, iprint=iprint)
@@ -115,8 +122,10 @@ def run_dmrg(L, dim, A, N_f=2, n_b=1, bond_dims=(20, 40, 80, 160, 320),
         bdims = [chi] * n_sweeps_per
         noises = [1e-4] * (n_sweeps_per - 1) + [0.0]
         thrds = [1e-8] * n_sweeps_per
+        t0 = time.time()
         e = driver.dmrg(mpo, mps, n_sweeps=n_sweeps_per, bond_dims=bdims,
                         noises=noises, thrds=thrds, iprint=iprint)
+        dt = time.time() - t0
         # bond entropy (max over bonds) if available
         try:
             bd = driver.get_bipartite_entanglement()
@@ -124,10 +133,12 @@ def run_dmrg(L, dim, A, N_f=2, n_b=1, bond_dims=(20, 40, 80, 160, 320),
         except Exception:
             smax = None
         rung = {'chi': chi, 'E': float(np.real(e)) + float(np.real(const)),
-                'S_max_bond': smax}
+                'S_max_bond': smax, 'wall_s': dt}
         out.append(rung)
         if on_chi is not None:
             on_chi(rung)
+        if max_chi_seconds is not None and dt > max_chi_seconds:
+            break                          # next chi only slower -> stop, keep all done
     return out, H
 
 

@@ -32,13 +32,24 @@ def main():
     if any(Es[i + 1] > Es[i] + 1e-6 for i in range(len(Es) - 1)):
         fails.append(f"energy not monotone non-increasing in chi: {Es}")
 
+    # each rung now carries its own wall time
+    if any("wall_s" not in r for r in seen):
+        fails.append("rung missing wall_s")
+
+    # per-chi TIME CAP: with a ~0 budget, any chi step exceeds it, so it must stop
+    # after the FIRST chi (keeping that one) rather than run the whole schedule.
+    capped, _ = run_dmrg(2, 1, 2, N_f=2, n_b=1, bond_dims=(20, 40, 80),
+                         n_sweeps_per=3, max_chi_seconds=1e-9)
+    if len(capped) != 1:
+        fails.append(f"max_chi_seconds cap did not stop early: got {len(capped)} rungs")
+
     if fails:
         print("test_dmrg_callback: FAILED")
         for f in fails:
             print("   -", f)
         sys.exit(1)
     print(f"test_dmrg_callback: PASS  (callback fired {len(seen)}x, "
-          f"E: {Es[0]:.3f} -> {Es[-1]:.3f} as chi {bond_dims[0]}->{bond_dims[-1]})")
+          f"E: {Es[0]:.3f} -> {Es[-1]:.3f}; time-cap stopped at {len(capped)} rung)")
 
 
 if __name__ == "__main__":

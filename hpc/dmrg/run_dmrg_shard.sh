@@ -13,7 +13,7 @@
 # passed EXPLICITLY (arg $7) because Condor doesn't reliably export _CONDOR_REQUEST_CPUS.
 set -u
 L="$1"; A="$2"; CAMPAIGN="$3"; N_F="${4:-4}"; BOND_DIMS="${5:-100,200,400,800}"
-NSWEEPS="${6:-6}"; cpus="${7:-${_CONDOR_REQUEST_CPUS:-4}}"
+NSWEEPS="${6:-6}"; cpus="${7:-${_CONDOR_REQUEST_CPUS:-4}}"; MAXCHISEC="${8:-}"
 REPO=/nfs_scratch/bfriend3/NuQu/NuQu
 SANDBOX="$(pwd)"
 [ -r "$REPO/hpc/dmrg/run_dmrg_shard.py" ] || { echo "ERROR: cannot read repo at $REPO" >&2; exit 1; }
@@ -55,8 +55,9 @@ mkdir -p "$OUTDIR"
 export PYTHONPATH="$REPO"
 OUT="$OUTDIR/dmrg_L${L}_A${A}_Nf${N_F}.json"
 
+MAXCHI_ARG=""; [ -n "$MAXCHISEC" ] && MAXCHI_ARG="--max-chi-seconds $MAXCHISEC"
 "$PY" -m hpc.dmrg.run_dmrg_shard --L "$L" --dim 3 --A "$A" --N_f "$N_F" --n_b 2 \
-    --bond-dims "$BOND_DIMS" --n-sweeps-per "$NSWEEPS" --out "$OUT"
+    --bond-dims "$BOND_DIMS" --n-sweeps-per "$NSWEEPS" $MAXCHI_ARG --out "$OUT"
 status=$?
 echo "[dmrg-shard] done status=$status -> $OUT"
 exit "$status"
