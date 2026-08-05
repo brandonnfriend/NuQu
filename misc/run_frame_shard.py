@@ -27,6 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from classical.trimci import build_from_eft, frame_workflow, frame
 from classical.trimci.frame_qpe import warmstart_overlap
+from classical.trimci.observables import occupation_tail, occupation_histogram
 from classical.trimci.run_cpp import (_adaptive_ladder_solve, _pick_solver,
                                       three_phase_growing_run)
 
@@ -135,6 +136,17 @@ def main():
             r["p0"] = warmstart_overlap(res.coeffs)
         except Exception:
             r["p0"] = None
+        # Boson-cutoff TAIL: leaked GS weight a per-mode Fock cutoff N_f would DROP
+        # (n_b=1 -> N_f=2 cut, n_b=2 -> N_f=4 cut), plus the per-mode occupation
+        # histogram p(n). Quantifies how much probability our small n_b truncates --
+        # the n_b=2-vs-1 justification. NOTE: only resolves the tail beyond level
+        # (N_f-1) when the run itself uses a LARGER cutoff, so drive with --n_b>=3.
+        try:
+            r["occ_tail"] = occupation_tail(res, [2, 3, 4, 5, 6, 8])
+            r["occ_hist"] = occupation_histogram(res).tolist()
+        except Exception:
+            r["occ_tail"] = None
+            r["occ_hist"] = None
         out["rungs"].append(r)
         out["wall_s"] = time.time() - t0
         save()   # INCREMENTAL: survive an OOM/timeout on the next (deeper) rung
