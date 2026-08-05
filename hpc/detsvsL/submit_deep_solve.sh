@@ -8,8 +8,12 @@
 #   sh submit_deep_solve.sh [FRAME] [FILLING] [L] [MAXCORE] [CPUS] [MEM]
 # default: gaussian frame, half-filling (A=54 at L=3, the most-connected / hardest), 1M.
 set -eu
-FRAME="${1:-gaussian}"; FILLING="${2:-2.0}"; L="${3:-3}"; MAXCORE="${4:-1024000}"
-CPUS="${5:-48}"; MEM="${6:-64G}"
+FRAME="${1:-gaussian}"; FILLING="${2:-0.5}"; L="${3:-3}"; MAXCORE="${4:-1024000}"
+CPUS="${5:-48}"; MEM="${6:-192G}"
+# MEMORY scales steeply with FILLING (connection count) and core. Measured: L=3
+# half-filling (A=54) hit ~64G by 128k and OOM'd climbing to 256k. Guidance to reach 1M:
+# filling<=0.5 (dilute, A<=14) -> ~192G is ample; filling 1.0 (A=27) -> ~256G; half-
+# filling (A=54) -> ~512G. Default is dilute A=14 (the DMRG-comparison point) at 192G.
 CAMPAIGN="deep-$(date +%Y%m%d-%H%M%S)-$$"; DIR="campaign_${CAMPAIGN}"; mkdir -p "$DIR/logs"
 
 cat > "$DIR/campaign.sub" <<EOF
