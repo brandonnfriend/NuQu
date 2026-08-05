@@ -155,46 +155,53 @@ public:
     // Complex H @ v: out[i] += sum_j H_ij * v_j, using the stored CSC.
     // vr = Re(v), vi = Im(v), both length N. Returns (out_re, out_im).
     // No hash lookups — pure sequential CSC array traversal.
+    // Row-parallel GATHER SpMV. H is Hermitian and the CSC's column i holds
+    // {(m, H_mi)}, so row i is H_im = conj(H_mi): y[i] = sum over column i of
+    // conj(data)*x[row_idx]. Each output row i is INDEPENDENT (pure gather, no
+    // scatter into shared rows) -> NO race, NO reduction/critical -> scales on ALL
+    // cores. The old column-scatter needed a per-thread O(N) critical merge that
+    // serialized the SpMV (why OpenMP was ~1x before). Sums in per-row order, a
+    // different FP order than a serial scatter -> sub-1e-10 drift eigsh absorbs;
+    // deterministic at fixed thread count. if(N_>=4096) keeps tiny subspaces serial.
     py::tuple matvec(py::array_t<double> vr_arr, py::array_t<double> vi_arr) const {
         auto vr = vr_arr.unchecked<1>();
         auto vi = vi_arr.unchecked<1>();
         std::vector<double> or_(N_, 0.0), oi_(N_, 0.0);
-#ifdef _OPENMP
-        // PARALLEL SpMV over columns. Each column scatters into arbitrary rows -> race,
-        // so each thread accumulates into thread-local outputs, then reduces. The cross-
-        // thread reduction reorders the adds -> a sub-1e-10 float drift that eigsh
-        // absorbs (documented tolerance). if(N_>=4096) keeps tiny subspaces (frame-fit
-        // at core~1000) serial -- not worth the thread overhead.
-        #pragma omp parallel if(N_ >= 4096)
-        {
-            std::vector<double> lor(N_, 0.0), loi(N_, 0.0);
-            #pragma omp for schedule(dynamic, 256) nowait
-            for (int j = 0; j < N_; ++j) {
-                const double vjr = vr(j), vji = vi(j);
-                if (vjr == 0.0 && vji == 0.0) continue;   // skip cold scatter
-                for (int64_t k = indptr_[j]; k < indptr_[j + 1]; ++k) {
-                    const int i = row_idx_[k];
-                    lor[i] += data_re_[k] * vjr - data_im_[k] * vji;
-                    loi[i] += data_re_[k] * vji + data_im_[k] * vjr;
-                }
+        #pragma omp parallel for schedule(dynamic, 256) if(N_ >= 4096)
+        for (int i = 0; i < N_; ++i) {
+            double yr = 0.0, yi = 0.0;
+            for (int64_t k = indptr_[i]; k < indptr_[i + 1]; ++k) {
+                const int m = row_idx_[k];
+                const double ar = data_re_[k], ai = -data_im_[k];   // conj(H_mi)=H_im
+                const double xr = vr(m), xi = vi(m);
+                yr += ar * xr - ai * xi;
+                yi += ar * xi + ai * xr;
             }
-            #pragma omp critical
-            for (int i = 0; i < N_; ++i) { or_[i] += lor[i]; oi_[i] += loi[i]; }
+            or_[i] = yr; oi_[i] = yi;
         }
-#else
-        // Serial reference: original in-place scatter (bit-identical).
-        for (int j = 0; j < N_; ++j) {
-            const double vjr = vr(j), vji = vi(j);
-            if (vjr == 0.0 && vji == 0.0) continue;
-            for (int64_t k = indptr_[j]; k < indptr_[j + 1]; ++k) {
-                const int i = row_idx_[k];
-                // (a + ib)(x + iy) = (ax-by) + i(ay+bx)
-                or_[i] += data_re_[k] * vjr - data_im_[k] * vji;
-                oi_[i] += data_re_[k] * vji + data_im_[k] * vjr;
-            }
-        }
-#endif
         return py::make_tuple(to_np(or_), to_np(oi_));
+    }
+
+    // Marshaling-free twin: complex128 in, complex128 out (avoids the per-eigsh-
+    // iteration Re/Im split + reassemble on the Python side, ~5 array allocs/iter
+    // that dominate once the SpMV itself is threaded). Same Hermitian gather.
+    py::array_t<std::complex<double>>
+    matvec_cplx(py::array_t<std::complex<double>> v_arr) const {
+        auto v = v_arr.unchecked<1>();
+        std::vector<std::complex<double>> out(N_);
+        #pragma omp parallel for schedule(dynamic, 256) if(N_ >= 4096)
+        for (int i = 0; i < N_; ++i) {
+            double yr = 0.0, yi = 0.0;
+            for (int64_t k = indptr_[i]; k < indptr_[i + 1]; ++k) {
+                const int m = row_idx_[k];
+                const double ar = data_re_[k], ai = -data_im_[k];
+                const std::complex<double> xm = v(m);
+                yr += ar * xm.real() - ai * xm.imag();
+                yi += ar * xm.imag() + ai * xm.real();
+            }
+            out[i] = std::complex<double>(yr, yi);
+        }
+        return to_np(out);
     }
 
     // Real part of the diagonal H_jj for each state j. Used as the initial
@@ -718,7 +725,10 @@ PYBIND11_MODULE(mixed_ci, m) {
         .def("matvec", &SubspaceContext::matvec,
              py::arg("vr"), py::arg("vi"),
              "Complex H@v: (vr=Re(v), vi=Im(v)) -> (out_re, out_im). "
-             "Pure C++ CSC traversal — no hash lookups, safe to call in a loop.")
+             "Row-parallel Hermitian gather — no hash lookups, scales on all cores.")
+        .def("matvec_cplx", &SubspaceContext::matvec_cplx, py::arg("v"),
+             "Complex H@v: complex128 v -> complex128 (marshaling-free twin of "
+             "matvec; same row-parallel Hermitian gather).")
         .def("diagonal", &SubspaceContext::diagonal,
              "Real diagonal of H over the subspace (H_jj.real for j=0..N-1). "
              "Used to seed the eigsh initial guess.");

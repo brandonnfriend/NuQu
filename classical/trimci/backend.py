@@ -403,7 +403,8 @@ def _diagonalize_arrays_scipy(H, ferm, bos, tol=1e-8):
     diag = np.asarray(ctx.diagonal(), dtype=np.float64)
     v0 = np.zeros(N, dtype=complex)
     v0[int(np.argmin(diag))] = 1.0
-    vals, vecs = eigsh(op, k=1, which="SA", tol=tol, v0=v0, maxiter=max(300, N))
+    vals, vecs = eigsh(op, k=1, which="SA", tol=tol, v0=v0,
+                    ncv=_eigsh_ncv(N), maxiter=_EIGSH_MAXITER)
     E0 = float(vals[0].real)
     v = vecs[:, 0]
     nrm = np.linalg.norm(v)
@@ -490,6 +491,17 @@ def cpp_expand(H, core_coeffs, pool_factor=10):
 # ---------------------------------------------------------------------------
 
 _MATFREE_N = 2000   # switch to eigsh+CSC above this subspace size
+# eigsh restart cap. The old maxiter=max(300, N) is a RUNAWAY at large N (N=10M ->
+# 10M ARPACK restarts before the fallback ever fires). A well-separated selected-CI
+# ground state converges in O(hundreds) of restarts with a decent Krylov space, so a
+# fixed, N-INDEPENDENT bound both prevents the stall and keeps the fallback reachable.
+_EIGSH_MAXITER = 2000
+
+
+def _eigsh_ncv(N, k=1):
+    """Krylov subspace size for eigsh — larger than scipy's default (min(N, 20)) so
+    the lowest mode of the wide mixed-Fock spectrum converges in fewer restarts."""
+    return int(min(N - 1, max(2 * k + 1, 48)))
 
 
 def cpp_diagonalize_matfree(H, states, tol=1e-10):
@@ -537,7 +549,7 @@ def cpp_diagonalize_matfree(H, states, tol=1e-10):
 
     try:
         vals, vecs = eigsh(op, k=1, which="SA", tol=tol, v0=v0,
-                           maxiter=max(300, N))
+                           ncv=_eigsh_ncv(N), maxiter=_EIGSH_MAXITER)
     except Exception:
         # Fall back to sparse Davidson (e.g. ARPACK convergence failure).
         return cpp_diagonalize(H, states)
@@ -660,12 +672,15 @@ def cpp_diagonalize_matfree_arrays(H, ferm, bos, tol=1e-8):
     from scipy.sparse.linalg import eigsh, LinearOperator
     ctx = prov.build_context(ferm, bos)
 
-    def _mv(v):
-        v = np.asarray(v, dtype=complex)
-        vr = np.ascontiguousarray(v.real, dtype=np.float64)
-        vi = np.ascontiguousarray(v.imag, dtype=np.float64)
-        or_, oi_ = ctx.matvec(vr, vi)
-        return np.asarray(or_) + 1j * np.asarray(oi_)
+    if hasattr(ctx, "matvec_cplx"):        # marshaling-free complex gather (fast path)
+        def _mv(v):
+            return np.asarray(ctx.matvec_cplx(np.ascontiguousarray(v, dtype=complex)))
+    else:                                  # old build: Re/Im split fallback
+        def _mv(v):
+            v = np.asarray(v, dtype=complex)
+            or_, oi_ = ctx.matvec(np.ascontiguousarray(v.real, dtype=np.float64),
+                                  np.ascontiguousarray(v.imag, dtype=np.float64))
+            return np.asarray(or_) + 1j * np.asarray(oi_)
 
     op = LinearOperator((N, N), matvec=_mv, dtype=complex)
     diag = np.asarray(ctx.diagonal(), dtype=np.float64)
@@ -673,7 +688,7 @@ def cpp_diagonalize_matfree_arrays(H, ferm, bos, tol=1e-8):
     v0[int(np.argmin(diag))] = 1.0
     try:
         vals, vecs = eigsh(op, k=1, which="SA", tol=tol, v0=v0,
-                           maxiter=max(300, N))
+                           ncv=_eigsh_ncv(N), maxiter=_EIGSH_MAXITER)
     except Exception:
         # ARPACK convergence failure -> official Davidson build if present, else
         # the scipy-only path (dense for tiny N, a re-seeded eigsh otherwise).
