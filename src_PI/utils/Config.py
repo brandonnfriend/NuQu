@@ -6,7 +6,8 @@ fermion-encoding / cutoff-method choices) in one place. Saved into JSON
 metadata so a sweep file is self-describing.
 
 Currently supported axes:
-- pion_basis:    'amplitude' or 'fock'
+- pion_basis:    'amplitude', 'fock', or 'fock_squeezed' (fock walked in the
+                 Gaussian squeeze frame; squeeze amplitude via params['squeeze_r'])
 - walk_mode:     'series' (default) or 'parallel'
 - cutoff_method: 'energy_bound' (Watson Lemma 5, default) or 'ns'
                  (Nyquist-Shannon optimal). Only consulted for the
@@ -31,7 +32,7 @@ working because defaults match current behavior.
 from dataclasses import dataclass, asdict, field
 
 
-_VALID_PION_BASES = ('amplitude', 'fock')
+_VALID_PION_BASES = ('amplitude', 'fock', 'fock_squeezed')
 _VALID_WALK_MODES = ('series', 'parallel')
 _VALID_CUTOFF_METHODS = ('energy_bound', 'ns')
 _VALID_BOSON_CUTOFF_METHODS = ('heuristic', 'tong')

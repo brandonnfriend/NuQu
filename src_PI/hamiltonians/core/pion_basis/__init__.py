@@ -12,12 +12,13 @@ function names regardless of basis. New bases slot in by adding a new module
 here; no caller code changes.
 """
 
-from src_PI.hamiltonians.core.pion_basis import amplitude, fock
+from src_PI.hamiltonians.core.pion_basis import amplitude, fock, fock_squeezed
 
 
 _MODULES = {
     'amplitude': amplitude,
     'fock': fock,
+    'fock_squeezed': fock_squeezed,
 }
 
 
