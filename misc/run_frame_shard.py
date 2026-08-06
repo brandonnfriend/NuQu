@@ -80,6 +80,10 @@ def main():
                     help="boson init: a float (truncated-geometric mean ~vacuum) or 'none' "
                          "(UNIFORM over [0,N_f), no vacuum anchor = the unbiased control). "
                          "Default keeps the solver's 0.5.")
+    ap.add_argument("--pt2-max-core", type=int, default=None,
+                    help="skip EN-PT2 once the core exceeds this (its external space ~223x "
+                         "core -> ~150GB at 1M, OOMs before the E_var solve). Deep runs set "
+                         "this low (e.g. 64000) to reach 1M+ on E_var; PT2 stays on shallow.")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
 
@@ -172,7 +176,7 @@ def main():
             Hind, A, args.ladder_start, args.n_rungs, solver, pt2_diag,
             max_core=args.max_core, max_rung_seconds=args.max_rung_seconds,
             n_runs=args.ladder_n_runs, seed=args.seed, verbose=True, on_rung=on_rung,
-            boson_init_mean=bim)
+            boson_init_mean=bim, pt2_max_core=args.pt2_max_core)
 
     out["done"] = True
     out["wall_s"] = time.time() - t0

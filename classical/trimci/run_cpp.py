@@ -515,13 +515,20 @@ def _solve_ladder(H, A, cores, solver, pt2_diag, n_runs=4, seed=0, pt2=True,
 def _adaptive_ladder_solve(H, A, ladder_start, n_rungs, solver, pt2_diag,
                            max_core=None, max_rung_seconds=None,
                            n_runs=4, seed=0, verbose=True, on_rung=None,
-                           boson_init_mean=0.5):
+                           boson_init_mean=0.5, pt2_max_core=None):
     """Geometric core ladder (ladder_start x2 each rung) with LAPTOP GUARDS: stop
     early once a rung's wall-clock exceeds `max_rung_seconds` (so the next, ~4x
     costlier rung isn't attempted) or the next core would exceed `max_core`. Returns
     the same rung dicts as `_solve_ladder` (PT2 always on), each with an added
     `wall_s`. With both guards None it reproduces `_solve_ladder` over the fixed
     n_rungs geometric ladder (the backward-compatible default).
+
+    `pt2_max_core`: skip the deterministic EN-PT2 once the core exceeds this. The PT2
+    external space scales ~223x core (measured L=3), so it materializes ~228M
+    determinants / ~150 GB at 1M core and OOMs long before the E_var solve does. Past
+    the cap we record the VARIATIONAL energy only (the deep-convergence quantity we
+    compare to the DMRG bound); PT2 is still captured on the shallower rungs for the
+    extrapolation. None = always compute (backward compatible).
 
     `on_rung(rung, res)`, if given, is called after each rung completes (rung dict +
     the raw GroundStateResult) — used for INCREMENTAL SAVE on deep HPC runs, so a
@@ -537,15 +544,21 @@ def _adaptive_ladder_solve(H, A, ladder_start, n_rungs, solver, pt2_diag,
         res = solver(H, n_elec=A, n_runs=n_runs, n_dets=r, seed=seed, max_rounds=mr,
                      boson_init_mean=boson_init_mean)
         wall = time.time() - t
-        pr = pt2_from_result(H, res, diag_fn=pt2_diag)
-        rung = {"core": int(res.n_dets), "E_var": float(pr["E_var"]),
-                "dE_pt2": float(pr["dE_pt2"]),
-                "E_pt2": float(pr["E_var"]) + float(pr["dE_pt2"]),
-                "n_ext": pr["n_ext"], "wall_s": wall}
+        if pt2_max_core is not None and int(res.n_dets) > pt2_max_core:
+            rung = {"core": int(res.n_dets), "E_var": float(res.energy),
+                    "dE_pt2": None, "E_pt2": None, "n_ext": None, "wall_s": wall}
+        else:
+            pr = pt2_from_result(H, res, diag_fn=pt2_diag)
+            rung = {"core": int(res.n_dets), "E_var": float(pr["E_var"]),
+                    "dE_pt2": float(pr["dE_pt2"]),
+                    "E_pt2": float(pr["E_var"]) + float(pr["dE_pt2"]),
+                    "n_ext": pr["n_ext"], "wall_s": wall}
         rungs.append(rung)
         if verbose:
+            pt2s = (f"dE_PT2={rung['dE_pt2']:+.4f} (n_ext={rung['n_ext']})"
+                    if rung["dE_pt2"] is not None else "PT2 skipped (core>cap)")
             print(f"  core={rung['core']:>6}  E_var={rung['E_var']:12.5f} MeV  "
-                  f"dE_PT2={rung['dE_pt2']:+.4f} (n_ext={rung['n_ext']})  [{wall:.1f}s]")
+                  f"{pt2s}  [{wall:.1f}s]")
         if on_rung is not None:
             on_rung(rung, res)
         if max_rung_seconds is not None and wall > max_rung_seconds:
