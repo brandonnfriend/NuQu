@@ -462,26 +462,33 @@ public:
             core[k] = std::move(d);
         }
 
-        // Parallelize the (dominant) connection computation, but keep the score
-        // reduction in the ORIGINAL j-order -> BIT-IDENTICAL to serial (the scores map,
-        // hence top-k tie-breaking, is order-sensitive). Pass 1 (parallel): each core
-        // column's connections (pure free fn, no shared cache). Pass 2 (serial, same
-        // order as before): max-reduce |H_ij c_j| into `scores`.
+        // CHUNKED connection sweep. Compute a chunk of core columns' connections in
+        // PARALLEL, then max-reduce them into `scores` SERIALLY in ascending j (the
+        // scores map -> top-k tie-breaking is order-sensitive, so this stays BIT-
+        // IDENTICAL to the old all-at-once reduce), then FREE the chunk before the next.
+        // The old code held std::vector<ConnMap> conns(N) -- EVERY core det's raw
+        // connections at once (~R x n_ext, R = cross-det duplication factor > 1) -- the
+        // dominant expand RAM. Peak is now ~ scores (n_ext) + one chunk of connections.
         const std::vector<Term>& terms = provider_->terms();
         const int Nf = provider_->N_f();
-        std::vector<ConnMap> conns(N);
-        #pragma omp parallel for schedule(dynamic, 64)
-        for (size_t j = 0; j < N; ++j)
-            conns[j] = mixedci::connections(terms, core[j], Nf);
         std::unordered_map<MixedDet, double, MixedDetHash> scores;
-        for (size_t j = 0; j < N; ++j) {
-            const cdouble cj(cr(j), ci(j));
-            for (const auto& kv : conns[j]) {
-                if (core_set.count(kv.first)) continue;
-                const double s = std::abs(kv.second * cj);
-                auto it = scores.find(kv.first);
-                if (it == scores.end()) scores.emplace(kv.first, s);
-                else if (s > it->second) it->second = s;
+        const size_t CHUNK = 8192;
+        std::vector<ConnMap> cbuf(std::min(CHUNK, N == 0 ? size_t(1) : N));
+        for (size_t base = 0; base < N; base += CHUNK) {
+            const size_t nc = std::min(CHUNK, N - base);
+            #pragma omp parallel for schedule(dynamic, 64)
+            for (size_t t = 0; t < nc; ++t)
+                cbuf[t] = mixedci::connections(terms, core[base + t], Nf);
+            for (size_t t = 0; t < nc; ++t) {          // serial, ascending j -> bit-identical
+                const cdouble cj(cr(base + t), ci(base + t));
+                for (const auto& kv : cbuf[t]) {
+                    if (core_set.count(kv.first)) continue;
+                    const double s = std::abs(kv.second * cj);
+                    auto it = scores.find(kv.first);
+                    if (it == scores.end()) scores.emplace(kv.first, s);
+                    else if (s > it->second) it->second = s;
+                }
+                ConnMap().swap(cbuf[t]);               // release this det's connections now
             }
         }
 
@@ -538,26 +545,33 @@ public:
             core[k] = std::move(d);
         }
 
-        // Parallelize the (dominant) connection computation, but keep the score
-        // reduction in the ORIGINAL j-order -> BIT-IDENTICAL to serial (the scores map,
-        // hence top-k tie-breaking, is order-sensitive). Pass 1 (parallel): each core
-        // column's connections (pure free fn, no shared cache). Pass 2 (serial, same
-        // order as before): max-reduce |H_ij c_j| into `scores`.
+        // CHUNKED connection sweep. Compute a chunk of core columns' connections in
+        // PARALLEL, then max-reduce them into `scores` SERIALLY in ascending j (the
+        // scores map -> top-k tie-breaking is order-sensitive, so this stays BIT-
+        // IDENTICAL to the old all-at-once reduce), then FREE the chunk before the next.
+        // The old code held std::vector<ConnMap> conns(N) -- EVERY core det's raw
+        // connections at once (~R x n_ext, R = cross-det duplication factor > 1) -- the
+        // dominant expand RAM. Peak is now ~ scores (n_ext) + one chunk of connections.
         const std::vector<Term>& terms = provider_->terms();
         const int Nf = provider_->N_f();
-        std::vector<ConnMap> conns(N);
-        #pragma omp parallel for schedule(dynamic, 64)
-        for (size_t j = 0; j < N; ++j)
-            conns[j] = mixedci::connections(terms, core[j], Nf);
         std::unordered_map<MixedDet, double, MixedDetHash> scores;
-        for (size_t j = 0; j < N; ++j) {
-            const cdouble cj(cr(j), ci(j));
-            for (const auto& kv : conns[j]) {
-                if (core_set.count(kv.first)) continue;
-                const double s = std::abs(kv.second * cj);
-                auto it = scores.find(kv.first);
-                if (it == scores.end()) scores.emplace(kv.first, s);
-                else if (s > it->second) it->second = s;
+        const size_t CHUNK = 8192;
+        std::vector<ConnMap> cbuf(std::min(CHUNK, N == 0 ? size_t(1) : N));
+        for (size_t base = 0; base < N; base += CHUNK) {
+            const size_t nc = std::min(CHUNK, N - base);
+            #pragma omp parallel for schedule(dynamic, 64)
+            for (size_t t = 0; t < nc; ++t)
+                cbuf[t] = mixedci::connections(terms, core[base + t], Nf);
+            for (size_t t = 0; t < nc; ++t) {          // serial, ascending j -> bit-identical
+                const cdouble cj(cr(base + t), ci(base + t));
+                for (const auto& kv : cbuf[t]) {
+                    if (core_set.count(kv.first)) continue;
+                    const double s = std::abs(kv.second * cj);
+                    auto it = scores.find(kv.first);
+                    if (it == scores.end()) scores.emplace(kv.first, s);
+                    else if (s > it->second) it->second = s;
+                }
+                ConnMap().swap(cbuf[t]);               // release this det's connections now
             }
         }
 
