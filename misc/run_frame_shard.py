@@ -28,6 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from classical.trimci import build_from_eft, frame_workflow, frame
 from classical.trimci.frame_qpe import warmstart_overlap
 from classical.trimci.observables import occupation_tail, occupation_histogram
+from classical.trimci.lf import compactness
 from classical.trimci.run_cpp import (_adaptive_ladder_solve, _pick_solver,
                                       three_phase_growing_run)
 
@@ -151,6 +152,19 @@ def main():
         except Exception:
             r["occ_tail"] = None
             r["occ_hist"] = None
+        # SUPPORT metrics (Tier-2 classical-cost measure): the effective # of
+        # determinants the ground state lives on. participation_ratio = 1/Sum|c|^4,
+        # and n{90,99,99.9,99.99} = # dets holding that cumulative weight. Tracked vs
+        # core, these say whether the support has CONVERGED (plateaued -> that's the
+        # classical cost) or is still growing (state not captured); their growth rate +
+        # the sorted-coeff decay extrapolate the core needed at a given weight cutoff --
+        # the cost claim that does NOT need the (unreachable) energy E_inf. A more
+        # compact frame shrinks these (Goal 1 -> Goal 3).
+        try:
+            c = compactness(res.coeffs, fracs=(0.9, 0.99, 0.999, 0.9999))
+            r["support"] = {k: c[k] for k in c}
+        except Exception:
+            r["support"] = None
         out["rungs"].append(r)
         out["wall_s"] = time.time() - t0
         save()   # INCREMENTAL: survive an OOM/timeout on the next (deeper) rung
