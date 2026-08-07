@@ -85,6 +85,13 @@ def main():
                     help="skip EN-PT2 once the core exceeds this (its external space ~223x "
                          "core -> ~150GB at 1M, OOMs before the E_var solve). Deep runs set "
                          "this low (e.g. 64000) to reach 1M+ on E_var; PT2 stays on shallow.")
+    ap.add_argument("--exact-ref", action="store_true",
+                    help="also compute the EXACT ground energy (Lanczos, guarded) as the "
+                         "true E_inf for the Tier-1 cost-to-fixed-accuracy anchor. Only "
+                         "feasible on small ED systems; records E_exact=None if the guard "
+                         "refuses (sector too large).")
+    ap.add_argument("--exact-max-mem-gb", type=float, default=24.0,
+                    help="memory ceiling for the exact-ref Lanczos (refuses cleanly above)")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
 
@@ -107,7 +114,28 @@ def main():
                  x for x in ("squeeze" if has_gaussian else "",
                              "projector-LF" if has_lf else "", "COO" if has_coo else "") if x)}
 
+    # EXACT reference (Tier-1): the true E_inf via guarded Lanczos on the bare H (the
+    # spectrum is frame-invariant, so this is the target EVERY frame's E_var must reach).
+    # core*(dE to E_exact) is the RIGOROUS cost-to-fixed-accuracy; E_exact=None when the
+    # sector is too large for ED (the guard refuses cleanly), i.e. not a Tier-1 anchor.
+    E_exact, exact_support = None, None
+    if args.exact_ref:
+        try:
+            from classical.trimci.lanczos import lanczos_ground_state
+            lz = lanczos_ground_state(Hbare, n_elec=A, return_vec=True,
+                                      max_mem_gb=args.exact_max_mem_gb)
+            E_exact = float(getattr(lz, "energy", lz[0]))
+            vec = getattr(lz, "coeffs", lz[1] if isinstance(lz, tuple) and len(lz) > 1 else None)
+            if vec is not None:
+                vals = list(vec.values()) if hasattr(vec, "values") else vec
+                exact_support = compactness(np.asarray(vals), fracs=(0.9, 0.99, 0.999, 0.9999))
+        except MemoryError:
+            E_exact = None
+        except Exception:
+            E_exact = None
+
     out = {
+        "E_exact": E_exact, "exact_support": exact_support,
         "kind": "frame_shard", "L": args.L, "dim": args.dim, "A": A,
         "filling": args.filling, "frame": args.frame, "seed": args.seed,
         "n_b": args.n_b, "N_f": Hbare.N_f, "sites": sites,

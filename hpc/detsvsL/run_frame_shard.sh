@@ -63,7 +63,7 @@ FILL_ARG=""
 [ "$FILLING" != "none" ] && FILL_ARG="--filling $FILLING"
 # distinct shard name per filling (or per A, for explicit-A grids)
 if [ "$FILLING" != "none" ]; then FTAG="_f${FILLING}"; else FTAG="_A${A}"; fi
-OUT="$OUTDIR/${FRAME}_L${L}${FTAG}_s${SEED}.json"
+OUT="$OUTDIR/${FRAME}_L${L}d${NUQU_DIM:-3}${FTAG}_s${SEED}.json"   # d<dim> keeps 1D/3D distinct
 # Optional knobs via Condor `environment` (defaults reproduce the crossover behavior):
 NB="${NUQU_N_B:-2}"                    # boson bits/mode -> N_f=2^NB (the N_f cutoff study)
 NRUNGS="${NUQU_N_RUNGS:-12}"           # ladder depth in #rungs; MAXCORE is the real cap
@@ -72,17 +72,20 @@ BIM_ARG=""; [ -n "${NUQU_BOSON_INIT_MEAN:-}" ] && BIM_ARG="--boson-init-mean ${N
 # PT2 external space ~223x core -> OOMs (~150GB at 1M) before the E_var solve does. Deep
 # runs cap it low so the ladder reaches 1M+ on E_var (PT2 kept on the shallow rungs).
 PT2CAP_ARG=""; [ -n "${NUQU_PT2_MAX_CORE:-}" ] && PT2CAP_ARG="--pt2-max-core ${NUQU_PT2_MAX_CORE}"
+DIM="${NUQU_DIM:-3}"                   # lattice dim (Tier-1 exact-anchor uses 1D/2D chains)
+# --exact-ref: guarded Lanczos true E_inf for the Tier-1 cost anchor (small ED systems).
+EXACT_ARG=""; [ -n "${NUQU_EXACT_REF:-}" ] && EXACT_ARG="--exact-ref --exact-max-mem-gb ${NUQU_EXACT_MAX_MEM_GB:-24}"
 # grow: Phase-0 ensemble + Phase-1 co-evolution + warm-start growth (deep/convergence runs).
 # independent: fit the frame ONCE (cheap; NO Phase-1 co-evolution, which is the 60+ min
 # cost) then grow a FROZEN frame -- for cheap frame COMPARISONS at equal footing.
 if [ "$LADDER_MODE" = "independent" ]; then
-  "$PY" -m misc.run_frame_shard --L "$L" --seed "$SEED" --dim 3 --n_b "$NB" --frame "$FRAME" \
+  "$PY" -m misc.run_frame_shard --L "$L" --seed "$SEED" --dim "$DIM" --n_b "$NB" --frame "$FRAME" \
       --A "$A" $FILL_ARG --ladder-mode independent --ladder-start 1000 --n-rungs "$NRUNGS" \
       --max-core "$MAXCORE" --frame-runs "$RUNS" --phase0-core "$PHASE0CORE" \
       --orbopt-cycles "$ORBOPTCYCLES" --max-rung-seconds "$MAXRUNGSEC" \
-      --ladder-n-runs "$LNRUNS" $BIM_ARG $PT2CAP_ARG --out "$OUT"
+      --ladder-n-runs "$LNRUNS" $BIM_ARG $PT2CAP_ARG $EXACT_ARG --out "$OUT"
 else
-  "$PY" -m misc.run_frame_shard --L "$L" --seed "$SEED" --dim 3 --n_b "$NB" --frame "$FRAME" \
+  "$PY" -m misc.run_frame_shard --L "$L" --seed "$SEED" --dim "$DIM" --n_b "$NB" --frame "$FRAME" \
       --A "$A" $FILL_ARG --ladder-mode grow --ladder-start 1000 --max-core "$MAXCORE" \
       --phase0-runs "$RUNS" --orbopt-cycles "$ORBOPTCYCLES" \
       --max-rung-seconds "$MAXRUNGSEC" --out "$OUT"
