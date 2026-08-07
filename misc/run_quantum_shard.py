@@ -42,6 +42,34 @@ from src_PI.utils.Config import Config
 from src_PI.utils.manifest import build_manifest
 
 
+def _reaction_depth(breakdown, n_b, n_walk):
+    """Fold the walk-step Toffoli-depth band + adaptive (N_walk·D_walk) band into a
+    sparse-family entry (task 30/34). Depth is an ALGORITHM resource; the τ_react
+    multiply (-> wall-clock) is a hardware choice applied at figure-assembly time.
+    Best-effort: returns None if the breakdown is missing (non-sparse series) or the
+    atom build fails, so a shard never dies on the depth add-on."""
+    if not breakdown:
+        return None
+    try:
+        # local import: keeps the (cirq atom-build) dependency off the non-sparse path.
+        from src_PI.estimation.hardware import walk_depth_from_breakdown
+        band, atom = walk_depth_from_breakdown(breakdown, n_b)
+        return {
+            'atom_toffoli_depth': atom.toffoli_depth,
+            'atom_toffoli_count': atom.toffoli_count,
+            'atom_clamped': atom.clamped,          # True at n_b=1 (conservative n_b=2 proxy)
+            'p_max': band.p_max,
+            'D_walk': {'serial': band.serial, 'qroam': band.qroam, 'log': band.log},
+            'adaptive_toffoli_depth': {
+                'serial': n_walk * band.serial,
+                'qroam': n_walk * band.qroam,
+                'log': n_walk * band.log,
+            },
+        }
+    except Exception as e:                        # noqa: BLE001 — never fail the shard
+        return {'error': f"{type(e).__name__}: {e}"}
+
+
 # Campaign design-axis columns (basis + encoder + cutoff prescription).
 SERIES = {
     'watson': dict(pion_basis='amplitude', cutoff_method='energy_bound',
@@ -120,10 +148,16 @@ def run_shard(L, series, A_values, dim=3, frame_occupation=None,
             'QFT_T_Count': norm['QFT_T_Count'],
             'Total_T_Count': t_step,
             'Per_Sub_Walk': norm.get('Per_Sub_Walk', []),
+            # sparse LCU breakdown (L_eff, select_T, single_mode_walk_T) — feeds the
+            # walk-depth / reaction-limited runtime model (task 30/34) downstream.
+            'Sparse_Breakdown': norm.get('Sparse_Breakdown'),
             # fold the QPE totals in per-entry so incremental saves carry them
             'QPE_Walk_Queries': walk_queries(lam, delta_E),
             'QPE_Total_T_Count': total_qpe_t_count(t_step, lam, delta_E),
         }
+        # reaction-limited depth band (sparse-family only; None otherwise).
+        entry['Reaction_Depth'] = _reaction_depth(
+            norm.get('Sparse_Breakdown'), n_b, entry['QPE_Walk_Queries'])
         out_data['results'].append(entry)
         out_data['wall_s'] = time.time() - t0
         save()                        # INCREMENTAL: survive an OOM on the next A

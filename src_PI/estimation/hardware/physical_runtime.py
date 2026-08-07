@@ -6,10 +6,11 @@ distance d, total physical qubits, and wall-clock runtime -- following the
 Beverland 2211.07629 closed-form model with the SOTA choices from
 `claude/research/ft_runtime_estimation/00_literature_review.md`.
 
-Runtime is reported (or will be) as a PAIR:
+Runtime is reported as a PAIR:
   * throughput-limited  t = C * d * t_cycle   (serial magic-state consumption) -- built here.
-  * reaction-limited    t = Toffoli_depth * tau_react  (the architecture floor) -- NEXT STEP,
-    stubbed: returned only when a Toffoli-depth is supplied.
+  * reaction-limited    t = Toffoli_depth * tau_react  (the architecture floor) -- returned
+    when a Toffoli-depth is supplied. The adaptive Toffoli-depth (N_walk * D_walk, with
+    D_walk a band over the QROAM ancilla knob) is modeled in `walk_depth.py`.
 
 Key facts encoded (see lit review §4):
   * Cliffords are compiled away for free (Pauli-frame / lattice surgery), so runtime
