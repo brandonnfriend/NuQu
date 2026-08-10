@@ -15,7 +15,8 @@
 # Usage (from $REPO/hpc/quantum/ on the pinned submit node, after reconciling to the
 # campaign branch — see submit_overnight.sh header):
 #   sh submit_frame_AB.sh test     # ONE smoke job (validate the new module on a qis node)
-#   sh submit_frame_AB.sh          # the real grid (L=2 + L=3)
+#   sh submit_frame_AB.sh          # pauli_lcu grid (L=2 + L=3; circuit-built, size-capped)
+#   sh submit_frame_AB.sh sparse   # sparse ANALYTICAL grid (L=2..10; the production path)
 set -eu
 MODE="${1:-run}"
 CAMPAIGN="$(date +%Y%m%d-%H%M%S)"
@@ -44,12 +45,27 @@ EOF
   exit 0
 fi
 
-# "L  n_b_values('+')  squeeze_r  mem".  pauli_lcu fock is feasible to n_b~4 (dies at >=5);
-# n_b 2-4 covers the operating range. Atomic per-(frame,n_b) save recovers any deep OOM.
-PLAN="
+# "L  n_b_values('+')  squeeze_r  mem".  squeeze_r = classical analytic_squeeze median r*
+# (off-cluster): L2=0.2109 L3=0.2543 L4=0.2728 L5/6=0.2913; L8/10 use the plateaued bulk
+# ~0.29 (isospectral for any r; only compaction-optimality depends on the exact value).
+if [ "$MODE" = "sparse" ]; then
+  ENCODER=sparse   # analytical Gilyen-Lemma-30 aggregation -> scales to L=10, cheap+light
+  PLAN="
+2 2+3+4 0.2109 8G
+3 2+3+4 0.2543 8G
+4 2+3+4 0.2728 8G
+5 2+3+4 0.2913 12G
+6 2+3+4 0.2913 12G
+8 2+3+4 0.29 16G
+10 2+3+4 0.29 24G
+"
+else
+  ENCODER=pauli_lcu   # BUILDS the walk circuit; feasible to n_b~4 (dies >=5), L~3
+  PLAN="
 2 2+3+4+5 0.2109 16G
 3 2+3+4 0.2543 32G
 "
+fi
 
 : > "$DIR/shards.txt"
 echo "$PLAN" | while read -r L NB R MEM; do
@@ -60,7 +76,7 @@ NJOBS=$(wc -l < "$DIR/shards.txt")
 
 cat > "$DIR/campaign.sub" <<EOF
 Executable              = ./run_frame_AB.sh
-arguments               = \$(L) \$(NB) \$(R) ${CAMPAIGN} run
+arguments               = \$(L) \$(NB) \$(R) ${CAMPAIGN} run ${ENCODER}
 should_transfer_files   = YES
 when_to_transfer_output = ON_EXIT
 transfer_input_files    = run_frame_AB.sh

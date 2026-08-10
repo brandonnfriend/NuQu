@@ -13,13 +13,18 @@ from src_PI.utils.LatticeGeometry import total_qubits, get_total_sites
 _NATIVE_FOCK_ENCODERS = frozenset({'sparse', 'lobe'})
 
 
+# Fock bases that have a native-algebra builder (bare + Gaussian-squeezed).
+_NATIVE_FOCK_BASES = frozenset({'fock', 'fock_squeezed'})
+
+
 def _use_native_fock_path(config):
     """True iff the (basis, encoder) combination should build native algebra.
 
-    Currently: Fock basis + (sparse | lobe). Amplitude basis is Pauli-native
-    so it always uses the existing path regardless of encoder.
+    Fock (or Gaussian-squeezed Fock) + (sparse | lobe). Amplitude basis is
+    Pauli-native so it always uses the existing path regardless of encoder;
+    `fock_squeezed` + pauli_lcu stays on the Pauli path (`fock_squeezed.py`).
     """
-    return (config.pion_basis == 'fock'
+    return (config.pion_basis in _NATIVE_FOCK_BASES
             and config.block_encoder in _NATIVE_FOCK_ENCODERS)
 
 
@@ -67,18 +72,24 @@ def build_eft_hamiltonian(L, dim, n_b, pi_max, params, config):
 
     if _use_native_fock_path(config):
         # Native Fock path: fermion stays as FermionOperator, boson as
-        # BosonOperator, mixed terms unmultiplied.
-        from src_PI.hamiltonians.core.pion_basis import fock_native
+        # BosonOperator, mixed terms unmultiplied. Bare `fock` -> fock_native;
+        # `fock_squeezed` -> fock_native_squeezed (same native contract, squeezed
+        # coefficients; r from params['squeeze_r']).
+        if config.pion_basis == 'fock_squeezed':
+            from src_PI.hamiltonians.core.pion_basis import (
+                fock_native_squeezed as native_builder)
+        else:
+            from src_PI.hamiltonians.core.pion_basis import fock_native as native_builder
 
-        mh = fock_native.build_native_mixed_hamiltonian(L, dim, n_b, params)
+        mh = native_builder.build_native_mixed_hamiltonian(L, dim, n_b, params)
         # Fold the static-nucleon FermionOperator into the MixedHamiltonian's
         # fermion_part without applying Jordan-Wigner.
         mh.fermion_part = mh.fermion_part + H_static_f
         sub_h = SubHamiltonian(
-            name='fock', operator=mh, algebra='fermion_boson'
+            name=config.pion_basis, operator=mh, algebra='fermion_boson'
         )
         metadata = {
-            'pion_basis': 'fock',
+            'pion_basis': config.pion_basis,
             'block_encoder': config.block_encoder,
             'L': L, 'dim': dim, 'n_b': n_b, 'num_sites': num_sites,
         }

@@ -1,6 +1,9 @@
 #!/bin/sh
 # Condor executable for ONE Architecture A-vs-B resource shard (task 34).
-# args: $1=L  $2=n_b_values ('+'-separated)  $3=squeeze_r  $4=campaign_id  $5=mode(opt:"test")
+# args: $1=L  $2=n_b_values ('+'-separated)  $3=squeeze_r  $4=campaign_id
+#       $5=mode(opt:"test")  $6=encoder(opt:"pauli_lcu"|"sparse", default pauli_lcu)
+# pauli_lcu BUILDS the walk circuit (size-capped ~L=3); sparse is the analytical
+# Gilyen-Lemma-30 aggregation (fock_squeezed->fock_native_squeezed) that scales to L=10.
 #
 # Runs bare `fock` vs squeezed `fock_squeezed@r*` walks across an n_b sweep at fixed L
 # (see misc/run_frame_AB_shard.py). Self-provisions per-sandbox (uv cache + managed
@@ -9,7 +12,7 @@
 # passed in, so the job needs only src_PI + pyLIQTR from requirements-hpc-quantum.txt).
 # Writes its per-shard JSON straight to the shared campaign dir (nothing transfers back).
 set -u
-L="$1"; NB="$2"; R="$3"; CAMPAIGN="$4"; MODE="${5:-run}"
+L="$1"; NB="$2"; R="$3"; CAMPAIGN="$4"; MODE="${5:-run}"; ENCODER="${6:-pauli_lcu}"
 # Condor `queue ... from file` splits columns on commas -> the n_b list uses '+' as a
 # comma-free separator; normalize back here (see HPC_WORKFLOW.md §10).
 NB="$(printf '%s' "$NB" | tr '+' ',')"
@@ -49,10 +52,10 @@ fi
 
 OUTDIR="$REPO/hpc/quantum/campaign_${CAMPAIGN}/shards"
 mkdir -p "$OUTDIR"
-OUT="$OUTDIR/L${L}_AB.json"
+OUT="$OUTDIR/L${L}_${ENCODER}_AB.json"
 # shellcheck disable=SC2086
 "$PY" -m misc.run_frame_AB_shard --L "$L" --dim 3 --n-b-values "$NB" \
-    --squeeze-r "$R" --frames bare,squeeze --encoder pauli_lcu --out "$OUT"
+    --squeeze-r "$R" --frames bare,squeeze --encoder "$ENCODER" --out "$OUT"
 status=$?
 echo "[AB] done status=$status -> $OUT"
 exit "$status"
