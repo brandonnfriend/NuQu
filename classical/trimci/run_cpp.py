@@ -571,7 +571,7 @@ def _adaptive_ladder_solve(H, A, ladder_start, n_rungs, solver, pt2_diag,
 
 
 def growing_ladder(H, A, rungs, phase0_runs=64, seed=0, pt2_diag=None,
-                   verbose=True, on_rung=None, max_rung_seconds=None):
+                   verbose=True, on_rung=None, max_rung_seconds=None, pt2_max_core=None):
     """The 'grow, don't redo' core ladder (TrimCI / COO 3-phase workflow):
 
       Phase 0 — heavy ENSEMBLE at the smallest rung: `phase0_runs` independent random
@@ -601,16 +601,23 @@ def growing_ladder(H, A, rungs, phase0_runs=64, seed=0, pt2_diag=None,
                                       seed=seed + i)
         wall = time.time() - t
         core = (res.ferm_arr, res.bos_arr)
-        pr = pt2_from_result(H, res, diag_fn=pt2_diag)
-        rung = {"core": int(res.n_dets), "E_var": float(pr["E_var"]),
-                "dE_pt2": float(pr["dE_pt2"]),
-                "E_pt2": float(pr["E_var"]) + float(pr["dE_pt2"]),
-                "n_ext": pr["n_ext"], "wall_s": wall,
-                "phase": "0-ensemble" if i == 0 else "grow"}
+        ph = "0-ensemble" if i == 0 else "grow"
+        if pt2_max_core is not None and int(res.n_dets) > pt2_max_core:
+            rung = {"core": int(res.n_dets), "E_var": float(res.energy),
+                    "dE_pt2": None, "E_pt2": None, "n_ext": None, "wall_s": wall,
+                    "phase": ph}
+        else:
+            pr = pt2_from_result(H, res, diag_fn=pt2_diag)
+            rung = {"core": int(res.n_dets), "E_var": float(pr["E_var"]),
+                    "dE_pt2": float(pr["dE_pt2"]),
+                    "E_pt2": float(pr["E_var"]) + float(pr["dE_pt2"]),
+                    "n_ext": pr["n_ext"], "wall_s": wall, "phase": ph}
         out.append(rung)
         if verbose:
+            pt2s = (f"dE_PT2={rung['dE_pt2']:+.4f}" if rung["dE_pt2"] is not None
+                    else "PT2 skipped (core>cap)")
             print(f"  [{rung['phase']:>10}] core={rung['core']:>7}  "
-                  f"E_var={rung['E_var']:12.5f} MeV  dE_PT2={rung['dE_pt2']:+.4f}  [{wall:.0f}s]")
+                  f"E_var={rung['E_var']:12.5f} MeV  {pt2s}  [{wall:.0f}s]")
         if on_rung is not None:
             on_rung(rung, res)
         if max_rung_seconds is not None and wall > max_rung_seconds:

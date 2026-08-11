@@ -30,7 +30,7 @@ from classical.trimci.frame_qpe import warmstart_overlap
 from classical.trimci.observables import occupation_tail, occupation_histogram
 from classical.trimci.lf import compactness
 from classical.trimci.run_cpp import (_adaptive_ladder_solve, _pick_solver,
-                                      three_phase_growing_run)
+                                      three_phase_growing_run, growing_ladder)
 
 
 def _mean_occupation(res, n_bos):
@@ -85,6 +85,12 @@ def main():
                     help="skip EN-PT2 once the core exceeds this (its external space ~223x "
                          "core -> ~150GB at 1M, OOMs before the E_var solve). Deep runs set "
                          "this low (e.g. 64000) to reach 1M+ on E_var; PT2 stays on shallow.")
+    ap.add_argument("--warm-grow", action="store_true",
+                    help="independent mode: after fitting the frame ONCE (Phase 0), GROW "
+                         "the core rung-to-rung warm-started from the previous rung (each "
+                         "rung's space contains the last) instead of a fresh from-scratch "
+                         "solve per rung. Monotone by construction -> a SMOOTH convergence "
+                         "curve (no seed-jaggedness); the fix for the cost-extrapolation.")
     ap.add_argument("--exact-ref", action="store_true",
                     help="also compute the EXACT ground energy (Lanczos, guarded) as the "
                          "true E_inf for the Tier-1 cost-to-fixed-accuracy anchor. Only "
@@ -214,11 +220,22 @@ def main():
         Hind, _ = frame_workflow.optimize_frame(
             Hbare, A, args.phase0_core, has_gaussian=has_gaussian, has_lf=has_lf,
             has_coo=has_coo, num_runs=args.frame_runs, cycles=args.orbopt_cycles, seed=args.seed)
-        _adaptive_ladder_solve(
-            Hind, A, args.ladder_start, args.n_rungs, solver, pt2_diag,
-            max_core=args.max_core, max_rung_seconds=args.max_rung_seconds,
-            n_runs=args.ladder_n_runs, seed=args.seed, verbose=True, on_rung=on_rung,
-            boson_init_mean=bim, pt2_max_core=args.pt2_max_core)
+        if args.warm_grow:
+            # GROW within the frozen frame: Phase-0 ensemble at the smallest rung, then
+            # warm-start each rung from the previous core (no from-scratch redo). Monotone
+            # -> smooth convergence curve for the cost extrapolation.
+            rungs = [args.ladder_start * 2 ** k for k in range(args.n_rungs)
+                     if args.ladder_start * 2 ** k <= args.max_core]
+            growing_ladder(
+                Hind, A, rungs, phase0_runs=args.phase0_runs, seed=args.seed,
+                pt2_diag=pt2_diag, verbose=True, on_rung=on_rung,
+                max_rung_seconds=args.max_rung_seconds, pt2_max_core=args.pt2_max_core)
+        else:
+            _adaptive_ladder_solve(
+                Hind, A, args.ladder_start, args.n_rungs, solver, pt2_diag,
+                max_core=args.max_core, max_rung_seconds=args.max_rung_seconds,
+                n_runs=args.ladder_n_runs, seed=args.seed, verbose=True, on_rung=on_rung,
+                boson_init_mean=bim, pt2_max_core=args.pt2_max_core)
 
     out["done"] = True
     out["wall_s"] = time.time() - t0

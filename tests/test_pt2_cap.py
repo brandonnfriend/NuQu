@@ -38,6 +38,18 @@ def main():
     if any(r["dE_pt2"] is None for r in plain):
         fails.append("pt2_max_core=None should compute PT2 on every rung")
 
+    # growing_ladder (warm-grow): E_var must be MONOTONE (each rung's core ⊇ the
+    # previous, so its variational energy can only drop) -- the smooth-curve property --
+    # and PT2 must gate the same way.
+    from classical.trimci.run_cpp import growing_ladder
+    gl = growing_ladder(H, 4, [500, 1000, 2000, 4000], phase0_runs=4, seed=0,
+                        pt2_diag=pt2_diag, verbose=False, pt2_max_core=1200)
+    Egl = [r["E_var"] for r in gl]
+    if any(Egl[i + 1] > Egl[i] + 1e-9 for i in range(len(Egl) - 1)):
+        fails.append(f"growing_ladder not monotone: {Egl}")
+    if any(r["dE_pt2"] is not None for r in gl if r["core"] > 1200):
+        fails.append("growing_ladder PT2 not gated above cap")
+
     if fails:
         print("test_pt2_cap: FAILED")
         for f in fails:

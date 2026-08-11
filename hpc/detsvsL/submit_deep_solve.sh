@@ -19,7 +19,7 @@ CAMPAIGN="deep-$(date +%Y%m%d-%H%M%S)-$$"; DIR="campaign_${CAMPAIGN}"; mkdir -p 
 cat > "$DIR/campaign.sub" <<EOF
 Executable              = ./run_frame_shard.sh
 arguments               = ${L} 0 ${CAMPAIGN} ${FRAME} 1 ${FILLING} ${MAXCORE} independent 4 3 1000 21600
-environment             = "NUQU_DEEP_SOLVE=1 NUQU_LADDER_NRUNS=1 NUQU_N_B=2 NUQU_N_RUNGS=11 NUQU_PT2_MAX_CORE=64000"
+environment             = "NUQU_DEEP_SOLVE=1 NUQU_LADDER_NRUNS=1 NUQU_N_B=2 NUQU_N_RUNGS=11 NUQU_PT2_MAX_CORE=64000 NUQU_WARM_GROW=1 NUQU_PHASE0_RUNS=32"
 should_transfer_files   = YES
 when_to_transfer_output = ON_EXIT
 transfer_input_files    = run_frame_shard.sh

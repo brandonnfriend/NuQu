@@ -72,6 +72,10 @@ BIM_ARG=""; [ -n "${NUQU_BOSON_INIT_MEAN:-}" ] && BIM_ARG="--boson-init-mean ${N
 # PT2 external space ~223x core -> OOMs (~150GB at 1M) before the E_var solve does. Deep
 # runs cap it low so the ladder reaches 1M+ on E_var (PT2 kept on the shallow rungs).
 PT2CAP_ARG=""; [ -n "${NUQU_PT2_MAX_CORE:-}" ] && PT2CAP_ARG="--pt2-max-core ${NUQU_PT2_MAX_CORE}"
+# WARM-GROW: after the one-time frame fit, grow the core rung-to-rung warm-started from
+# the previous rung (monotone -> smooth convergence curve), not a fresh solve per rung.
+WARMGROW_ARG=""; [ -n "${NUQU_WARM_GROW:-}" ] && WARMGROW_ARG="--warm-grow"
+P0RUNS="${NUQU_PHASE0_RUNS:-64}"       # warm-grow Phase-0 basin-escape ensemble size
 DIM="${NUQU_DIM:-3}"                   # lattice dim (Tier-1 exact-anchor uses 1D/2D chains)
 # --exact-ref: guarded Lanczos true E_inf for the Tier-1 cost anchor (small ED systems).
 EXACT_ARG=""; [ -n "${NUQU_EXACT_REF:-}" ] && EXACT_ARG="--exact-ref --exact-max-mem-gb ${NUQU_EXACT_MAX_MEM_GB:-24}"
@@ -82,8 +86,8 @@ if [ "$LADDER_MODE" = "independent" ]; then
   "$PY" -m misc.run_frame_shard --L "$L" --seed "$SEED" --dim "$DIM" --n_b "$NB" --frame "$FRAME" \
       --A "$A" $FILL_ARG --ladder-mode independent --ladder-start 1000 --n-rungs "$NRUNGS" \
       --max-core "$MAXCORE" --frame-runs "$RUNS" --phase0-core "$PHASE0CORE" \
-      --orbopt-cycles "$ORBOPTCYCLES" --max-rung-seconds "$MAXRUNGSEC" \
-      --ladder-n-runs "$LNRUNS" $BIM_ARG $PT2CAP_ARG $EXACT_ARG --out "$OUT"
+      --orbopt-cycles "$ORBOPTCYCLES" --max-rung-seconds "$MAXRUNGSEC" --phase0-runs "$P0RUNS" \
+      --ladder-n-runs "$LNRUNS" $BIM_ARG $PT2CAP_ARG $EXACT_ARG $WARMGROW_ARG --out "$OUT"
 else
   "$PY" -m misc.run_frame_shard --L "$L" --seed "$SEED" --dim "$DIM" --n_b "$NB" --frame "$FRAME" \
       --A "$A" $FILL_ARG --ladder-mode grow --ladder-start 1000 --max-core "$MAXCORE" \
