@@ -20,6 +20,8 @@ since support grows with volume). Pure analysis -- no solves, safe to run anywhe
 """
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 
 WEIGHT_KEYS = [("n90", 0.10), ("n99", 0.01), ("n999", 1e-3), ("n9999", 1e-4)]
@@ -117,3 +119,58 @@ def support_weight_exponent(rung):
 def deepest_rung(rungs):
     r = [x for x in rungs if x.get("E_var") is not None]
     return max(r, key=lambda x: x["core"]) if r else None
+
+
+# ------------------------------------------------ energy extrapolation with error bars
+def extrapolate_uncertainty(cores, E, min_window=4, predict_cores=(), dEs=(1.0,)):
+    """Power-law fit `E_var(core) = E_inf + C*core^{-alpha}` with a HONEST error bar from
+    the fit-range family: fit over every window [start:] ending at the deepest core
+    (start = 0 .. N-min_window). The SPREAD across windows is the uncertainty — it captures
+    the full-vs-tail-fit disagreement that a single covariance-matrix error bar hides, which
+    is the dominant uncertainty here (no exact E_inf anchor at 3D). Each window fit grids
+    E_inf and takes the best-R^2 log-linear slope.
+
+    Returns dict with, as (median, lo, hi) triples: `Einf`, `alpha`; `predict[core]` = the
+    extrapolated E_var at an unmeasured core; `core_star[dE]` = core to reach within dE of
+    that window's own E_inf. lo/hi are the min/max over the fit family = the error band."""
+    cores = np.asarray(cores, float); E = np.asarray(E, float)
+    n = len(cores)
+    if n < 2:                                  # need >=2 points to fit a line
+        return None
+    fits = []
+    for start in range(0, max(1, n - min_window + 1)):
+        cc, EE = cores[start:], E[start:]
+        best = None
+        for Einf in np.linspace(min(EE) - 1000.0, min(EE) - 0.05, 500):
+            y = EE - Einf
+            if np.any(y <= 0):
+                continue
+            with warnings.catch_warnings():    # grid hits near-degenerate log-fits; expected
+                warnings.simplefilter("ignore", np.RankWarning)
+                a, logC = np.polyfit(np.log(cc), np.log(y), 1)
+            vy = np.var(np.log(y))
+            r2 = 1 - np.var(np.log(y) - (a * np.log(cc) + logC)) / vy if vy > 0 else 0.0
+            if best is None or r2 > best[0]:
+                best = (r2, Einf, -a, np.exp(logC))
+        if best is not None and best[2] > 0:
+            fits.append((best[1], best[2], best[3]))          # (E_inf, alpha, C)
+    if not fits:
+        return None
+    F = np.array(fits)
+    trip = lambda v: (float(np.median(v)), float(np.min(v)), float(np.max(v)))
+    out = {"Einf": trip(F[:, 0]), "alpha": trip(F[:, 1]), "n_fits": len(fits)}
+    out["predict"] = {pc: trip(np.array([ei + C * pc ** (-a) for ei, a, C in F]))
+                      for pc in predict_cores}
+    with np.errstate(over="ignore"):          # tiny alpha -> inf core_star = "unreachable"
+        out["core_star"] = {dE: trip(np.array([(C / dE) ** (1.0 / a) for ei, a, C in F]))
+                            for dE in dEs}
+    out["fits"] = F.tolist()          # (E_inf, alpha, C) per window -- for dense band plots
+    return out
+
+
+def predict_band(fits, cores):
+    """Given the raw (E_inf, alpha, C) window fits, return (median, lo, hi) arrays of the
+    extrapolated E_var over `cores` -- the shaded error band at every core, measured or not."""
+    cores = np.asarray(cores, float)
+    M = np.array([[ei + C * c ** (-a) for c in cores] for ei, a, C in fits])
+    return np.median(M, 0), M.min(0), M.max(0)
