@@ -11,9 +11,15 @@
 # shallow rung keeps its footprint ~10-15 GB while E_var (the observable we extrapolate) is
 # still recorded on EVERY rung. Memory is generous (qis nodes ~1 TB) to avoid OOM holds.
 #
-#   sh submit_deep_L_sweep.sh ["4 5 6"]      # default sweeps L=4,5,6
+#   sh submit_deep_L_sweep.sh ["4 5 6"]      # default sweeps L=4,5,6 at 48c/192G
+#
+# Tight-packing overrides (to fit a partially-free qis node when the allocation is busy):
+#   NUQU_CPUS=24 NUQU_MEM_OVERRIDE=128G sh submit_deep_L_sweep.sh "5 6"
+# The C++ SpMV threads to request_cpus, so fewer cores = a slower (but scheduling-friendly)
+# solve; per-rung incremental saving means a capped deep rung still keeps everything below it.
 set -eu
-FRAME=gaussian+lf; FILLING=1.0; CPUS=48; NB=2; P0RUNS=32; MAXRUNGSEC=21600
+FRAME=gaussian+lf; FILLING=1.0; NB=2; P0RUNS=32; MAXRUNGSEC=21600
+CPUS="${NUQU_CPUS:-48}"
 LS="${1:-4 5 6}"
 for L in $LS; do
   case "$L" in
@@ -24,6 +30,7 @@ for L in $LS; do
     6) MAXCORE=64000;   MEM=192G; PT2CAP=8000  ;;
     *) echo "ERROR: no schedule for L=$L" >&2; exit 1 ;;
   esac
+  [ -n "${NUQU_MEM_OVERRIDE:-}" ] && MEM="$NUQU_MEM_OVERRIDE"   # tight-pack a busy node
   CAMPAIGN="deepL-$(date +%Y%m%d-%H%M%S)-L${L}-$$"; DIR="campaign_${CAMPAIGN}"; mkdir -p "$DIR/logs"
   cat > "$DIR/campaign.sub" <<EOF
 Executable              = ./run_frame_shard.sh
