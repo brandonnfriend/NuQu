@@ -28,13 +28,11 @@ def sector_energy(shard):
     """Converged E ± sigma for one sector from its warm-grow rungs (extrapolate the tail;
     fall back to the deepest E_var with sigma = last monotone drop)."""
     rs = [r for r in shard["rungs"] if r.get("E_var") is not None]
-    cores = np.array([r["core"] for r in rs], float)
     E = np.array([r["E_var"] for r in rs], float)
-    if len(E) >= 4:
-        r = extrapolate_uncertainty(cores, E, min_window=4)
-        if r:
-            ei, lo, hi = r["Einf"]
-            return float(ei), float(max((hi - lo) / 2.0, abs(E[-1] - ei)))
+    # These dilute curves are near a PLATEAU (unlike the far-from-converged filling=1.0
+    # runs), so the deepest E_var is the estimate and the last monotone drop is the
+    # convergence-residual sigma. A power-law extrapolation is inappropriate here and
+    # manufactures a spurious far-off E_inf with a huge band.
     sig = abs(E[-1] - E[-2]) if len(E) >= 2 else 1.0
     return float(E[-1]), float(sig)
 
