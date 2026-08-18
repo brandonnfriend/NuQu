@@ -42,9 +42,11 @@ from openfermion import (
 
 from src_PI.hamiltonians.core.Operators import Nucleon_Transition_JW
 from src_PI.hamiltonians.core.pion_basis import fock
+from src_PI.hamiltonians.core.pion_basis.fock import _bosonop_to_qubitop
 from src_PI.hamiltonians.core.pion_basis.fock_native import (
     _MODES,
     _nucleon_transition_fermion,
+    build_native_mixed_hamiltonian,
 )
 from src_PI.hamiltonians.core.EFTParameters import get_physical_parameters
 from src_PI.utils.LatticeGeometry import (
@@ -237,6 +239,47 @@ def test_h_av_is_linear_in_axial_coupling():
     H1 = fock.H_axial_vector(L, dim, n_b, p1)
     H2 = fock.H_axial_vector(L, dim, n_b, p2)
     assert _qubitop_allclose(H2, 2.0 * H1)
+
+
+# --------------------------------------------------------------------------- #
+# Part 4 — cross-builder equivalence (the shared-representation guarantee)      #
+# --------------------------------------------------------------------------- #
+# The classical/sparse path (fock_native.py → MixedHamiltonian) and the        #
+# PauliLCU/quantum path (fock.py → QubitOperator) are independent builders.    #
+# The whole "shared native representation prevents classical/quantum drift"    #
+# claim rests on them being the SAME operator. Multiply the native mixed terms #
+# out and assert equality with the fock.py Pauli build, sector by sector.      #
+
+def _native_mixed_to_qubitop(mh, n_b):
+    """Multiply out the native MixedHamiltonian's mixed terms into a QubitOp."""
+    H = QubitOperator()
+    for mt in mh.mixed_terms:
+        f_q = jordan_wigner(mt.fermion_factor)
+        # Do NOT normal-order the boson factor: the truncated register makes
+        # that unsound (see fock._bosonop_to_qubitop).
+        b_q = _bosonop_to_qubitop(mt.boson_factor, n_b, mh.mode_to_qubits)
+        H += mt.coeff * (f_q * b_q)
+    return H
+
+
+@pytest.mark.parametrize("L,dim,n_b", [(2, 1, 2), (2, 2, 2)])
+def test_native_mixed_terms_match_fock_pauli(L, dim, n_b):
+    """fock_native H_AV+H_WT (multiplied out) == fock.py H_AV+H_WT."""
+    p = _params()
+    mh = build_native_mixed_hamiltonian(L, dim, n_b, p)
+    native = _native_mixed_to_qubitop(mh, n_b)
+    pauli = fock.H_axial_vector(L, dim, n_b, p) + fock.H_WT_Logic(L, dim, n_b, p)
+    assert _qubitop_allclose(native, pauli, tol=1e-8)
+
+
+@pytest.mark.parametrize("L,dim,n_b", [(2, 1, 2), (2, 2, 2)])
+def test_native_boson_part_matches_fock_free_pion(L, dim, n_b):
+    """fock_native H_pion_free (boson_part) == fock.py H_pion_free."""
+    p = _params()
+    mh = build_native_mixed_hamiltonian(L, dim, n_b, p)
+    native = _bosonop_to_qubitop(mh.boson_part, n_b, mh.mode_to_qubits)
+    pauli = fock.H_pion_free(L, dim, n_b, p)
+    assert _qubitop_allclose(native, pauli, tol=1e-8)
 
 
 if __name__ == '__main__':

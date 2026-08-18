@@ -126,10 +126,19 @@ or a clearly-scoped scenario band; no mixed upper/lower "bounds."
   `Operators1D.py`); callers unchanged.
 - A2 oracle suite: DONE — `tests/test_vertex_algebra.py` (Kronecker one-body oracle for
   all 12 σ_S⊗τ_I channels, imaginary-channel guard, native/JW cross-check, Hermiticity,
-  full-H fermion-number conservation, zero/linear-coupling limits). 71 fix-adjacent tests
-  green. Bug-baseline tests updated: `test_fock_basis` counts, `test_sign_structure` claim.
-- A3 `a_L**dim` amplitude consistency: TODO.
-- Remaining: small ED anchor for TrimCI (folds into Phase 2).
+  full-H fermion-number conservation, zero/linear-coupling limits, and cross-builder
+  equivalence: fock.py PauliLCU ≡ fock_native multiplied-out, dim=1 and dim=2). Bug-
+  baseline tests updated: `test_fock_basis` counts, `test_sign_structure` claim.
+- A3 `a_L**dim` consistency: DONE for the operator builder (`amplitude.py` free-pion
+  vol_factor a_L**3 → a_L**dim, matching Fock; identical at dim=3). DEFERRED to
+  Workstream B: the Watson cutoff formulas in `EFTParameters.py` (Eqs 75–78) still carry
+  fixed a_L**3 — they are entangled with the rigorous-cutoff rework and are 3D-derived, so
+  the dim-general form lands with B. `trotter_exact.py`/`trotter_theory.py` a_L**3 are
+  Watson Table IX 3D constants — intentionally left.
+- Full suite: 143 passed pre-A3; +4 cross-builder tests. Amplitude change is dim=3-
+  identical (no production-data impact).
+- **Workstream A COMPLETE** (Hamiltonian correctness). Small ED reference energy for
+  TrimCI is a Phase-2 validation artifact, not an A code item.
 
 ## Workstream D — Paper / claims cleanup (parallel, low compute)
 

@@ -133,7 +133,9 @@ def H_pion_free(L, dim, n_b, P, Q, Pp, Qp, m_pi, a_L):
     num_sites = get_total_sites(L, dim)
     H_pos_free = QubitOperator()
     H_mom_free = QubitOperator()
-    vol_factor = (a_L ** 3) / 2.0
+    # Lattice-cell volume a_L^d — dim-general to match the Fock path
+    # (fock_native._basis_coefficients uses a_L**dim). Identical at dim=3.
+    vol_factor = (a_L ** dim) / 2.0
     mass_factor = vol_factor * (m_pi ** 2)
 
     for x in range(num_sites):
