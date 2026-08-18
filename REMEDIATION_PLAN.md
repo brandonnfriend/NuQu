@@ -1,9 +1,9 @@
 # NuQu Remediation & Regeneration Plan
 
 Response to the Codex publication-readiness audit (`codex_audit/`, 2026-08-18).
-Owner: user (reviewer). Branch: TBD (recommend a dedicated `remediation/vertex-fix`
-cut from `main`). All data generated before the vertex fix is **invalid** and must be
-regenerated — see Workstream A.
+Owner: user (reviewer). Branch: **`remediation/vertex-fix`** (off the campaign branch, so it
+carries the binding/HPC infra). All data generated before the vertex fix is **invalid** and
+must be regenerated — see Workstream A.
 
 ## Scope decisions (locked 2026-08-18)
 
@@ -16,6 +16,60 @@ regenerated — see Workstream A.
 All three are max-rigor. To keep the paper's spine unblocked by the slow theory/encoder
 work, the workstreams are sequenced so the **critical path (Workstream A) unlocks the
 core results on its own**; B, C1, C2 extend the claim set.
+
+---
+
+## Current status & handoff (2026-08-18)
+
+Commits on `remediation/vertex-fix` (newest first):
+`9bc2e7a` C1 design done · `644d94f` C scoping + C3 anchor · `11beb50` B `tong_rigorous` ·
+`d532857` A3 + cross-builder tests · `9404fac` A vertex fix + oracle suite.
+
+| Workstream | State |
+|---|---|
+| **A** — Hamiltonian correctness | ✅ **DONE.** Vertex fix (3 builders) + physics-oracle suite (`tests/test_vertex_algebra.py`: Kronecker oracle for all 12 σ⊗τ channels, cross-builder equivalence, `[H_WT,n̂_x]=0`) + `a_L**dim`. **Full suite 143 pass.** |
+| **B** — Rigorous cutoff | ✅ **CODE DONE.** `boson_cutoff_method='tong_rigorous'` (exact Bogoliubov tail + variational bound), `classical/trimci/gaussian_cutoff.py`, tests. Draft `claude/research/bosonic-encodings/05_*.md` — audited & **rescoped honestly** (2 rigorous results; 2 open gaps: bound `‖Vψ‖` via Gaussian moments, control `|δ_true−δ_Gauss|`). **For user + Codex proof review.** `'heuristic'` stays default. |
+| **C3** — PauliLCU anchor | ✅ **DONE.** Genuinely circuit-level on corrected H (L=2,dim=1,n_b=2 → Λ=3077, Walk_T=214724, 31 qubits, 1.3s). Small-L validation anchor; ceiling is QubitOperator memory. |
+| **C1** — compiled sparse RE | 📐 **DESIGN DONE** (`docs/sparse_full_bundle_design.md`), **implementation TODO — this is the next major build.** |
+| **C2** — amplitude composed encoding | ⬜ scoped, not started (2nd large build). |
+| **C4** — runtime bands | ⬜ scoped, not started (medium). |
+| **D** — paper cleanup | ⬜ mostly parallel/low-compute; sign-problem writeup done (`docs/sign_problem.md`). |
+| **Phase 2/3** — regeneration | ⬜ not started; needs the corrected H + (for quantum) C1/C2. HPC, launch-approval loop. |
+
+### ▶ Recommended action for the C-focused session (start here)
+
+**Implement C1 step-by-step from `docs/sparse_full_bundle_design.md`**, in its gated order —
+do **not** build it all at once; each step has a validation gate:
+
+1. `SparseBosonMonomialBlockEncoding` (d=1 atom; cases 3a linear / 3b number-op / 3c-direct
+   two-mode) → **gate:** per-atom block-matrix sim (`α_l·⟨0|U_l|0⟩` vs exact monomial matrix,
+   n_b=2). Lowest risk; reuses the proven `single_ladder.py` machinery.
+2. Fermion atom via off-the-shelf `PauliStringLCU(MyCustomHamiltonian(jordan_wigner(fermion_part)))`
+   → **gate:** term-for-term vs standalone PauliLCU `estimate_resources`. This removes the
+   fermion LOWER-bound proxy.
+3. `BundleSelect(UnaryIterationGate)` + `SparseFullBundleBlockEncoding` → **gates:** α_tot
+   invariant (`be.alpha == compute_native_lambda(...)['physical_lambda']`) **and** the scaled-toy
+   assembly sim (≤~12 qubits). **These retire the #1 correctness risk (reflection subspace / α).**
+4. Compiled-vs-analytical A/B at L=2 dim=1 then dim=3 (n_b=2); report the ratio + boson/fermion/
+   mixed breakdown — that A/B *is* a publishable "cost of honest compilation" number.
+5. Only then flip the Config default; extend the pyLIQTR cache to the compiled composite.
+
+**Guardrails for the C session:**
+- **Highest risk = reflection subspace / α_tot** (design §7.1): the walk reflects about the flag
+  subspace; get it wrong and every Λ/T-count is *silently* corrupt. The α_tot invariant + toy
+  sim (step 3) are the gates that catch it — do not skip them.
+- **Env is pinned:** pyLIQTR 1.3.4 / Qualtran 0.4.0 (no composite block-encoders → all custom
+  bloqs from primitives). Do not plan around a Qualtran upgrade.
+- **Comparison-switch discipline** (CLAUDE.md): keep the analytical `estimate_sparse_resources`
+  alive as the A/B baseline; gate the compiled path behind a `compiled` Config switch, default
+  analytical until validated.
+- **No heavy local compute** (laptop crashes twice on record): validation sims stay tiny
+  (n_b≤2, ≤~12 qubits); anything larger → cluster.
+- After C1: **C2** (composed `H_pos+H_mom` encoding + Watson Eqs. 102–104 species-selective QFT),
+  then **C4** (runtime bands). Then Phase 2/3 regeneration.
+
+**Not blocking C:** the B proof gaps are the user's/Codex's to review; A is the foundation
+(worth a look before Phase-2/3 regeneration burns cluster time).
 
 ---
 
