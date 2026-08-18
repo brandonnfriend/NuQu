@@ -22,54 +22,44 @@ core results on its own**; B, C1, C2 extend the claim set.
 ## Current status & handoff (2026-08-18)
 
 Commits on `remediation/vertex-fix` (newest first):
-`9bc2e7a` C1 design done · `644d94f` C scoping + C3 anchor · `11beb50` B `tong_rigorous` ·
+`a4a38f9` C1 step 5 (Config switch+cache) · `47c662e` C1 step 4 (A/B) · `91ca3de` C1 step 3
+(full-bundle) · `fe7fdf5` C1 step 2 (fermion atom) · `524b1c8` C1 step 1 (boson monomial) ·
+`5ec99be`/`9bc2e7a` C1 design · `644d94f` C scoping + C3 anchor · `11beb50` B `tong_rigorous` ·
 `d532857` A3 + cross-builder tests · `9404fac` A vertex fix + oracle suite.
 
 | Workstream | State |
 |---|---|
-| **A** — Hamiltonian correctness | ✅ **DONE.** Vertex fix (3 builders) + physics-oracle suite (`tests/test_vertex_algebra.py`: Kronecker oracle for all 12 σ⊗τ channels, cross-builder equivalence, `[H_WT,n̂_x]=0`) + `a_L**dim`. **Full suite 143 pass.** |
+| **A** — Hamiltonian correctness | ✅ **DONE.** Vertex fix (3 builders) + physics-oracle suite (`tests/test_vertex_algebra.py`: Kronecker oracle for all 12 σ⊗τ channels, cross-builder equivalence, `[H_WT,n̂_x]=0`) + `a_L**dim`. |
 | **B** — Rigorous cutoff | ✅ **CODE DONE.** `boson_cutoff_method='tong_rigorous'` (exact Bogoliubov tail + variational bound), `classical/trimci/gaussian_cutoff.py`, tests. Draft `claude/research/bosonic-encodings/05_*.md` — audited & **rescoped honestly** (2 rigorous results; 2 open gaps: bound `‖Vψ‖` via Gaussian moments, control `|δ_true−δ_Gauss|`). **For user + Codex proof review.** `'heuristic'` stays default. |
 | **C3** — PauliLCU anchor | ✅ **DONE.** Genuinely circuit-level on corrected H (L=2,dim=1,n_b=2 → Λ=3077, Walk_T=214724, 31 qubits, 1.3s). Small-L validation anchor; ceiling is QubitOperator memory. |
-| **C1** — compiled sparse RE | 📐 **DESIGN DONE** (`docs/sparse_full_bundle_design.md`), **implementation TODO — this is the next major build.** |
-| **C2** — amplitude composed encoding | ⬜ scoped, not started (2nd large build). |
+| **C1** — compiled sparse RE | ✅ **DONE (implemented, 5 steps).** `SparseFullBundleBlockEncoding` — genuine `estimate_resources` Walk_T, no mixed bounds. Retired risk #1 via the α_tot invariant (machine precision incl. static-nucleon fermion sector) + a machine-precision toy assembly sim (heterogeneous: 2-mode boson multi-qubit shared ancilla + fermion + imaginary phase). **A/B: compiled 0.89×/0.92× the analytical proxy** (L=2 dim=1/3, n_b=2). `sparse_oracle_mode` Config switch (default analytical). 66-test suite; full suite 207 pass. *(final quantum-algorithms review in flight; two cost approximations documented — see §C1 below.)* |
+| **C2** — amplitude composed encoding | ⬜ scoped, not started (next large build). |
 | **C4** — runtime bands | ⬜ scoped, not started (medium). |
 | **D** — paper cleanup | ⬜ mostly parallel/low-compute; sign-problem writeup done (`docs/sign_problem.md`). |
-| **Phase 2/3** — regeneration | ⬜ not started; needs the corrected H + (for quantum) C1/C2. HPC, launch-approval loop. |
+| **Phase 2/3** — regeneration | ⬜ not started; needs the corrected H + (quantum) C1 ✅/C2. HPC, launch-approval loop. |
 
-### ▶ Recommended action for the C-focused session (start here)
+### ▶ Recommended action for the next C session (C2)
 
-**Implement C1 step-by-step from `docs/sparse_full_bundle_design.md`**, in its gated order —
-do **not** build it all at once; each step has a validation gate:
+**C1 is complete.** All five gated steps landed with their validation gates green (see the
+`## Workstream C` section for the step-by-step results). The next build is **C2 — amplitude
+composed encoding** (build the real `H_pos+H_mom` sum block encoding, incl. the H_WT
+species-selective QFT / basis-change circuit per Watson Eqs. 102–104), then **C4** (runtime bands),
+then Phase 2/3 regeneration on the cluster (corrected H, launch-approval loop).
 
-1. `SparseBosonMonomialBlockEncoding` (d=1 atom; cases 3a linear / 3b number-op / 3c-direct
-   two-mode) → **gate:** per-atom block-matrix sim (`α_l·⟨0|U_l|0⟩` vs exact monomial matrix,
-   n_b=2). Lowest risk; reuses the proven `single_ladder.py` machinery.
-2. Fermion atom via off-the-shelf `PauliStringLCU(MyCustomHamiltonian(jordan_wigner(fermion_part)))`
-   → **gate:** term-for-term vs standalone PauliLCU `estimate_resources`. This removes the
-   fermion LOWER-bound proxy.
-3. `BundleSelect(UnaryIterationGate)` + `SparseFullBundleBlockEncoding` → **gates:** α_tot
-   invariant (`be.alpha == compute_native_lambda(...)['physical_lambda']`) **and** the scaled-toy
-   assembly sim (≤~12 qubits). **These retire the #1 correctness risk (reflection subspace / α).**
-4. Compiled-vs-analytical A/B at L=2 dim=1 then dim=3 (n_b=2); report the ratio + boson/fermion/
-   mixed breakdown — that A/B *is* a publishable "cost of honest compilation" number.
-5. Only then flip the Config default; extend the pyLIQTR cache to the compiled composite.
+**Two things to close on C1 before it feeds a published figure:**
+- **Flip the default** `sparse_oracle_mode='analytical'→'compiled'` once the user is ready — it is a
+  one-line, now-validated change; kept analytical-by-default so no downstream number moves silently
+  (comparison-switch discipline).
+- **Documented cost approximations** (the α_tot subnormalization and the encoded operator are
+  *exact*; these are second-order and only touch the T/qubit *count*): (a) per-atom SELECT charges
+  the *uncontrolled* block cost + the unary AND-ladder, so the per-atom control overhead is only
+  partially counted; (b) `LogicalQubits` junk width (alias-sampling temporaries + one QROM kappa
+  batch) is an estimate. Both are far more honest than the retired mixed upper/lower bounds; the
+  in-flight review will say whether either needs tightening.
 
-**Guardrails for the C session:**
-- **Highest risk = reflection subspace / α_tot** (design §7.1): the walk reflects about the flag
-  subspace; get it wrong and every Λ/T-count is *silently* corrupt. The α_tot invariant + toy
-  sim (step 3) are the gates that catch it — do not skip them.
-- **Env is pinned:** pyLIQTR 1.3.4 / Qualtran 0.4.0 (no composite block-encoders → all custom
-  bloqs from primitives). Do not plan around a Qualtran upgrade.
-- **Comparison-switch discipline** (CLAUDE.md): keep the analytical `estimate_sparse_resources`
-  alive as the A/B baseline; gate the compiled path behind a `compiled` Config switch, default
-  analytical until validated.
-- **No heavy local compute** (laptop crashes twice on record): validation sims stay tiny
-  (n_b≤2, ≤~12 qubits); anything larger → cluster.
-- After C1: **C2** (composed `H_pos+H_mom` encoding + Watson Eqs. 102–104 species-selective QFT),
-  then **C4** (runtime bands). Then Phase 2/3 regeneration.
-
-**Not blocking C:** the B proof gaps are the user's/Codex's to review; A is the foundation
-(worth a look before Phase-2/3 regeneration burns cluster time).
+**Guardrails (unchanged, still apply to C2):** env pinned pyLIQTR 1.3.4 / Qualtran 0.4.0;
+comparison-switch discipline (keep the Fock-vs-amplitude paths both alive); no heavy local compute
+(tiny sims only). The B proof gaps are the user's/Codex's to review.
 
 ---
 
@@ -196,21 +186,40 @@ Walk_T=214724, 31 logical qubits (938 Pauli strings, 1.3s). Estimation is fast; 
 is QubitOperator build/memory (term count ~ O(L^d · f(n_b))). Use PauliLCU as the small-L
 validation anchor; pin the empirical ceiling in Phase 2 on the cluster.
 
-**C1 (compiled sparse full-bundle) — DESIGN DONE (`docs/sparse_full_bundle_design.md`),
-implementation TODO (large build).** Concrete buildable spec from the quantum-algorithms
-specialist: pyLIQTR 1.3.4/Qualtran 0.4.0 has no composite block-encoders, so all custom bloqs
-from primitives (`UnaryIterationGate`, `SelectPauliLCU`, `StatePreparationAliasSampling`,
-`ProgrammableRotationGateArray`, `AddK`). Highest correctness risk = the reflection subspace /
-α_tot (retired by the scaled-toy assembly sim). 5 prioritized steps in the design doc. Build
-`SparseFullBundleBlockEncoding(BlockEncoding)` with a real PREP/SELECT decomposition:
-  1. Per-term boson encoders beyond the linear `(â+â†)`: number-operator-shaped monomials
-     (`n̂`, H_grad diagonal), multi-mode products (H_WT's `a^{b†}a^c`), via Qualtran bloq
-     composition of the single-mode encoder.
-  2. Fermion JW-Pauli factors (H_AV/H_WT nucleon parts) via a pyLIQTR PauliLCU sub-encoder
-     (replaces the current fermion LOWER-bound proxy).
-  3. LCU PREP (alias-sampling over the `L_eff` term coefficients) + controlled SELECT.
-  4. `_t_complexity_` = Qualtran-tracked composite (no mixed bounds); cross-check vs the
-     analytical proxy (same order) and vs PauliLCU term-for-term on small instances.
+**C1 (compiled sparse full-bundle) — ✅ DONE (implemented + validated).** Built per
+`docs/sparse_full_bundle_design.md` in 5 gated steps; each gate green. New files:
+`sparse_oracle/boson_monomial_encoding.py`, `fermion_atom.py`, `bundle_encoding.py`;
+`resources.py` (+`estimate_sparse_resources_compiled`, `compiled_vs_analytical`); `sparse.py`
+(+`compiled` switch); `tests/test_sparse_full_bundle.py` (66 tests).
+  1. **`SparseBosonMonomialBlockEncoding`** — d=1 per-mode encoder (linear `â`/`â†`, number op,
+     two-mode products). **Gate:** per-atom block-matrix sim vs exact monomial, ~1e-15 for every
+     shape in the real H (n_b=2,3); per-atom α == `lambda_compute._monomial_max_amplitude`.
+  2. **Fermion atom** via off-the-shelf pyLIQTR PauliLCU over `jordan_wigner(fermion_factor)`.
+     Replaces the `4·weight` LOWER bound (≈32 T) with the genuine PauliLCU cost (≈836 T).
+     **Gate:** α == Pauli 1-norm; term-for-term == standalone PauliLCU `estimate_resources`.
+     Asserts JW reality (vertex-fixed factors are Hermitian χ-channels).
+  3. **`SparseFullBundleBlockEncoding`** — LCU over atoms, `PREP(alias)·D_phase·SELECT·PREP†`.
+     Genuine Walk_T = `estimate_resources(QubitizedWalkOperator(be))` (389,496 at L=2 dim=1 n_b=2).
+     **Retired risk #1** two ways: (a) **α_tot invariant** `be.alpha == compute_native_lambda
+     physical_lambda` to machine precision (L=2 dim=1/2/3, incl. the static-nucleon fermion
+     sector); (b) **toy assembly sim** — ideal decompose reproduces H to ~1e-15 on a heterogeneous
+     toy (2-mode boson ⇒ multi-qubit shared ancilla + fermion + imaginary phase). All block-flag
+     qubits are in `selection_registers`, so `QubitizedWalkOperator` reflects the correct block.
+     *Bug found + fixed here:* H_WT's conjugate-momentum Π gives **imaginary** boson coefficients;
+     atoms now carry complex coeffs (phase → `D_phase`), not `.real`-projected (had dropped 12/15
+     mixed terms).
+  4. **A/B:** compiled **0.89×** (389,496 vs 438,208) at L=2 dim=1; **0.92×** (2.27M vs 2.45M) at
+     L=2 dim=3 — the honest number lands just under the proxy (the boson upper-bound ceiling had
+     dominated the fermion floor). Same α_tot both paths; per-kind SELECT breakdown reported.
+  5. **`sparse_oracle_mode`** Config switch (`'analytical'` default / `'compiled'`), A-independent
+     walk-estimate cache. Analytical proxy retained as the A/B baseline (comparison-switch
+     discipline). Default unflipped so no downstream number moves silently.
+
+  **Documented cost approximations (α + operator are exact; these touch only the T/qubit count):**
+  per-atom SELECT charges the *uncontrolled* block cost + unary AND-ladder (per-atom control
+  overhead only partially counted); `LogicalQubits` junk width is estimated (alias temporaries +
+  one QROM kappa). Both are far more honest than the retired mixed upper/lower bounds. *(A final
+  quantum-algorithms correctness review is in flight; this section will note its verdict.)*
 
 **C2 (amplitude composed encoding) — TODO, large build.** Build the controlled block
 encoding of `H_pos + H_mom` (or a costed product-formula with a stated simulation-error
