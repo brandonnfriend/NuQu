@@ -125,6 +125,48 @@ H; production N_f justified by proof (and consistent with empirical convergence)
 **Exit gate:** every reported quantum number is either pyLIQTR-compiled (PauliLCU, sparse)
 or a clearly-scoped scenario band; no mixed upper/lower "bounds."
 
+### Workstream C — implementation scoping + status (2026-08-18)
+
+**Current state of the code (audited):**
+- The single-mode `(â+â†)` sparse encoder IS a compiled pyLIQTR `BlockEncoding`
+  (`SparseSingleLadderBlockEncoding`: real Cirq `decompose_from_registers` + Qualtran
+  `_t_complexity_`). ✓
+- The **full-bundle** sparse number (`resources.py::estimate_sparse_resources`) is
+  **analytical** (Gilyén Lemma 30 + LCU over per-term single-mode costs) and mixes a boson
+  UPPER bound with a fermion LOWER bound → the P0-2 defect. This is what C1 must replace.
+- PauliLCU (`estimators.py`) IS genuinely circuit-level via pyLIQTR `QubitizedWalkOperator`
+  + `estimate_resources`. ✓
+
+**C3 (anchor) — DONE.** Verified on the corrected H: L=2,dim=1,n_b=2 → Λ=3077,
+Walk_T=214724, 31 logical qubits (938 Pauli strings, 1.3s). Estimation is fast; the ceiling
+is QubitOperator build/memory (term count ~ O(L^d · f(n_b))). Use PauliLCU as the small-L
+validation anchor; pin the empirical ceiling in Phase 2 on the cluster.
+
+**C1 (compiled sparse full-bundle) — TODO, large build.** Build
+`SparseFullBundleBlockEncoding(BlockEncoding)` with a real PREP/SELECT decomposition:
+  1. Per-term boson encoders beyond the linear `(â+â†)`: number-operator-shaped monomials
+     (`n̂`, H_grad diagonal), multi-mode products (H_WT's `a^{b†}a^c`), via Qualtran bloq
+     composition of the single-mode encoder.
+  2. Fermion JW-Pauli factors (H_AV/H_WT nucleon parts) via a pyLIQTR PauliLCU sub-encoder
+     (replaces the current fermion LOWER-bound proxy).
+  3. LCU PREP (alias-sampling over the `L_eff` term coefficients) + controlled SELECT.
+  4. `_t_complexity_` = Qualtran-tracked composite (no mixed bounds); cross-check vs the
+     analytical proxy (same order) and vs PauliLCU term-for-term on small instances.
+
+**C2 (amplitude composed encoding) — TODO, large build.** Build the controlled block
+encoding of `H_pos + H_mom` (or a costed product-formula with a stated simulation-error
+budget), *including* the H_WT species-selective QFT / term-controlled basis-change circuit
+(Watson Eqs. 102–104). Only then is amplitude-vs-Fock apples-to-apples.
+
+**C4 (runtime bands) — TODO, medium.** Recast `physical_runtime.py` as optimistic/pessimistic
+bands over cycle time, physical error, reaction latency, factory rate/count, routing, total
+failure probability (task 30) + error budget (task 12).
+
+**Note:** C1/C2 are the largest, most specialized pyLIQTR/Qualtran builds in the remediation;
+they warrant focused execution (fresh context; `quantum-algorithms` agent for the circuit
+design). The vertex fix changes the sparse/PauliLCU *numbers* (restored τ_y terms) but not
+the encoder *structure*.
+
 ---
 
 ## Scientific consequences of the fix (surfaced during Workstream A)
