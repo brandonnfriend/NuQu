@@ -142,7 +142,12 @@ Walk_T=214724, 31 logical qubits (938 Pauli strings, 1.3s). Estimation is fast; 
 is QubitOperator build/memory (term count ~ O(L^d · f(n_b))). Use PauliLCU as the small-L
 validation anchor; pin the empirical ceiling in Phase 2 on the cluster.
 
-**C1 (compiled sparse full-bundle) — TODO, large build.** Build
+**C1 (compiled sparse full-bundle) — DESIGN DONE (`docs/sparse_full_bundle_design.md`),
+implementation TODO (large build).** Concrete buildable spec from the quantum-algorithms
+specialist: pyLIQTR 1.3.4/Qualtran 0.4.0 has no composite block-encoders, so all custom bloqs
+from primitives (`UnaryIterationGate`, `SelectPauliLCU`, `StatePreparationAliasSampling`,
+`ProgrammableRotationGateArray`, `AddK`). Highest correctness risk = the reflection subspace /
+α_tot (retired by the scaled-toy assembly sim). 5 prioritized steps in the design doc. Build
 `SparseFullBundleBlockEncoding(BlockEncoding)` with a real PREP/SELECT decomposition:
   1. Per-term boson encoders beyond the linear `(â+â†)`: number-operator-shaped monomials
      (`n̂`, H_grad diagonal), multi-mode products (H_WT's `a^{b†}a^c`), via Qualtran bloq
