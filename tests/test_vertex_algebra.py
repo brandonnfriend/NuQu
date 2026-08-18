@@ -282,5 +282,27 @@ def test_native_boson_part_matches_fock_free_pion(L, dim, n_b):
     assert _qubitop_allclose(native, pauli, tol=1e-8)
 
 
+# --------------------------------------------------------------------------- #
+# Part 5 — H_WT conserves per-site total pion number (cutoff-derivation linchpin)#
+# --------------------------------------------------------------------------- #
+# The rigorous boson-cutoff derivation (task 25, gaussian_cutoff.py) hinges on
+# H_WT being number-preserving w.r.t. the per-site TOTAL pion occupation: the
+# ε-antisymmetry kills the a†a†/aa squeezing pieces, leaving ε^{abc} a^{b†}a^c.
+# If this regresses, the "H_WT ∈ Tong's H_R" resolution of the Watson
+# obstruction breaks. See claude/research/bosonic-encodings/05_*.md.
+
+def test_h_wt_conserves_persite_total_pion_number():
+    L, dim, n_b = 1, 1, 2
+    H_WT = fock.H_WT_Logic(L, dim, n_b, _params())
+    N_pion = QubitOperator()
+    for a in range(3):  # sum over the three pion species at the (single) site
+        N_pion += fock._number_op_register(0, a, n_b)
+    nq = _n_qubits(H_WT, N_pion)
+    Hm = get_sparse_operator(H_WT, n_qubits=nq)
+    Nm = get_sparse_operator(N_pion, n_qubits=nq)
+    comm = Hm @ Nm - Nm @ Hm
+    assert abs(comm).max() < 1e-9, "H_WT must conserve total per-site pion number"
+
+
 if __name__ == '__main__':
     raise SystemExit(pytest.main([__file__, '-q']))

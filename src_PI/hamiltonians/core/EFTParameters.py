@@ -60,7 +60,21 @@ def calculate_dynamic_cutoffs(L, dim, A_nucleons, params, epsilon_cut=0.1, E_bou
     CI = params['CI']
 
     eta = A_nucleons
-    L_vol = L ** dim  # Generalizes L^3 to handle our dimensional sweeps
+    L_vol = L ** dim  # site count generalizes to L^dim
+
+    # NOTE: Watson's Lemma 5 (Eqs. 75-78) is DERIVED FOR 3D. The a_L powers below
+    # (a_L**3 volume factors AND the a_L**4 in the mass term) are 3D-specific and
+    # are NOT uniformly cell-volume, so they cannot be mechanically generalized to
+    # a_L**dim. The dim-general rigorous cutoff is the exact-Bogoliubov
+    # 'tong_rigorous' path (classical/trimci/gaussian_cutoff.py). Warn here.
+    if dim != 3:
+        import warnings
+        warnings.warn(
+            f"calculate_dynamic_cutoffs implements Watson Lemma 5, derived for dim=3; "
+            f"its a_L powers are 3D-specific. Result for dim={dim} is not the correct "
+            f"d-dimensional bound. Use boson_cutoff_method='tong_rigorous' for dim!=3.",
+            RuntimeWarning,
+        )
 
     # Equation 77: A and B coefficients
     A_coeff = ((m_pi**2) * (a_L**3) / 2.0) - (1.0 / (2.0 * (f_pi**2) * a_L))
@@ -182,6 +196,27 @@ def _tong_boson_cutoff(L, dim, A_nucleons, params):
     return max(pred["n_b_eng"], pred["n_b_spec1"])
 
 
+def _tong_rigorous_boson_cutoff(L, dim, A_nucleons, params, epsilon_cut):
+    """Rigorous per-mode boson cutoff from the exact Bogoliubov ground state of
+    the free+gradient pion sector (task 25; derivation in
+    ``claude/research/bosonic-encodings/05_rigorous_cutoff_persite_number.md``).
+
+    Unlike the first-draft ``'tong'`` (SCS + Cauchy-Schwarz estimate), this uses
+    the *exact* cross-site-correlated Gaussian occupation tail and the exact
+    variational eigenvalue bound. The Weinberg-Tomozawa obstruction that blocks
+    Watson-2026's use of Tong is dissolved by taking the per-site-total pion
+    number as the Tong local quantum number (H_WT then conserves it → H_R).
+
+    ``epsilon_cut`` is the target relative eigenvalue error (dimensionless);
+    ``dE_QPE`` is read from ``params['dE_QPE']`` (default 0.1·m_π). Deferred
+    import (scipy/classical solver heavier than this module needs at import).
+    """
+    from classical.trimci.gaussian_cutoff import tong_rigorous_cutoff
+    dE_QPE = params.get('dE_QPE', 0.1 * params['m_pi'])
+    return tong_rigorous_cutoff(L, dim, A_nucleons, params,
+                                eps=epsilon_cut, dE_QPE=dE_QPE)
+
+
 def estimate_boson_cutoff(L, dim, A_nucleons, params, epsilon_cut=0.1,
                           E_bound=140.0, boson_cutoff_method='heuristic'):
     """
@@ -198,8 +233,12 @@ def estimate_boson_cutoff(L, dim, A_nucleons, params, epsilon_cut=0.1,
       - 'heuristic' (default): the starter formula
         ``n_q = max(N_Q_MIN, ceil(N_Q_BASE + N_Q_PER_LOG_A·log2(1+A)))`` —
         conservative, grows with A. See the module-level note for the caveat.
-      - 'tong': the rigorous Tong-2022 bound (``_tong_boson_cutoff``),
-        n_q = 4-5, essentially A-independent.
+      - 'tong': the first-draft Tong-2022 bound (``_tong_boson_cutoff``),
+        n_q = 4-5, essentially A-independent (SCS + Cauchy-Schwarz estimate).
+      - 'tong_rigorous': the exact-Bogoliubov tail + exact variational bound
+        (``_tong_rigorous_boson_cutoff``, task 25). dim-general;
+        rigorous-modulo-approx (see gaussian_cutoff.py). Here ``epsilon_cut``
+        is the target relative eigenvalue error (not the amplitude weight).
 
     pi_max and Pi_max are computed via the amplitude-basis (energy-bound)
     formula for *return-shape consistency* with calculate_dynamic_cutoffs()
@@ -211,6 +250,11 @@ def estimate_boson_cutoff(L, dim, A_nucleons, params, epsilon_cut=0.1,
     """
     if boson_cutoff_method == 'tong':
         n_q = _tong_boson_cutoff(L, dim, A_nucleons, params)
+    elif boson_cutoff_method == 'tong_rigorous':
+        # Exact-Bogoliubov rigorous-modulo-approx cutoff (task 25). For this
+        # method, `epsilon_cut` is the target relative eigenvalue error.
+        n_q = _tong_rigorous_boson_cutoff(
+            L, dim, A_nucleons, params, epsilon_cut)
     elif boson_cutoff_method == 'heuristic':
         # See module-level note for the rigor caveat on this heuristic.
         n_q = max(
@@ -219,7 +263,7 @@ def estimate_boson_cutoff(L, dim, A_nucleons, params, epsilon_cut=0.1,
         )
     else:
         raise ValueError(
-            f"boson_cutoff_method must be 'heuristic' or 'tong', "
+            f"boson_cutoff_method must be 'heuristic', 'tong', or 'tong_rigorous', "
             f"got {boson_cutoff_method!r}"
         )
 

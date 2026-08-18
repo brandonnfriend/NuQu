@@ -12,8 +12,10 @@ Currently supported axes:
 - cutoff_method: 'energy_bound' (Watson Lemma 5, default) or 'ns'
                  (Nyquist-Shannon optimal). Only consulted for the
                  amplitude basis; the Fock basis derives its own cutoff.
-- boson_cutoff_method: 'heuristic' (default log2(1+A) starter formula) or
-                 'tong' (rigorous Tong-2022 polylog bound, n_q=4-5). Chooses
+- boson_cutoff_method: 'heuristic' (default log2(1+A) starter formula),
+                 'tong' (first-draft Tong-2022 polylog bound, n_q=4-5), or
+                 'tong_rigorous' (exact-Bogoliubov tail + exact variational
+                 bound, task 25; rigorous-modulo-approx, dim-general). Chooses
                  how the per-site boson register size n_q is set. Drives the
                  Fock basis directly and the NS amplitude register indirectly;
                  ignored by the amplitude 'energy_bound' path (Lemma 5 sets
@@ -35,7 +37,7 @@ from dataclasses import dataclass, asdict, field
 _VALID_PION_BASES = ('amplitude', 'fock', 'fock_squeezed')
 _VALID_WALK_MODES = ('series', 'parallel')
 _VALID_CUTOFF_METHODS = ('energy_bound', 'ns')
-_VALID_BOSON_CUTOFF_METHODS = ('heuristic', 'tong')
+_VALID_BOSON_CUTOFF_METHODS = ('heuristic', 'tong', 'tong_rigorous')
 _VALID_BLOCK_ENCODERS = ('pauli_lcu', 'sparse', 'lobe')
 
 

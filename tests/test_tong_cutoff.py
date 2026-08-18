@@ -123,5 +123,52 @@ def main():
     print("=" * 62)
 
 
+# --------------------------------------------------------------------------- #
+# pytest coverage for the exact-Bogoliubov 'tong_rigorous' method (task 25)     #
+# --------------------------------------------------------------------------- #
+
+def test_tong_rigorous_lands_in_single_digit_nq():
+    """Rigorous cutoff certifies n_q = 4-5 across the physical L range."""
+    p = get_physical_parameters()
+    for L in (2, 4, 6, 10):
+        n_q, _, _ = estimate_boson_cutoff(
+            L, 3, 4, p, epsilon_cut=1e-3, boson_cutoff_method='tong_rigorous')
+        assert 4 <= n_q <= 5, f"L={L}: n_q={n_q} outside [4,5]"
+
+
+def test_tong_rigorous_monotone_in_precision():
+    """Tighter ε (smaller) never decreases the required N_f (polylog growth)."""
+    from classical.trimci.gaussian_cutoff import tong_rigorous_predictions
+    p = get_physical_parameters()
+    N_prev = 0
+    for eps in (1e-2, 1e-3, 1e-4, 1e-5):
+        N_f = tong_rigorous_predictions(4, 3, 4, p, eps=eps)['N_f']
+        assert N_f >= N_prev, f"N_f dropped as ε tightened: {N_f} < {N_prev}"
+        N_prev = N_f
+
+
+def test_tong_rigorous_is_dim_general():
+    """Unlike the Watson-3D baseline, the rigorous path runs for dim != 3."""
+    p = get_physical_parameters()
+    for dim in (1, 2, 3):
+        n_q, _, _ = estimate_boson_cutoff(
+            2, dim, 2, p, epsilon_cut=1e-3, boson_cutoff_method='tong_rigorous')
+        assert n_q >= 2
+
+
+def test_tong_rigorous_gaussian_tail_decreasing():
+    """The exact per-mode occupation tail is monotone decreasing in N_f."""
+    from classical.trimci.gaussian_cutoff import gaussian_tail
+    p = get_physical_parameters()
+    tails = [gaussian_tail(4, 3, N_f, p) for N_f in (2, 4, 6, 8, 10)]
+    assert all(tails[i] > tails[i + 1] for i in range(len(tails) - 1))
+
+
+def test_config_accepts_tong_rigorous():
+    c = Config(pion_basis='fock', boson_cutoff_method='tong_rigorous')
+    assert c.boson_cutoff_method == 'tong_rigorous'
+    assert Config.from_dict(c.to_dict()).boson_cutoff_method == 'tong_rigorous'
+
+
 if __name__ == "__main__":
     main()

@@ -69,11 +69,31 @@ Deliver an explicit `N_f(ε, t, L, A, couplings)` bound that **resolves the H_WT
 obstruction Watson flags after Lemma 5**, with constants retained. Interim: run the
 empirical `N_f→N_f+1` energy/weighted-tail convergence study (also needed as the
 cross-check) so production isn't blocked while the proof matures. Reconcile the
-production N_f against the proven bound once it lands. Relabel the `'tong'` switch in
-`EFTParameters.py` away from "certified" until the bound is proven.
+production N_f against the proven bound once it lands.
 
 **Exit gate:** checked theorem with hypotheses mapped term-by-term to the finite-volume
 H; production N_f justified by proof (and consistent with empirical convergence).
+
+### Workstream B — status (2026-08-18)
+
+- **Derivation draft** (`claude/research/bosonic-encodings/05_rigorous_cutoff_persite_number.md`,
+  gitignored). Two results rigorous + verified: (1) H_WT conserves per-site-total pion number
+  (ε-antisymmetry; `[H_WT,n̂_x]=0`) → dissolves the *specific* Watson H_WT obstruction; (2) the
+  exact variational eigenvalue inequality `(★)` (replaces `02`'s 2nd-order-PT). Adversarially
+  audited (proof-auditor) → **draft rescoped**: the certificate route is the spectral bound
+  `(★)` + exact Gaussian tail (covers all terms incl. H_WT *without* Tong), NOT Tong T6 on the
+  full H (the gradient squeezing is a 2nd Δλ=±2 obstruction). **Two gaps to a certified bound:**
+  (i) bound `‖Vψ‖` via Gaussian 4-point moments; (ii) control `|δ_true − δ_Gauss|`. User +
+  Codex to review the proof.
+- **Code:** `classical/trimci/gaussian_cutoff.py` (exact Bogoliubov tail + `(★)` solver);
+  `boson_cutoff_method='tong_rigorous'` switch in `estimate_boson_cutoff` (dim-general;
+  rigorous-modulo-approx); `'heuristic'` stays default. `n_q=4–5` across L=2…10.
+- **A3 remainder (dim consistency):** the `'tong_rigorous'` path is dim-general by construction;
+  the Watson-3D `calculate_dynamic_cutoffs` is now **guarded** (warns for `dim≠3`) rather than
+  given a wrong mechanical `a_L**3→a_L**dim` substitution.
+- **Tests:** `[H_WT,n̂_x]=0` regression; `tong_rigorous` single-digit n_q / ε-monotone /
+  dim-general / Gaussian-tail-monotone; Config round-trip.
+- **Deferred to Phase 2 (cluster):** empirical `N_f→N_f+1` ED convergence on corrected H.
 
 ---
 
