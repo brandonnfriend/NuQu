@@ -214,6 +214,25 @@ def _shift_gate_matrix(delta, n_b):
     return M
 
 
+def yield_boson_monomial_ops(amp_qubits, mode_registers, monomial, n_b):
+    """Yield the ideal boson-monomial block-encoding ops on the given qubits.
+
+    `amp_qubits[i]` is the amp ancilla for the i-th touched mode (sorted-mode
+    order); `mode_registers[i]` its `n_b` Fock qubits (big-endian). Lets a caller
+    (the bundle SELECT) place a boson atom on specific ancilla/system qubits.
+    """
+    for i, (_mode, actions) in enumerate(monomial_mode_groups(monomial)):
+        M = single_mode_monomial_matrix(actions, n_b)
+        alpha_m = float(np.abs(M).max())
+        delta, values = _column_shift_and_values(M)
+        amp, mreg = amp_qubits[i], mode_registers[i]
+        yield from _amp_oracle_ops(amp, mreg, values, alpha_m, n_b)
+        if delta % (1 << n_b) != 0:
+            yield cirq.MatrixGate(
+                _shift_gate_matrix(delta, n_b), name=f'SHIFT{delta}'
+            ).on(*mreg)
+
+
 def build_boson_monomial_circuit(monomial, n_b):
     """Build the classical-sim BCK circuit for a single boson monomial.
 
@@ -233,21 +252,9 @@ def build_boson_monomial_circuit(monomial, n_b):
         [cirq.NamedQubit(f'm{i}_{k}') for k in range(n_b)]
         for i in range(len(groups))
     ]
-    alpha = 1.0
-    ops = []
-    for i, (_mode, actions) in enumerate(groups):
-        M = single_mode_monomial_matrix(actions, n_b)
-        alpha_m = float(np.abs(M).max())
-        alpha *= alpha_m
-        delta, values = _column_shift_and_values(M)
-        amp, mreg = amp_qubits[i], mode_registers[i]
-        ops.extend(_amp_oracle_ops(amp, mreg, values, alpha_m, n_b))
-        if delta % (1 << n_b) != 0:
-            shift = cirq.MatrixGate(
-                _shift_gate_matrix(delta, n_b), name=f'SHIFT{delta}'
-            )
-            ops.append(shift.on(*mreg))
-    circuit = cirq.Circuit(ops)
+    alpha = monomial_alpha(monomial, n_b)
+    circuit = cirq.Circuit(
+        yield_boson_monomial_ops(amp_qubits, mode_registers, monomial, n_b))
     return circuit, amp_qubits, mode_registers, alpha
 
 

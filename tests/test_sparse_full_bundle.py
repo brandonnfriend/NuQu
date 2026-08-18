@@ -222,6 +222,156 @@ def test_fermion_atom_empty_operator_is_zero():
     assert cost == {'T': 0, 'Clifford': 0, 'LogicalQubits': 0, 'alpha': 0.0}
 
 
+# --------------------------------------------------------------------------- #
+# Step 3 §6.1 — α_tot invariant on real bundles                               #
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize('L,dim', [(2, 1), (2, 2), (2, 3)])
+def test_bundle_alpha_tot_invariant(L, dim):
+    """be.alpha == compute_native_lambda(mh, n_b)['physical_lambda'] to ~machine
+    precision — the block-encoding subnormalization matches the Λ every Λ/N_walk
+    downstream uses. Retires the α half of the reflection/α correctness risk."""
+    from src_PI.hamiltonians.core.pion_basis.fock_native import (
+        build_native_mixed_hamiltonian,
+    )
+    from src_PI.hamiltonians.core.EFTParameters import get_physical_parameters
+    from src_PI.estimation.sparse_oracle.lambda_compute import compute_native_lambda
+    from src_PI.estimation.sparse_oracle.bundle_encoding import (
+        FullBundleProblemInstance, SparseFullBundleBlockEncoding,
+    )
+    n_b = 2
+    mh = build_native_mixed_hamiltonian(L, dim, n_b, get_physical_parameters())
+    pi = FullBundleProblemInstance(mh, n_b, num_sites=L ** dim)
+    be = SparseFullBundleBlockEncoding(pi)
+    lam = compute_native_lambda(mh, n_b)['physical_lambda']
+    assert abs(be.alpha - lam) <= 1e-9 * max(1.0, lam), (
+        f"L={L} dim={dim}: α_tot={be.alpha} != physical_lambda={lam}")
+
+
+def test_bundle_keeps_imaginary_boson_coefficients():
+    """Regression: H_WT's conjugate-momentum Π pieces give *imaginary* boson-factor
+    coefficients. Every mixed term must be kept (not real-projected to zero), so
+    the atom count matches len(mixed_terms) and α_tot is exact."""
+    from src_PI.hamiltonians.core.pion_basis.fock_native import (
+        build_native_mixed_hamiltonian,
+    )
+    from src_PI.hamiltonians.core.EFTParameters import get_physical_parameters
+    from src_PI.estimation.sparse_oracle.bundle_encoding import extract_atoms
+    mh = build_native_mixed_hamiltonian(2, 1, 2, get_physical_parameters())
+    atoms = extract_atoms(mh, 2)
+    n_mixed = sum(1 for a in atoms if a.kind == 'mixed')
+    assert n_mixed == len(mh.mixed_terms) == 15, (
+        f"kept {n_mixed} mixed atoms of {len(mh.mixed_terms)} — imaginary "
+        "boson coeffs were dropped")
+
+
+def test_bundle_per_part_weights_match_compute_native_lambda():
+    """Per-kind Σ weight equals compute_native_lambda's per_part_lambdas."""
+    from src_PI.hamiltonians.core.pion_basis.fock_native import (
+        build_native_mixed_hamiltonian,
+    )
+    from src_PI.hamiltonians.core.EFTParameters import get_physical_parameters
+    from src_PI.estimation.sparse_oracle.lambda_compute import compute_native_lambda
+    from src_PI.estimation.sparse_oracle.bundle_encoding import extract_atoms
+    mh = build_native_mixed_hamiltonian(2, 2, 2, get_physical_parameters())
+    atoms = extract_atoms(mh, 2)
+    mine = {'boson': 0.0, 'fermion': 0.0, 'mixed': 0.0}
+    for a in atoms:
+        mine[a.kind] += a.weight
+    ref = compute_native_lambda(mh, 2)['per_part_lambdas']
+    assert abs(mine['boson'] - ref['boson_sparse']) < 1e-9
+    assert abs(mine['mixed'] - ref['mixed_sparse']) < 1e-9
+    assert abs(mine['fermion'] - ref['fermion']) < 1e-9
+
+
+# --------------------------------------------------------------------------- #
+# Step 3 §6.5 — toy assembly sim (retires the reflection-subspace risk)       #
+# --------------------------------------------------------------------------- #
+
+
+def _toy_bundle(boson_part, fermion_part, mode_to_qubits, n_b=1,
+                num_sites=1, num_pion_species=1):
+    from src_PI.hamiltonians.core.MixedHamiltonian import MixedHamiltonian
+    from src_PI.estimation.sparse_oracle.bundle_encoding import (
+        FullBundleProblemInstance, SparseFullBundleBlockEncoding,
+    )
+    mh = MixedHamiltonian(boson_part=boson_part, fermion_part=fermion_part,
+                          mode_to_qubits=mode_to_qubits)
+    pi = FullBundleProblemInstance(mh, n_b, num_sites=num_sites,
+                                   num_pion_species=num_pion_species)
+    return SparseFullBundleBlockEncoding(pi)
+
+
+def _assembly_error(be):
+    import numpy as np
+    from src_PI.estimation.sparse_oracle.bundle_encoding import (
+        extracted_bundle_block, bundle_reference_matrix,
+    )
+    return float(np.linalg.norm(extracted_bundle_block(be) - bundle_reference_matrix(be)))
+
+
+def test_toy_assembly_boson_only_mixed_phases():
+    """α_tot·⟨0|_flag U|0⟩_flag = H for a boson-only toy with real ± and imaginary
+    phases — validates PREP magnitudes, D_phase (real+imag), dispatch, reflection
+    subspace, operator assembly."""
+    from openfermion import BosonOperator, FermionOperator
+    bp = (BosonOperator('0', 1.0) + BosonOperator('0^', -1.0)
+          + BosonOperator('0^ 0', 1.0j))
+    be = _toy_bundle(bp, FermionOperator(), {0: [0]})
+    assert _assembly_error(be) < 1e-9
+
+
+def test_toy_assembly_heterogeneous_boson_and_fermion():
+    """Heterogeneous toy: a 2-mode boson atom (K=2 → multi-qubit shared ancilla,
+    A_atom=2), an imaginary-phase number op, AND a fermion atom (dilation). All
+    block-flag qubits are reflected; the encoded operator is exact."""
+    from openfermion import BosonOperator, FermionOperator
+    bp = BosonOperator('0 1', 0.7) + BosonOperator('0^ 0', -0.5j)
+    fp = FermionOperator('0^ 1', 1.0) + FermionOperator('1^ 0', 1.0)
+    be = _toy_bundle(bp, fp, {0: [2], 1: [3]})
+    # confirm the multi-qubit shared ancilla actually arises
+    assert be.PI._A_atom >= 2
+    assert _assembly_error(be) < 1e-9
+
+
+def test_toy_all_flag_qubits_in_selection_registers():
+    """Every block-flag qubit (outer select + shared atom ancilla) is in
+    selection_registers, so QubitizedWalkOperator reflects about exactly the
+    flagged block (design risk #1). No flag qubit hides in junk."""
+    from openfermion import BosonOperator, FermionOperator
+    bp = BosonOperator('0 1', 0.7) + BosonOperator('0^ 0', -0.5j)
+    fp = FermionOperator('0^ 1', 1.0) + FermionOperator('1^ 0', 1.0)
+    be = _toy_bundle(bp, fp, {0: [2], 1: [3]})
+    sel_bits = sum(r.total_bits() for r in be.selection_registers)
+    assert sel_bits == be.PI._b_out + be.PI._A_atom
+
+
+# --------------------------------------------------------------------------- #
+# Step 3 — compiled walk cost runs end-to-end                                 #
+# --------------------------------------------------------------------------- #
+
+
+def test_bundle_estimate_resources_runs():
+    """estimate_resources(QubitizedWalkOperator(be)) returns a finite compiled
+    T-count on the real L=2 dim=1 bundle (uses _t_complexity_, not the sim)."""
+    from src_PI.hamiltonians.core.pion_basis.fock_native import (
+        build_native_mixed_hamiltonian,
+    )
+    from src_PI.hamiltonians.core.EFTParameters import get_physical_parameters
+    from src_PI.estimation.sparse_oracle.bundle_encoding import (
+        FullBundleProblemInstance, SparseFullBundleBlockEncoding,
+    )
+    from pyLIQTR.qubitization.qubitized_gates import QubitizedWalkOperator
+    from pyLIQTR.utils.resource_analysis import estimate_resources
+    mh = build_native_mixed_hamiltonian(2, 1, 2, get_physical_parameters())
+    pi = FullBundleProblemInstance(mh, 2, num_sites=2)
+    be = SparseFullBundleBlockEncoding(pi)
+    res = estimate_resources(QubitizedWalkOperator(be))
+    assert res['T'] > 0 and res['Clifford'] > 0
+    assert res['LogicalQubits'] >= pi._w_flag + pi._w_sys - 8   # ≈ within junk slack
+
+
 if __name__ == '__main__':
     import sys
     sys.exit(pytest.main([__file__, '-q']))
