@@ -201,6 +201,13 @@ def estimate_sparse_resources(mh, n_b, num_sites):
 # --------------------------------------------------------------------------- #
 
 
+# Cache the (~1.5-7 s) compiled walk estimate on a stable, A-independent bundle
+# signature — the native mixed Hamiltonian's coupling structure depends on
+# (num_sites, n_b, species) but not the nucleon number A, so one estimate serves
+# a whole A-sweep. Bypass with NUQU_DISABLE_PYLIQTR_CACHE=1 (matches estimators).
+_COMPILED_CACHE = {}
+
+
 def estimate_sparse_resources_compiled(mh, n_b, num_sites, num_pion_species=3):
     """Genuinely compiled full-bundle resource estimate (C1 step 3-4).
 
@@ -212,6 +219,8 @@ def estimate_sparse_resources_compiled(mh, n_b, num_sites, num_pion_species=3):
     keys as the analytical fn plus a `compiled_breakdown` (atom counts + per-kind
     SELECT roll-up) for the "cost of honest compilation" A/B report.
     """
+    import os
+
     from pyLIQTR.utils.resource_analysis import get_T_counts_from_rotations
     from src_PI.estimation.sparse_oracle.bundle_encoding import (
         FullBundleProblemInstance,
@@ -221,6 +230,14 @@ def estimate_sparse_resources_compiled(mh, n_b, num_sites, num_pion_species=3):
 
     pi = FullBundleProblemInstance(mh, n_b, num_sites, num_pion_species)
     be = SparseFullBundleBlockEncoding(pi)
+
+    cache_disabled = os.environ.get('NUQU_DISABLE_PYLIQTR_CACHE', '') == '1'
+    key = None if cache_disabled else (
+        int(num_sites), int(n_b), int(num_pion_species),
+        len(pi.atoms), round(float(be.alpha), 6))
+    if key is not None and key in _COMPILED_CACHE:
+        return dict(_COMPILED_CACHE[key])
+
     res = estimate_resources(QubitizedWalkOperator(be))
 
     # Per-kind SELECT cost roll-up (T after rotation synthesis, so it is
@@ -234,7 +251,7 @@ def estimate_sparse_resources_compiled(mh, n_b, num_sites, num_pion_species=3):
         d['count'] += 1
         d['select_T'] += int(t_syn)
 
-    return {
+    result = {
         'Walk_T_Count': int(res['T']),
         'Walk_Clifford_Count': int(res['Clifford']),
         'Logical_Qubits': int(res['LogicalQubits']),
@@ -246,6 +263,9 @@ def estimate_sparse_resources_compiled(mh, n_b, num_sites, num_pion_species=3):
             'w_sys': pi._w_sys,
         },
     }
+    if key is not None:
+        _COMPILED_CACHE[key] = dict(result)
+    return result
 
 
 def compiled_vs_analytical(mh, n_b, num_sites, num_pion_species=3):

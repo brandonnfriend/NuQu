@@ -24,7 +24,10 @@ Refer to `tasks/26-sparse-oracle-fock.md` and
 """
 
 from src_PI.estimation.sparse_oracle.lambda_compute import compute_native_lambda
-from src_PI.estimation.sparse_oracle.resources import estimate_sparse_resources
+from src_PI.estimation.sparse_oracle.resources import (
+    estimate_sparse_resources,
+    estimate_sparse_resources_compiled,
+)
 from src_PI.hamiltonians.core.MixedHamiltonian import MixedHamiltonian
 from src_PI.hamiltonians.core.SubHamiltonian import SubHamiltonian
 
@@ -56,24 +59,44 @@ class SparseStrategy:
         physical_lambda = lam_data['physical_lambda']
         identity_shift = lam_data['identity_shift']
 
-        print(f"--- Sparse-oracle strategy (C3d.1: analytical full-bundle estimate) ---")
-        print(f"-> Identity (classical) shift:   {identity_shift:.4e}")
-        print(f"-> Physical Lambda (total):      {physical_lambda:.4e}")
-        for part, value in lam_data['per_part_lambdas'].items():
-            share = (value / physical_lambda * 100.0) if physical_lambda else 0.0
-            print(f"   - {part:>14}: λ = {value:.4e}  ({share:.2f}% of Λ)")
+        # C1: 'analytical' (default, mixed-bound proxy) vs 'compiled' (genuinely
+        # circuit-level SparseFullBundleBlockEncoding). Both share this exact
+        # α_tot (compute_native_lambda == be.alpha, the α invariant).
+        mode = getattr(config, 'sparse_oracle_mode', 'analytical')
 
-        # C3d.1 deliverable: full-bundle resource estimate.
-        res = estimate_sparse_resources(mh, n_b, num_sites)
-        bd = res['breakdown']
-        print(f"-> LCU summand count (L_eff): {bd['L_eff']} "
-              f"(boson={bd['boson_terms']}, fermion={bd['fermion_terms']}, "
-              f"mixed={bd['mixed_terms']})")
-        print(f"-> Single-mode walk T (n_b={n_b}, C3c): {bd['single_mode_walk_T']}")
-        print(f"-> SELECT T  = {bd['select_T']:.4e}")
-        print(f"-> PREP T    = {bd['prep_T']:.4e}")
-        print(f"-> Walk T (2·PREP + SELECT) = {res['Walk_T_Count']:.4e}")
-        print(f"-> Logical qubits           = {res['Logical_Qubits']}")
+        if mode == 'compiled':
+            print("--- Sparse-oracle strategy (C1: COMPILED full-bundle estimate) ---")
+            print(f"-> Identity (classical) shift:   {identity_shift:.4e}")
+            print(f"-> Physical Lambda (total):      {physical_lambda:.4e}")
+            res = estimate_sparse_resources_compiled(mh, n_b, num_sites)
+            bd = res['compiled_breakdown']
+            print(f"-> Atoms: {bd['n_atoms']}  per-kind: "
+                  + ", ".join(f"{k}={v['count']}" for k, v in bd['per_kind'].items()))
+            print(f"-> Walk T (compiled, estimate_resources) = {res['Walk_T_Count']:.4e}")
+            print(f"-> Logical qubits (flag {bd['w_flag']} + sys {bd['w_sys']}) "
+                  f"= {res['Logical_Qubits']}")
+            walk_T = res['Walk_T_Count']
+            walk_Cl = res['Walk_Clifford_Count']
+            logical_q = res['Logical_Qubits']
+            breakdown = bd
+        else:
+            print("--- Sparse-oracle strategy (analytical mixed-bound proxy) ---")
+            print(f"-> Identity (classical) shift:   {identity_shift:.4e}")
+            print(f"-> Physical Lambda (total):      {physical_lambda:.4e}")
+            for part, value in lam_data['per_part_lambdas'].items():
+                share = (value / physical_lambda * 100.0) if physical_lambda else 0.0
+                print(f"   - {part:>14}: λ = {value:.4e}  ({share:.2f}% of Λ)")
+            res = estimate_sparse_resources(mh, n_b, num_sites)
+            bd = res['breakdown']
+            print(f"-> LCU summand count (L_eff): {bd['L_eff']} "
+                  f"(boson={bd['boson_terms']}, fermion={bd['fermion_terms']}, "
+                  f"mixed={bd['mixed_terms']})")
+            print(f"-> Walk T (2·PREP + SELECT) = {res['Walk_T_Count']:.4e}")
+            print(f"-> Logical qubits           = {res['Logical_Qubits']}")
+            walk_T = res['Walk_T_Count']
+            walk_Cl = res['Walk_Clifford_Count']
+            logical_q = res['Logical_Qubits']
+            breakdown = bd
 
         # Build a `norm_data`-shaped dict the orchestrator expects.
         return {
@@ -84,16 +107,17 @@ class SparseStrategy:
             'physical_lambda': physical_lambda,
             'delta': 0.0,                          # no Δ for sparse path (no PauliLCU normalize)
             'walk_mode': bundle.walk_mode,
-            'Walk_T_Count': res['Walk_T_Count'],
-            'Walk_Clifford_Count': res['Walk_Clifford_Count'],
-            'Logical_Qubits': res['Logical_Qubits'],
+            'sparse_oracle_mode': mode,
+            'Walk_T_Count': walk_T,
+            'Walk_Clifford_Count': walk_Cl,
+            'Logical_Qubits': logical_q,
             'Physical_Lambda': physical_lambda,
             'Per_Sub_Walk': [{
                 'name': sub[0].name,
-                'T': res['Walk_T_Count'],
-                'Clifford': res['Walk_Clifford_Count'],
-                'LogicalQubits': res['Logical_Qubits'],
+                'T': walk_T,
+                'Clifford': walk_Cl,
+                'LogicalQubits': logical_q,
                 'alpha': physical_lambda,
             }],
-            'Sparse_Breakdown': res['breakdown'],   # diagnostic for downstream plots
+            'Sparse_Breakdown': breakdown,   # diagnostic for downstream plots
         }

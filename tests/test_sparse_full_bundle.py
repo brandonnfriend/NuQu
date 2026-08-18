@@ -405,6 +405,63 @@ def test_compiled_vs_analytical_ab():
     assert sum(v['count'] for v in bk['per_kind'].values()) == bk['n_atoms']
 
 
+# --------------------------------------------------------------------------- #
+# Step 5 — Config switch + cache + full-pipeline dispatch                      #
+# --------------------------------------------------------------------------- #
+
+
+def test_config_sparse_oracle_mode_axis():
+    from src_PI.utils.Config import Config
+    assert Config().sparse_oracle_mode == 'analytical'          # default unchanged
+    c = Config(block_encoder='sparse', sparse_oracle_mode='compiled')
+    assert c.sparse_oracle_mode == 'compiled'
+    assert Config.from_dict(c.to_dict()).sparse_oracle_mode == 'compiled'
+    with pytest.raises(ValueError, match='sparse_oracle_mode'):
+        Config(sparse_oracle_mode='nope')
+
+
+def _sparse_estimate(mode):
+    """Run the full sparse pipeline at L=2 dim=1 n_b=2 in the given oracle mode."""
+    from src_PI.hamiltonians.ConstructEFT import build_eft_hamiltonian
+    from src_PI.hamiltonians.core.EFTParameters import get_physical_parameters
+    from src_PI.estimation.block_encoders.sparse import SparseStrategy
+    from src_PI.utils.Config import Config
+    cfg = Config(pion_basis='fock', block_encoder='sparse', sparse_oracle_mode=mode)
+    bundle, _q, ns = build_eft_hamiltonian(
+        2, 1, 2, pi_max=0.0, params=get_physical_parameters(), config=cfg)
+    return SparseStrategy().estimate(bundle, ns, 2, cfg)
+
+
+def test_sparse_switch_dispatches_both_modes():
+    """The 'compiled' switch routes SparseStrategy to the compiled encoder while
+    'analytical' keeps the proxy; both share the exact same Physical_Lambda (the
+    α invariant, now including the static nucleon fermion sector)."""
+    a = _sparse_estimate('analytical')
+    c = _sparse_estimate('compiled')
+    assert a['sparse_oracle_mode'] == 'analytical'
+    assert c['sparse_oracle_mode'] == 'compiled'
+    assert abs(a['Physical_Lambda'] - c['Physical_Lambda']) < 1e-6 * a['Physical_Lambda']
+    # genuinely different walk numbers (compiled is not the proxy)
+    assert a['Walk_T_Count'] != c['Walk_T_Count']
+    assert c['Walk_T_Count'] > 0
+
+
+def test_compiled_estimate_cache_returns_identical():
+    """The compiled walk estimate is cached on an A-independent bundle signature."""
+    from src_PI.hamiltonians.core.pion_basis.fock_native import (
+        build_native_mixed_hamiltonian,
+    )
+    from src_PI.hamiltonians.core.EFTParameters import get_physical_parameters
+    from src_PI.estimation.sparse_oracle.resources import (
+        estimate_sparse_resources_compiled,
+    )
+    mh = build_native_mixed_hamiltonian(2, 1, 2, get_physical_parameters())
+    r1 = estimate_sparse_resources_compiled(mh, 2, 2)
+    r2 = estimate_sparse_resources_compiled(mh, 2, 2)
+    assert r1['Walk_T_Count'] == r2['Walk_T_Count']
+    assert r1['Logical_Qubits'] == r2['Logical_Qubits']
+
+
 if __name__ == '__main__':
     import sys
     sys.exit(pytest.main([__file__, '-q']))
