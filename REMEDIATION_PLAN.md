@@ -32,34 +32,44 @@ Commits on `remediation/vertex-fix` (newest first):
 | **A** — Hamiltonian correctness | ✅ **DONE.** Vertex fix (3 builders) + physics-oracle suite (`tests/test_vertex_algebra.py`: Kronecker oracle for all 12 σ⊗τ channels, cross-builder equivalence, `[H_WT,n̂_x]=0`) + `a_L**dim`. |
 | **B** — Rigorous cutoff | ✅ **CODE DONE.** `boson_cutoff_method='tong_rigorous'` (exact Bogoliubov tail + variational bound), `classical/trimci/gaussian_cutoff.py`, tests. Draft `claude/research/bosonic-encodings/05_*.md` — audited & **rescoped honestly** (2 rigorous results; 2 open gaps: bound `‖Vψ‖` via Gaussian moments, control `|δ_true−δ_Gauss|`). **For user + Codex proof review.** `'heuristic'` stays default. |
 | **C3** — PauliLCU anchor | ✅ **DONE.** Genuinely circuit-level on corrected H (L=2,dim=1,n_b=2 → Λ=3077, Walk_T=214724, 31 qubits, 1.3s). Small-L validation anchor; ceiling is QubitOperator memory. |
-| **C1** — compiled sparse RE | ✅ **DONE (implemented, 5 steps).** `SparseFullBundleBlockEncoding` — genuine `estimate_resources` Walk_T, no mixed bounds. Retired risk #1 via the α_tot invariant (machine precision incl. static-nucleon fermion sector) + a machine-precision toy assembly sim (heterogeneous: 2-mode boson multi-qubit shared ancilla + fermion + imaginary phase). **A/B: compiled 0.89×/0.92× the analytical proxy** (L=2 dim=1/3, n_b=2). `sparse_oracle_mode` Config switch (default analytical). 66-test suite; full suite 207 pass. *(final quantum-algorithms review in flight; two cost approximations documented — see §C1 below.)* |
+| **C1** — compiled sparse RE | ⚠ **BLOCK ENCODING DONE; WALK HERMITIZATION PENDING.** `SparseFullBundleBlockEncoding` built (5 steps): the block encoding `α_tot·⟨0|U|0⟩ = H` and `α_tot` (= Λ) are **exact & validated** (α invariant to machine precision incl. fermion sector; heterogeneous toy assembly sim ~1e-15). **BUT** the quantum-algorithms review found the d=1 atoms make `U` non-Hermitian, so the single-reflection `QubitizedWalkOperator` is **not a valid qubitization** (walk spectrum lacks `e^{±i arccos(E/α)}` — confirmed, xfail regression test). The compiled `Walk_T` (0.89×/0.92× the proxy) is a **block-encoding-level estimate, not a genuine walk cost**, until the atoms are Hermitized (re-pair `c·m+c̄·m†`; fermion atoms already Hermitian; α_tot preserved). Also open: mixed-atom operator sim (α is phase-blind), control-overhead + junk undercounts. **See §C1 below — needs a Hermitization pass before it feeds a figure.** |
 | **C2** — amplitude composed encoding | ⬜ scoped, not started (next large build). |
 | **C4** — runtime bands | ⬜ scoped, not started (medium). |
 | **D** — paper cleanup | ⬜ mostly parallel/low-compute; sign-problem writeup done (`docs/sign_problem.md`). |
 | **Phase 2/3** — regeneration | ⬜ not started; needs the corrected H + (quantum) C1 ✅/C2. HPC, launch-approval loop. |
 
-### ▶ Recommended action for the next C session (C2)
+### ▶ Recommended action for the next C session (C1 Hermitization, THEN C2)
 
-**C1 is complete.** All five gated steps landed with their validation gates green (see the
-`## Workstream C` section for the step-by-step results). The next build is **C2 — amplitude
-composed encoding** (build the real `H_pos+H_mom` sum block encoding, incl. the H_WT
-species-selective QFT / basis-change circuit per Watson Eqs. 102–104), then **C4** (runtime bands),
-then Phase 2/3 regeneration on the cluster (corrected H, launch-approval loop).
+**C1's block encoding is built and its α is exact, but the walk it costs is not yet a valid
+qubitization** (quantum-algorithms review, 2026-08-18 — see the ⚠ in the status table + §C1). Before
+C1 can produce a headline number, the atoms must be **Hermitized**:
 
-**Two things to close on C1 before it feeds a published figure:**
-- **Flip the default** `sparse_oracle_mode='analytical'→'compiled'` once the user is ready — it is a
-  one-line, now-validated change; kept analytical-by-default so no downstream number moves silently
-  (comparison-switch discipline).
-- **Documented cost approximations** (the α_tot subnormalization and the encoded operator are
-  *exact*; these are second-order and only touch the T/qubit *count*): (a) per-atom SELECT charges
-  the *uncontrolled* block cost + the unary AND-ladder, so the per-atom control overhead is only
-  partially counted; (b) `LogicalQubits` junk width (alias-sampling temporaries + one QROM kappa
-  batch) is an estimate. Both are far more honest than the retired mixed upper/lower bounds; the
-  in-flight review will say whether either needs tightening.
+1. **Re-pair conjugate boson monomials** `c·m + c̄·m†` (â↔â†; two-mode products with their h.c.)
+   into single Hermitian atoms, each encoded by a Hermitian d=2 BCK (generalize the *already-Hermitian*
+   `single_ladder.py` `(â+â†)` encoder to complex `c`). Hermitian **diagonal** atoms (`n̂`, gradient
+   diagonal) via a Hermitian 1-ancilla dilation. **Fermion PauliLCU atoms are already Hermitian —
+   no change.** α_tot is **preserved** under re-pairing (the d=2 α = sum of the two d=1 α's), so the
+   α invariant + all Λ downstream survive.
+   **Gate:** `test_bundle_walk_qubitizes_hermitian_H` (currently xfail, strict) flips to pass —
+   `W = (2Π−I)·U` has the spectrum `e^{±i arccos(E_k/α)}`.
+2. **Mixed-atom operator sim** (the α invariant is phase-blind — a dropped `i` inside an H_WT mixed
+   atom would pass silently): implement `_atom_sim_unitary` for `kind=='mixed'` (boson-circuit ⊗
+   fermion-dilation on disjoint supports) and check `α_l·⟨0|B_l|0⟩ = M_f⊗M_b` incl. an imaginary
+   boson factor.
+3. **Quantify the control-overhead undercount** (per-atom SELECT is charged *uncontrolled*): compare
+   `Σ uncontrolled` vs `Σ singly-controlled` atom cost on one bundle; fold into the A/B as an error
+   bar. **Tighten `LogicalQubits` junk** from a hardcoded `+8` to `max over atoms of inner-atom
+   ancilla` (fermion inner-PREP width; per-mode kappa×#modes; AddK).
 
-**Guardrails (unchanged, still apply to C2):** env pinned pyLIQTR 1.3.4 / Qualtran 0.4.0;
-comparison-switch discipline (keep the Fock-vs-amplitude paths both alive); no heavy local compute
-(tiny sims only). The B proof gaps are the user's/Codex's to review.
+**Then C2 — amplitude composed encoding** (real `H_pos+H_mom` block encoding + H_WT
+species-selective QFT, Watson Eqs. 102–104), **C4** (runtime bands), Phase 2/3 regeneration.
+
+**Do NOT flip the `sparse_oracle_mode` default to `'compiled'`** until the walk is Hermitized — the
+current compiled number is a block-encoding-level estimate for a not-yet-valid walk. Analytical stays
+default.
+
+**Guardrails (unchanged):** env pinned pyLIQTR 1.3.4 / Qualtran 0.4.0; comparison-switch discipline;
+no heavy local compute (tiny sims only). The B proof gaps are the user's/Codex's to review.
 
 ---
 
@@ -215,11 +225,18 @@ validation anchor; pin the empirical ceiling in Phase 2 on the cluster.
      walk-estimate cache. Analytical proxy retained as the A/B baseline (comparison-switch
      discipline). Default unflipped so no downstream number moves silently.
 
-  **Documented cost approximations (α + operator are exact; these touch only the T/qubit count):**
-  per-atom SELECT charges the *uncontrolled* block cost + unary AND-ladder (per-atom control
-  overhead only partially counted); `LogicalQubits` junk width is estimated (alias temporaries +
-  one QROM kappa). Both are far more honest than the retired mixed upper/lower bounds. *(A final
-  quantum-algorithms correctness review is in flight; this section will note its verdict.)*
+  **⚠ Quantum-algorithms review verdict (2026-08-18):** the α_tot invariant and the one-sided
+  `D_phase` are correct; the block-flag qubits are all in `selection_registers`; the ideal-sim
+  `MatrixGate` decomposition never leaks into the cost path (verified). **But** the review found a
+  load-bearing defect: the d=1 atoms encode non-Hermitian monomials → `U` is non-Hermitian → the
+  single-reflection `QubitizedWalkOperator` is **not a valid qubitization** (I verified: `‖U−U†‖≈7`
+  and the walk spectrum lacks `e^{±i arccos(E/α)}`). So the compiled `Walk_T` costs an object that
+  would not run QPE. **Λ/α_tot is exact; the walk is not — Hermitization required (see Recommended
+  action).** Secondary (all optimistic undercounts, documented): per-atom SELECT charged
+  *uncontrolled*; `LogicalQubits` junk width estimated; **mixed atoms unvalidated at the operator
+  level** (the α invariant is phase-blind — the largest untested surface). All still strictly more
+  honest than the retired mixed upper/lower bounds, but C1 is **not** publication-ready until the
+  walk is Hermitized + the mixed-atom sim lands.
 
 **C2 (amplitude composed encoding) — TODO, large build.** Build the controlled block
 encoding of `H_pos + H_mom` (or a costed product-formula with a stated simulation-error

@@ -24,31 +24,46 @@ That identity is the **α_tot invariant** (design §2, §6.1) — it holds by
 construction because each atom's α_l is the same d=1 sparse-oracle / Pauli
 1-norm factor `compute_native_lambda` sums.
 
-**Reflection subspace (design risk #1, retired here).**
+**Reflection subspace / block-flag qubit placement.**
 `QubitizedWalkOperator.decompose_from_registers` reflects about *all*
 `selection_registers` qubits being |0⟩ and leaves `junk_registers` unreflected
 (assumed to return to |0⟩). The flagged block of this encoding is
 `sel=0 ∧ atom_anc=0`, so **both the outer selection AND the shared atom
-ancilla are placed in `selection_registers`** (one `flag` register). The walk
-therefore reflects about exactly the block-flag subspace — no silent Λ/N_walk
-corruption. The internal QROM-load (`kappa`) and alias-sampling temporaries are
-genuine junk (uncomputed within their bloqs) and are declared as
-`junk_registers`. The toy assembly sim (`tests/test_sparse_full_bundle.py`)
-validates `α_tot·⟨0|_flag U|0⟩_flag = H` directly.
+ancilla are placed in `selection_registers`** (one `flag` register) — every
+block-flag qubit is reflected, none hides in junk. The toy assembly sim
+(`tests/test_sparse_full_bundle.py`) validates `α_tot·⟨0|_flag U|0⟩_flag = H`
+directly.
 
-**Cost is compiled, not bounded.** `_t_complexity_` is a strict roll-up of real
-sub-bloq `.t_complexity()` values — alias-sampling PREP (linear-T),
-per-atom block-encoding costs (boson `SparseBosonMonomialBlockEncoding`, fermion
-off-the-shelf PauliLCU), the unary-dispatch AND-ladder — with NO hand-inserted
-`P·single_ladder` ceiling or `4·weight` floor (the two mixed bounds of the
-analytical proxy `resources.py::estimate_sparse_resources`). The genuine
-Walk_T_Count is `estimate_resources(QubitizedWalkOperator(be))`.
+**⚠ KNOWN DEFECT — the walk is not yet a valid qubitization (Hermitization
+pending; quantum-algorithms review 2026-08-18).** The d=1 per-mode atoms encode
+*non-Hermitian* monomials (`â`, `â†` alone), so the assembled block encoding `U`
+is NOT Hermitian (`‖U−U†‖ ≫ 0`). pyLIQTR's `QubitizedWalkOperator` is a
+*single-reflection* walk `W = (2Π−I)·U`, which qubitizes only a Hermitian `U`;
+for this non-Hermitian `U` the walk spectrum lacks the qubitization phases
+`e^{±i·arccos(E_k/α)}` (regression test
+`test_bundle_walk_qubitizes_hermitian_H`, currently xfail). **What IS exact and
+validated:** the block encoding `α_tot·⟨0|U|0⟩ = H` and `α_tot` (= Λ). **What is
+NOT yet valid:** the *walk*, so `estimate_resources(QubitizedWalkOperator(be))`
+is a **block-encoding-level cost estimate**, not a genuine QPE walk cost, until
+the atoms are Hermitized (re-pair `c·m + c̄·m†` into Hermitian d=2 encoders; the
+fermion PauliLCU atoms are already Hermitian; α_tot is preserved under
+re-pairing).
+
+**Cost roll-up (still an improvement over the mixed-bound proxy).**
+`_t_complexity_` is a roll-up of real sub-bloq `.t_complexity()` values —
+alias-sampling PREP (linear-T), per-atom block-encoding costs (boson
+`SparseBosonMonomialBlockEncoding`, fermion off-the-shelf PauliLCU), the
+unary-dispatch AND-ladder — with no hand-inserted `P·single_ladder` ceiling or
+`4·weight` floor. Two known undercounts (per-atom SELECT charged *uncontrolled*;
+`LogicalQubits` junk width estimated) push it optimistically; and the
+Hermitization overhead above is not yet added. Treat the number as an optimistic
+block-encoding-level estimate, not a final compiled walk cost.
 
 Status (C1 step 3): cost path (α_tot + `_t_complexity_` + signature) +
-`decompose_from_registers` ideal-sim for the toy assembly gate. The realistic
-alias-sampling / QROM primitives are standard, separately-validated pyLIQTR
-bloqs; the toy sim validates the *novel* outer assembly (PREP + sign + dispatch
-+ shared-ancilla uncompute + reflection subspace) on ideal primitives.
+`decompose_from_registers` ideal-sim for the toy assembly gate. The toy sim
+validates the *novel* outer block-encoding assembly (PREP + phase fold +
+dispatch + shared-ancilla uncompute + block-flag placement) for boson + fermion
+atoms; mixed-atom operator sim and walk Hermiticity are open (see the test file).
 """
 
 import math

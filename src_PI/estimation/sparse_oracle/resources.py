@@ -209,15 +209,22 @@ _COMPILED_CACHE = {}
 
 
 def estimate_sparse_resources_compiled(mh, n_b, num_sites, num_pion_species=3):
-    """Genuinely compiled full-bundle resource estimate (C1 step 3-4).
+    """Compiled full-bundle resource estimate (C1 step 3-4).
 
     Builds `SparseFullBundleBlockEncoding` and costs
-    `estimate_resources(QubitizedWalkOperator(be))` — a real circuit-level
-    Walk_T_Count with NO mixed boson-upper / fermion-lower bounds (the P0-2
-    defect of `estimate_sparse_resources`). The two are directly comparable:
-    same α_tot (the α invariant), same LCU atom decomposition. Returns the same
-    keys as the analytical fn plus a `compiled_breakdown` (atom counts + per-kind
-    SELECT roll-up) for the "cost of honest compilation" A/B report.
+    `estimate_resources(QubitizedWalkOperator(be))` as a roll-up of real
+    sub-bloq costs (no mixed boson-upper / fermion-lower bounds — the P0-2 defect
+    of `estimate_sparse_resources`). Directly comparable to the analytical proxy:
+    same α_tot (the α invariant), same LCU atom decomposition.
+
+    ⚠ **Not yet a valid walk cost.** The d=1 atoms make the block encoding `U`
+    non-Hermitian, so the single-reflection `QubitizedWalkOperator` is not a
+    valid qubitization (see `bundle_encoding` module docstring + the xfail
+    regression test). The `α_tot`/Λ is exact; the reported `Walk_T_Count` is a
+    block-encoding-level estimate (optimistic — uncontrolled per-atom SELECT,
+    estimated junk width, Hermitization overhead not yet added) pending
+    Hermitization. Returns the same keys as the analytical fn plus a
+    `compiled_breakdown` (atom counts + per-kind SELECT roll-up).
     """
     import os
 
@@ -272,9 +279,10 @@ def compiled_vs_analytical(mh, n_b, num_sites, num_pion_species=3):
     """A/B the compiled bundle vs the analytical proxy on the same MixedHamiltonian.
 
     Returns `{compiled, analytical, ratio}` where `ratio` = compiled/analytical
-    Walk_T_Count — the "cost of honest compilation" (the compiled number lands
-    between the analytical boson-ceiling and fermion-floor). This ratio and the
-    per-kind breakdown are themselves a publishable result.
+    Walk_T_Count. NOTE: the compiled number is a block-encoding-level estimate
+    for a not-yet-valid walk (non-Hermitian U — see
+    `estimate_sparse_resources_compiled`); the ratio is diagnostic, not yet a
+    publishable "genuine walk cost".
     """
     compiled = estimate_sparse_resources_compiled(mh, n_b, num_sites, num_pion_species)
     analytical = estimate_sparse_resources(mh, n_b, num_sites)

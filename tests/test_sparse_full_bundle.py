@@ -406,6 +406,56 @@ def test_compiled_vs_analytical_ab():
 
 
 # --------------------------------------------------------------------------- #
+# KNOWN DEFECT (quantum-algorithms review, 2026-08-18) — walk validity         #
+# --------------------------------------------------------------------------- #
+#
+# The d=1 per-mode atoms encode non-Hermitian monomials (â, â† alone), so the
+# bundle block encoding U is NOT Hermitian (‖U−U†‖ ≫ 0). pyLIQTR's
+# QubitizedWalkOperator is a SINGLE-reflection walk W = (2Π−I)·U, which
+# qubitizes only a Hermitian U. Hence estimate_resources(QubitizedWalkOperator)
+# costs an object that does NOT run QPE correctly. The block encoding
+# (α_tot·⟨0|U|0⟩ = H) and α_tot are exact; the *walk* is not yet valid.
+#
+# Fix = Hermitize the atoms (re-pair conjugate monomials c·m + c̄·m† into
+# Hermitian d=2 encoders; Hermitian dilation for diagonal n̂; fermion PauliLCU
+# atoms are already Hermitian). α_tot is preserved under re-pairing. This test
+# is the regression gate for that fix: it is expected to FAIL until Hermitized,
+# and strict=True flips the suite red the moment it starts passing.
+
+
+@pytest.mark.xfail(reason="d=1 atoms non-Hermitian -> single-reflection walk not "
+                          "a valid qubitization; Hermitization pending", strict=True)
+def test_bundle_walk_qubitizes_hermitian_H():
+    """W = (2Π−I)·U must have the qubitization spectrum e^{±i·arccos(E_k/α)}."""
+    import cirq
+    import numpy as np
+    from openfermion import BosonOperator
+    from src_PI.hamiltonians.core.MixedHamiltonian import MixedHamiltonian
+    from src_PI.estimation.sparse_oracle.bundle_encoding import (
+        FullBundleProblemInstance, SparseFullBundleBlockEncoding,
+        bundle_reference_matrix,
+    )
+    # Hermitian toy: H = (â + â†) + 0.5 n̂ on one n_b=2 mode.
+    bp = BosonOperator('0', 1.0) + BosonOperator('0^', 1.0) + BosonOperator('0^ 0', 0.5)
+    mh = MixedHamiltonian(boson_part=bp, mode_to_qubits={0: [0, 1]})
+    pi = FullBundleProblemInstance(mh, 2, num_sites=0, num_pion_species=0)
+    be = SparseFullBundleBlockEncoding(pi)
+    alpha = pi._alpha
+    flag = [cirq.NamedQubit(f'f{i}') for i in range(pi._w_flag)]
+    sysq = [cirq.NamedQubit(f's{i}') for i in range(pi._w_sys)]
+    U = cirq.Circuit(be.decompose_from_registers(context=None, flag=flag, system=sysq)
+                     ).unitary(qubit_order=flag + sysq)
+    dim_sys = 1 << pi._w_sys
+    Pi = np.diag([1.0] * dim_sys + [0.0] * (len(U) - dim_sys))
+    W = (2 * Pi - np.eye(len(U))) @ U
+    wphases = np.angle(np.linalg.eigvals(W))
+    E = np.linalg.eigvalsh(bundle_reference_matrix(be))
+    for th in np.arccos(np.clip(E / alpha, -1, 1)):
+        dist = np.min(np.abs((wphases - th + np.pi) % (2 * np.pi) - np.pi))
+        assert dist < 1e-6, f"qubitization phase {th:.4f} absent from walk spectrum"
+
+
+# --------------------------------------------------------------------------- #
 # Step 5 — Config switch + cache + full-pipeline dispatch                      #
 # --------------------------------------------------------------------------- #
 
