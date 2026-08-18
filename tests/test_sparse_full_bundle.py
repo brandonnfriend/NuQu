@@ -142,6 +142,86 @@ def test_boson_monomial_number_op_has_no_shift():
     assert delta_ad == +1
 
 
+# --------------------------------------------------------------------------- #
+# Step 2 §6.3 — fermion atom via off-the-shelf PauliLCU                        #
+# --------------------------------------------------------------------------- #
+
+
+def _first_mixed_fermion_factor(L=2, dim=1, n_b=2):
+    from src_PI.hamiltonians.core.pion_basis.fock_native import (
+        build_native_mixed_hamiltonian,
+    )
+    from src_PI.hamiltonians.core.EFTParameters import get_physical_parameters
+    mh = build_native_mixed_hamiltonian(L, dim, n_b, get_physical_parameters())
+    return mh.mixed_terms[0].fermion_factor
+
+
+def test_fermion_atom_alpha_equals_pauli_one_norm():
+    """The fermion atom's α (== encoding.alpha) equals fermion_jw_stats' Pauli
+    1-norm — its exact contribution to the global α_tot invariant."""
+    from src_PI.estimation.sparse_oracle.fermion_atom import (
+        fermion_atom_encoding, fermion_atom_alpha,
+    )
+    ff = _first_mixed_fermion_factor()
+    enc = fermion_atom_encoding(ff)
+    assert abs(enc.alpha - fermion_atom_alpha(ff)) < 1e-12
+
+
+def test_fermion_atom_cost_is_genuine_not_lower_bound():
+    """The genuine PauliLCU walk cost strictly exceeds the retired `4·weight`
+    lower-bound proxy — demonstrating the fermion floor is gone."""
+    from src_PI.estimation.sparse_oracle.fermion_atom import fermion_atom_walk_cost
+    from src_PI.estimation.sparse_oracle.fermion_jw_stats import fermion_jw_stats
+    ff = _first_mixed_fermion_factor()
+    genuine = fermion_atom_walk_cost(ff)
+    proxy_T = 4 * fermion_jw_stats(ff)['total_weight']
+    assert genuine['T'] > proxy_T, (
+        f"genuine PauliLCU T={genuine['T']} should exceed proxy floor {proxy_T}"
+    )
+    assert genuine['LogicalQubits'] >= 4
+
+
+def test_fermion_atom_matches_standalone_pauli_lcu_term_for_term():
+    """The fermion atom's encoding is bit-for-bit the standalone PauliLCU path
+    (`estimators._ham_to_pyliqtr_instance` → getEncoding) on the same JW image:
+    same α and same estimate_resources T/Clifford/LogicalQubits."""
+    from pyLIQTR.BlockEncodings.getEncoding import getEncoding, VALID_ENCODINGS
+    from pyLIQTR.qubitization.qubitized_gates import QubitizedWalkOperator
+    from pyLIQTR.utils.resource_analysis import estimate_resources
+    from src_PI.estimation.estimators import _ham_to_pyliqtr_instance
+    from src_PI.estimation.sparse_oracle.jw_cache import jordan_wigner_cached
+    from src_PI.estimation.sparse_oracle.fermion_atom import fermion_atom_walk_cost
+
+    ff = _first_mixed_fermion_factor()
+    # standalone reference path (identical to the whole-Hamiltonian PauliLCU code)
+    ref_inst = _ham_to_pyliqtr_instance(jordan_wigner_cached(ff))
+    ref_enc = getEncoding(VALID_ENCODINGS.PauliLCU)(ref_inst)
+    ref = estimate_resources(QubitizedWalkOperator(ref_enc))
+
+    atom = fermion_atom_walk_cost(ff)
+    assert abs(atom['alpha'] - ref_enc.alpha) < 1e-12
+    assert atom['T'] == ref['T']
+    assert atom['Clifford'] == ref['Clifford']
+    assert atom['LogicalQubits'] == ref['LogicalQubits']
+
+
+def test_fermion_atom_rejects_non_hermitian_factor():
+    """A non-Hermitian fermion factor (complex JW image) must raise, never have
+    its phase silently real-projected."""
+    from openfermion import FermionOperator
+    from src_PI.estimation.sparse_oracle.fermion_atom import fermion_pauli_dict
+    # a†_0 a_1 alone is non-Hermitian → JW has ±i/2 XY/YX pieces
+    with pytest.raises(ValueError, match="Hermitian"):
+        fermion_pauli_dict(FermionOperator('0^ 1'))
+
+
+def test_fermion_atom_empty_operator_is_zero():
+    from openfermion import FermionOperator
+    from src_PI.estimation.sparse_oracle.fermion_atom import fermion_atom_walk_cost
+    cost = fermion_atom_walk_cost(FermionOperator())
+    assert cost == {'T': 0, 'Clifford': 0, 'LogicalQubits': 0, 'alpha': 0.0}
+
+
 if __name__ == '__main__':
     import sys
     sys.exit(pytest.main([__file__, '-q']))
