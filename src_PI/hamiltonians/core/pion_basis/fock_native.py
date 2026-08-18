@@ -61,11 +61,17 @@ def _build_mode_to_qubits(num_sites, n_b):
 
 
 def _nucleon_transition_fermion(site_id, mode_alpha, mode_beta, n_b):
-    """FermionOp for (a†_α a_β + a†_β a_α) on the given site (Hermitian transition)."""
+    """FermionOp for the single ordered bilinear a†_α a_β on the given site.
+
+    The caller sums this over ALL ordered (α,β) mode pairs weighted by the
+    Hermitian chiral coefficient χ_{αβ} = [σ_S ⊗ τ_I]_{αβ}, which reconstructs
+    the full Hermitian vertex Σ_{αβ} χ_{αβ} a†_α a_β. The (β,α) term supplies
+    the h.c.; adding a†_β a_α here as well would double symmetric channels and
+    cancel antisymmetric/imaginary ones.
+    """
     idx_alpha = site_to_nucleon_qubit(site_id, mode_alpha, n_b)
     idx_beta = site_to_nucleon_qubit(site_id, mode_beta, n_b)
-    return (FermionOperator(f'{idx_alpha}^ {idx_beta}')
-            + FermionOperator(f'{idx_beta}^ {idx_alpha}'))
+    return FermionOperator(f'{idx_alpha}^ {idx_beta}')
 
 
 def _b_x_global(global_mode):
@@ -146,7 +152,8 @@ def H_axial_vector_native(L, dim, n_b, params):
     """H_AV mixed-terms list (each term coeff · F_op · B_op, unmultiplied).
 
     For each (x, d, I) triple, one MixedTerm capturing:
-      * fermion_factor: Σ_{α,β} χ_{αβ}^I · (a†_α a_β + a†_β a_α) on site x
+      * fermion_factor: Σ_{α,β} χ_{αβ}^I · a†_α a_β on site x (ordered sum
+        over all pairs; Hermitian because χ = σ_S ⊗ τ_I is Hermitian)
       * boson_factor:   (b̂_y + b̂†_y) − (b̂_x + b̂†_x) on global modes
                          (gradient of π_I across the (x, y) bond).
     Empty fermion-factor terms (zero chiral coefficient) are skipped.
@@ -194,7 +201,8 @@ def H_WT_native(L, dim, n_b, params):
     """H_WT mixed-terms list (each term coeff · F_op · B_op, unmultiplied).
 
     For each (x, ε_{I1 I2 I3}) sign-tagged tuple, one MixedTerm capturing:
-      * fermion_factor: Σ_{α,β} χ_{αβ}^{I1} · (a†_α a_β + a†_β a_α) on site x
+      * fermion_factor: Σ_{α,β} χ_{αβ}^{I1} · a†_α a_β on site x (ordered sum
+        over all pairs; Hermitian because χ = τ_{I1} is Hermitian)
       * boson_factor:   π_{I2}(x) · Π_{I3}(x) = c_π·c_Π · (b̂_m2)·(i·(b̂†_m3 − b̂_m3))
         where m2, m3 are the global modes for (x, I2) and (x, I3).
     """

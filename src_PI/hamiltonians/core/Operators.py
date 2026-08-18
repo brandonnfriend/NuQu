@@ -9,8 +9,14 @@ amplitude-basis-specific P, Q, Pp, Qp parameters that don't exist in the
 Fock basis.
 
 What stays here:
-- Nucleon_Transition_JW: Jordan-Wigner-mapped (a†_α a_β + h.c.) for one
-  site, cached. Used by both bases for the fermionic coupling structure.
+- Nucleon_Transition_JW: Jordan-Wigner-mapped ordered bilinear a†_α a_β
+  for one site, cached. Used by both bases for the fermionic coupling
+  structure. Callers sum this over ALL ordered (α,β) mode pairs weighted
+  by the (Hermitian) chiral coefficient χ_{αβ} = [σ_S ⊗ τ_I]_{αβ}, which
+  reconstructs the full Hermitian vertex Σ_{αβ} χ_{αβ} a†_α a_β. The
+  builder must therefore NOT add its own h.c. term (doing so double-counts
+  symmetric channels and cancels antisymmetric/imaginary ones — see
+  tests/test_vertex_algebra.py).
 - Dict-accumulator helpers (_add, _z_key, _to_qubit_op): used by amplitude.py
   to build dense Pauli sums efficiently. Kept here so they're accessible
   to any future basis module.
@@ -58,13 +64,15 @@ _NUCLEON_TRANSITION_CACHE = {}
 def _nucleon_transition_jw_uncached(site_id, mode_alpha, mode_beta, n_b):
     idx_alpha = site_to_nucleon_qubit(site_id, mode_alpha, n_b)
     idx_beta = site_to_nucleon_qubit(site_id, mode_beta, n_b)
-    f_op = (FermionOperator(f'{idx_alpha}^ {idx_beta}')
-            + FermionOperator(f'{idx_beta}^ {idx_alpha}'))
+    # Single ordered bilinear a†_α a_β. The +h.c. is supplied by the caller's
+    # sum over ordered pairs (the (β,α) term carries χ_{βα}); adding it here
+    # too would double symmetric channels and cancel imaginary ones.
+    f_op = FermionOperator(f'{idx_alpha}^ {idx_beta}')
     return jordan_wigner(f_op)
 
 
 def Nucleon_Transition_JW(site_id, mode_alpha, mode_beta, n_b):
-    """Jordan-Wigner mapped Pauli string for (a^dagger_alpha a_beta + h.c.)"""
+    """Jordan-Wigner mapped Pauli string for the ordered bilinear a†_α a_β."""
     key = (site_id, mode_alpha, mode_beta, n_b)
     cached = _NUCLEON_TRANSITION_CACHE.get(key)
     if cached is None:

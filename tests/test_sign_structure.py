@@ -1,10 +1,15 @@
 """
 Tests for the D-AFQMC-sign diagnostics (classical/baselines/sign_structure.py):
 
-  1. H_WT IS THE PHASE SOURCE — the fraction of COMPLEX off-diagonal matrix
-     elements is > 0 for the full model and EXACTLY 0 when H_WT is toggled off.
-     This is the exact, basis-invariant fingerprint: the imaginary eps_abc . Pi
-     Weinberg-Tomozawa term injects complex weights no real gauge can remove.
+  1. THE PION COUPLING IS THE PHASE SOURCE — the fraction of COMPLEX off-diagonal
+     matrix elements is > 0 whenever any dynamical-pion coupling is present, and
+     EXACTLY 0 for the static-only sector (no pion). BOTH H_AV and H_WT inject
+     complex weights on their own: each carries an imaginary isospin-tau_y channel
+     (H_AV via sigma.grad(pi) tau_y; H_WT via the eps_abc . Pi term), which no real
+     gauge removes.
+     (CORRECTED 2026-08-18: the earlier claim that H_WT was the SOLE source was an
+     artifact of the vertex bug, which had cancelled the tau_y channels. See
+     REMEDIATION_PLAN.md and tests/test_vertex_algebra.py.)
   2. PERRON-FROBENIUS — the Troyer-Wiese severity Delta_sign = E0(H) - E0(H_stoq)
      is >= 0 for every term configuration (the stoquastic comparison is a lower
      bound), and > 0 for the full model at a generic filling (a genuine sign
@@ -25,16 +30,30 @@ from classical.baselines.sign_structure import (
 )
 
 
-def test_wt_is_the_phase_source():
-    M_full, _ = dense_H(2, 1, 2, N_f=2)
-    M_nowt, _ = dense_H(2, 1, 2, N_f=2, wt=0.0)
-    r_full = offdiag_report(M_full)
-    r_nowt = offdiag_report(M_nowt)
-    print(f"  full : complex-offdiag = {r_full['frac_complex']*100:.1f}%")
-    print(f"  no-WT: complex-offdiag = {r_nowt['frac_complex']*100:.1f}%")
-    assert r_full['frac_complex'] > 0.01, "full model must have complex off-diagonals"
-    assert r_nowt['frac_complex'] < 1e-9, "removing H_WT must remove all complex elements"
-    print("  PASS: H_WT is exactly the source of the phase (complex-weight) problem\n")
+def test_pion_coupling_is_the_phase_source():
+    """Both H_AV and H_WT inject complex weights; the static sector is real.
+
+    Corrected after the vertex fix: the imaginary tau_y channels (previously
+    cancelled by the bug) make H_AV a phase source too, so H_WT is NOT the sole
+    origin of the sign problem. The basis-invariant invariant is that the
+    static-only (no-pion) sector has zero complex off-diagonals.
+    """
+    f = lambda **kw: offdiag_report(dense_H(2, 1, 2, N_f=2, **kw)[0])['frac_complex']
+    f_full = f()
+    f_av = f(wt=0.0)                 # H_AV only
+    f_wt = f(av=0.0)                 # H_WT only
+    f_static = f(av=0.0, wt=0.0)     # no dynamical-pion coupling
+    print(f"  full   : complex-offdiag = {f_full*100:.1f}%")
+    print(f"  AV only: complex-offdiag = {f_av*100:.1f}%")
+    print(f"  WT only: complex-offdiag = {f_wt*100:.1f}%")
+    print(f"  static : complex-offdiag = {f_static*100:.1f}%")
+    assert f_full > 0.01, "full model must have complex off-diagonals"
+    # Corrected physics: BOTH pion couplings inject complex weights via tau_y.
+    assert f_av > 0.01, "H_AV alone must have complex off-diagonals (tau_y channel)"
+    assert f_wt > 0.01, "H_WT alone must have complex off-diagonals"
+    # Static (no-pion) sector is stoquastic-real: no phase problem.
+    assert f_static < 1e-9, "static-only sector must have no complex elements"
+    print("  PASS: the dynamical-pion coupling (H_AV and H_WT both) is the phase source\n")
 
 
 def test_perron_frobenius_and_positive_severity():
@@ -80,7 +99,7 @@ def test_sparse_matches_dense():
 
 if __name__ == '__main__':
     print("=== D-AFQMC-sign diagnostics tests ===\n")
-    test_wt_is_the_phase_source()
+    test_pion_coupling_is_the_phase_source()
     test_perron_frobenius_and_positive_severity()
     test_average_sign_decays()
     test_sparse_matches_dense()

@@ -94,9 +94,14 @@ def Momentum_Squared_Operator(site_id, pion_species, n_b, Pp, Qp):
     return H
 
 def Nucleon_Transition_JW(site_id, mode_alpha, mode_beta, n_b):
-    """Jordan-Wigner mapped Pauli string for (a^dagger_alpha a_beta + h.c.)"""
+    """Jordan-Wigner mapped Pauli string for the ordered bilinear a†_α a_β.
+
+    (Legacy 1D path — no active importers. Kept in sync with the 3D builders:
+    the caller sums over all ordered (α,β) pairs weighted by χ_{αβ}, so this
+    must NOT add its own h.c. term.)
+    """
     idx_alpha = site_to_nucleon_qubit_1D(site_id, mode_alpha, n_b)
     idx_beta = site_to_nucleon_qubit_1D(site_id, mode_beta, n_b)
-    
-    f_op = FermionOperator(f'{idx_alpha}^ {idx_beta}') + FermionOperator(f'{idx_beta}^ {idx_alpha}')
+
+    f_op = FermionOperator(f'{idx_alpha}^ {idx_beta}')
     return jordan_wigner(f_op)

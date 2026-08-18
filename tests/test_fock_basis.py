@@ -17,12 +17,18 @@ from src_PI.hamiltonians.core.pion_basis import fock
 from src_PI.hamiltonians.core.EFTParameters import get_physical_parameters
 
 
-# Golden term counts captured against the pre-refactor build at this problem
-# size; bit-exact equality verified once at refactor time.
+# Golden term counts at this problem size. REGENERATED 2026-08-18 after the
+# vertex fix (Workstream A): the previous H_av=192 / H_wt=1024 were captured
+# against the BUGGY builder that added a per-pair h.c. (doubling symmetric
+# channels, cancelling the imaginary τ_y channels). The corrected ordered-
+# bilinear vertex restores the previously-cancelled σ⊗τ_y channels, so the
+# term counts grew (H_av 192→384, H_wt 1024→1536). H_free is unchanged (the
+# bug never touched the pion sector). The physics oracle for these vertices
+# lives in tests/test_vertex_algebra.py; this test is a build-drift tripwire.
 _REF_TERM_COUNTS = {
     'H_free': 253,
-    'H_av':   192,
-    'H_wt':   1024,
+    'H_av':   384,
+    'H_wt':   1536,
 }
 
 
