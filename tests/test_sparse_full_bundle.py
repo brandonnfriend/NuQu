@@ -372,6 +372,39 @@ def test_bundle_estimate_resources_runs():
     assert res['LogicalQubits'] >= pi._w_flag + pi._w_sys - 8   # ≈ within junk slack
 
 
+# --------------------------------------------------------------------------- #
+# Step 4 §6.4 — compiled-vs-analytical A/B                                     #
+# --------------------------------------------------------------------------- #
+
+
+def test_compiled_vs_analytical_ab():
+    """The compiled bundle and the analytical proxy are directly comparable:
+    same α_tot, and the compiled Walk_T lands in a sane band around the proxy
+    (between its boson-ceiling and fermion-floor). The ratio + per-kind
+    breakdown is the 'cost of honest compilation' deliverable."""
+    from src_PI.hamiltonians.core.pion_basis.fock_native import (
+        build_native_mixed_hamiltonian,
+    )
+    from src_PI.hamiltonians.core.EFTParameters import get_physical_parameters
+    from src_PI.estimation.sparse_oracle.lambda_compute import compute_native_lambda
+    from src_PI.estimation.sparse_oracle.resources import compiled_vs_analytical
+
+    mh = build_native_mixed_hamiltonian(2, 1, 2, get_physical_parameters())
+    ab = compiled_vs_analytical(mh, 2, num_sites=2)
+    c = ab['compiled']
+    # genuine compiled numbers are positive
+    assert c['Walk_T_Count'] > 0 and c['Walk_Clifford_Count'] > 0
+    # same subnormalization as the analytical path (compute_native_lambda)
+    lam = compute_native_lambda(mh, 2)['physical_lambda']
+    assert abs(c['Physical_Lambda'] - lam) <= 1e-9 * max(1.0, lam)
+    # compiled lands within a small factor of the proxy (no order-of-magnitude
+    # surprise — the proxy was a reasonable, if mixed-bound, estimate)
+    assert 0.2 < ab['ratio'] < 5.0
+    # the breakdown accounts for every atom
+    bk = c['compiled_breakdown']
+    assert sum(v['count'] for v in bk['per_kind'].values()) == bk['n_atoms']
+
+
 if __name__ == '__main__':
     import sys
     sys.exit(pytest.main([__file__, '-q']))

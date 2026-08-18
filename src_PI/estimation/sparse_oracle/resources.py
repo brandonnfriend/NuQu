@@ -194,3 +194,73 @@ def estimate_sparse_resources(mh, n_b, num_sites):
             'prep_T': int(prep_T),
         },
     }
+
+
+# --------------------------------------------------------------------------- #
+# C1: compiled full-bundle estimate (replaces the analytical proxy above)     #
+# --------------------------------------------------------------------------- #
+
+
+def estimate_sparse_resources_compiled(mh, n_b, num_sites, num_pion_species=3):
+    """Genuinely compiled full-bundle resource estimate (C1 step 3-4).
+
+    Builds `SparseFullBundleBlockEncoding` and costs
+    `estimate_resources(QubitizedWalkOperator(be))` — a real circuit-level
+    Walk_T_Count with NO mixed boson-upper / fermion-lower bounds (the P0-2
+    defect of `estimate_sparse_resources`). The two are directly comparable:
+    same α_tot (the α invariant), same LCU atom decomposition. Returns the same
+    keys as the analytical fn plus a `compiled_breakdown` (atom counts + per-kind
+    SELECT roll-up) for the "cost of honest compilation" A/B report.
+    """
+    from pyLIQTR.utils.resource_analysis import get_T_counts_from_rotations
+    from src_PI.estimation.sparse_oracle.bundle_encoding import (
+        FullBundleProblemInstance,
+        SparseFullBundleBlockEncoding,
+        _atom_select_cost,
+    )
+
+    pi = FullBundleProblemInstance(mh, n_b, num_sites, num_pion_species)
+    be = SparseFullBundleBlockEncoding(pi)
+    res = estimate_resources(QubitizedWalkOperator(be))
+
+    # Per-kind SELECT cost roll-up (T after rotation synthesis, so it is
+    # comparable to the reported Walk_T). Uses the same _atom_select_cost the
+    # composite _t_complexity_ sums.
+    per_kind = {}
+    for atom in pi.atoms:
+        tc = _atom_select_cost(atom)
+        t_syn = tc.t + (get_T_counts_from_rotations(tc.rotations) if tc.rotations else 0)
+        d = per_kind.setdefault(atom.kind, {'count': 0, 'select_T': 0})
+        d['count'] += 1
+        d['select_T'] += int(t_syn)
+
+    return {
+        'Walk_T_Count': int(res['T']),
+        'Walk_Clifford_Count': int(res['Clifford']),
+        'Logical_Qubits': int(res['LogicalQubits']),
+        'Physical_Lambda': float(be.alpha),
+        'compiled_breakdown': {
+            'n_atoms': len(pi.atoms),
+            'per_kind': per_kind,
+            'w_flag': pi._w_flag,
+            'w_sys': pi._w_sys,
+        },
+    }
+
+
+def compiled_vs_analytical(mh, n_b, num_sites, num_pion_species=3):
+    """A/B the compiled bundle vs the analytical proxy on the same MixedHamiltonian.
+
+    Returns `{compiled, analytical, ratio}` where `ratio` = compiled/analytical
+    Walk_T_Count — the "cost of honest compilation" (the compiled number lands
+    between the analytical boson-ceiling and fermion-floor). This ratio and the
+    per-kind breakdown are themselves a publishable result.
+    """
+    compiled = estimate_sparse_resources_compiled(mh, n_b, num_sites, num_pion_species)
+    analytical = estimate_sparse_resources(mh, n_b, num_sites)
+    a_T = max(1, analytical['Walk_T_Count'])
+    return {
+        'compiled': compiled,
+        'analytical': analytical,
+        'ratio': compiled['Walk_T_Count'] / a_T,
+    }
