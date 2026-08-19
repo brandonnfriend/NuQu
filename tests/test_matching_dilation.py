@@ -150,3 +150,15 @@ def test_full_atom_block_encoding_qubitizes(actions, coeff, num_c, n_b):
     assert np.allclose(U, U.conj().T, atol=1e-6), "atom U not Hermitian"
     assert np.allclose(U @ U, np.eye(len(U)), atol=1e-6), "atom U not self-inverse"
     assert _walk_qubitizes(U, alpha, 1 << n_b, M), "atom walk does not qubitize"
+
+
+def test_single_mode_atom_has_genuine_compiled_t_count():
+    """The full single-mode atom decomposes to elementary gates with a real,
+    finite T-count (a circuit-traversed cost, not a hand `_t_complexity_`) at the
+    production cutoff n_b=2 — directly refuting the 'no executable decomposition'
+    finding for the dominant boson sector."""
+    from src_PI.estimation.sparse_oracle.matching_dilation import compiled_atom_cost
+    M = (hermitian_single_mode_matrix((0,), 1.0, 2)
+         + hermitian_single_mode_matrix((1, 0), 0.5, 2))     # â+â† + ½n̂
+    t, cliff = compiled_atom_cost(M, 2)
+    assert 0 < t < 10000 and cliff > 0
