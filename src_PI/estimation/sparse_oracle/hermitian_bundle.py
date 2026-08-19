@@ -225,23 +225,24 @@ def hermitian_bundle_reference(mh, n_b, mode_to_qubits, w_sys):
 # --------------------------------------------------------------------------- #
 
 
-def _rotation_array_tc(n_entries):
+def _rotation_array_tc(n_entries, kappa=_KAPPA):
     """`ProgrammableRotationGateArray` cost for an `n_entries`-angle oracle.
 
+    `kappa` = rotation-synthesis bit precision (from the P0-4 error budget).
     Uses a *varied non-zero* angle table — an all-zero table is costed as free
     by Qualtran (no rotations), which would massively undercount the amplitude
     oracle (the walk-T driver via rotation synthesis)."""
     n = max(2, int(n_entries))
     table = tuple(1 + (i % 251) for i in range(n))
-    return ProgrammableRotationGateArray(table, kappa=_KAPPA,
+    return ProgrammableRotationGateArray(table, kappa=kappa,
                                          rotation_gate=cirq.Y).t_complexity()
 
 
-def _alias_prep_tc(n_items):
+def _alias_prep_tc(n_items, prob_eps=_PREP_EPS):
     if n_items < 2:
         return TComplexity()
     return StatePreparationAliasSampling.from_lcu_probs(
-        [1.0] * n_items, probability_epsilon=_PREP_EPS).t_complexity()
+        [1.0] * n_items, probability_epsilon=prob_eps).t_complexity()
 
 
 def _and_ladder_tc(n_items):
@@ -249,23 +250,24 @@ def _and_ladder_tc(n_items):
     return TComplexity(t=4 * toff, clifford=9 * toff)
 
 
-def _boson_matrix_cost(M, n_bits):
+def _boson_matrix_cost(M, n_bits, kappa=_KAPPA, prob_eps=_PREP_EPS):
     """Compiled cost of the matching-dilation encoder of Hermitian `M`.
 
     Per component (diagonal + matchings): two amplitude oracles (the `M_k/α`
     values and the diagonal `√(I−M_k²/α²)`) over the `2^n_bits`-entry register,
     plus one conditional shift (`AddK`) per matching; an inner alias PREP over
     the components. All real Qualtran-bloq `.t_complexity()` — no floors/ceilings.
+    `kappa`/`prob_eps` come from the P0-4 error budget.
     """
     diag, matchings = _split_into_components(M)
     n_entries = 1 << n_bits
     n_comp = (1 if np.abs(diag).max() > _TOL else 0) + len(matchings)
     n_comp = max(1, n_comp)
-    total = 2 * _alias_prep_tc(n_comp)                    # inner LCU PREP + PREP†
+    total = 2 * _alias_prep_tc(n_comp, prob_eps)          # inner LCU PREP + PREP†
     if np.abs(diag).max() > _TOL:
-        total = total + _rotation_array_tc(n_entries)     # diagonal oracle
+        total = total + _rotation_array_tc(n_entries, kappa)   # diagonal oracle
     for Mk in matchings:
-        total = total + 2 * _rotation_array_tc(n_entries)  # M_k/α + √ oracles
+        total = total + 2 * _rotation_array_tc(n_entries, kappa)  # M_k/α + √ oracles
         shift = _shift_of_matching(Mk)
         total = total + AddK(bitsize=max(1, n_bits), k=max(1, shift % (1 << n_bits)),
                              signed=False).t_complexity()
@@ -277,9 +279,9 @@ def _shift_of_matching(Mk):
     return abs(int(nz[0][0] - nz[0][1])) if len(nz) else 1
 
 
-def _atom_cost(atom):
+def _atom_cost(atom, kappa=_KAPPA, prob_eps=_PREP_EPS):
     if atom.kind == 'boson':
-        return _boson_matrix_cost(atom.M, atom.payload['n_bits'])
+        return _boson_matrix_cost(atom.M, atom.payload['n_bits'], kappa, prob_eps)
     if atom.kind == 'fermion':
         return pylqt_t_complexity(fermion_atom_encoding(atom.payload['fermion_op']))
     if atom.kind == 'mixed':
@@ -287,19 +289,20 @@ def _atom_cost(atom):
         mats = atom.payload['boson_group_mats']
         bits = atom.payload['boson_group_bits']
         for Mg, nb in zip(mats, bits):
-            cost = cost + _boson_matrix_cost(Mg, nb)
+            cost = cost + _boson_matrix_cost(Mg, nb, kappa, prob_eps)
         return cost
     raise ValueError(f"unknown atom kind {atom.kind!r}")
 
 
-def hermitian_bundle_t_complexity(atoms):
+def hermitian_bundle_t_complexity(atoms, kappa=_KAPPA, prob_eps=_PREP_EPS):
     """Cost-MODEL `_t_complexity_` of the Hermitian bundle: 2·outer-PREP + AND-ladder
     + Σ atom costs. Leaf costs are real Qualtran bloqs, but the composition is
     hand-asserted (not compiled) and omits controls/matching predicates/boundary/
-    phase/precision — an OPTIMISTIC estimate. See SparseHermitianBundleBlockEncoding."""
-    total = 2 * _alias_prep_tc(len(atoms)) + _and_ladder_tc(len(atoms))
+    phase — an OPTIMISTIC estimate. `kappa`/`prob_eps` from the P0-4 error budget
+    (default to the module constants). See SparseHermitianBundleBlockEncoding."""
+    total = 2 * _alias_prep_tc(len(atoms), prob_eps) + _and_ladder_tc(len(atoms))
     for atom in atoms:
-        total = total + _atom_cost(atom)
+        total = total + _atom_cost(atom, kappa, prob_eps)
     return total
 
 
@@ -374,18 +377,23 @@ class SparseHermitianBundleBlockEncoding(BlockEncoding):
     OPTIMISTIC: it omits the matching endpoint/direction predicates + boundary
     (no-wrap) logic (an `AddK` is charged where a real matching permutation is
     needed), the coherent heterogeneous SELECT controls (per-atom cost charged
-    *uncontrolled*), the actual (nonuniform) PREP weights and folded phases, the
-    real amplitude/√ angle tables (synthetic tables are used), and a precision/
-    error budget (`kappa`, alias-eps hard-coded). **Use the PauliLCU anchor for
-    publication numbers** until an executable decomposable composite lands. A
-    declared `junk` register keeps `LogicalQubits` from silently dropping the
-    qalloc'd temporaries, but it too is heuristic (not compiler-scheduled)."""
+    *uncontrolled*), the actual (nonuniform) PREP weights and folded phases, and
+    the real amplitude/√ angle tables (synthetic tables are used). **Use the
+    PauliLCU anchor for publication numbers** until an executable decomposable
+    composite lands (`compiled_bundle`). A declared `junk` register keeps
+    `LogicalQubits` from silently dropping the qalloc'd temporaries (heuristic,
+    not compiler-scheduled). **Precision is no longer hard-coded** — `kappa`
+    (rotation-synthesis bits) and `prob_eps` (alias-PREP precision) come from the
+    P0-4 error budget (`precision_budget`), derived from the target ΔE."""
 
-    def __init__(self, problem_instance, control_val=None, **kwargs):
+    def __init__(self, problem_instance, control_val=None,
+                 kappa=_KAPPA, prob_eps=_PREP_EPS, **kwargs):
         if not isinstance(problem_instance, HermitianBundlePI):
             raise TypeError("requires a HermitianBundlePI")
         super().__init__(problem_instance, control_val=control_val, **kwargs)
         self._encoding_type = None
+        self._kappa = kappa            # rotation-synthesis bits (P0-4 budget)
+        self._prob_eps = prob_eps      # alias-PREP precision (P0-4 budget)
 
     @property
     def control_registers(self) -> Tuple[Register, ...]:
@@ -417,31 +425,45 @@ class SparseHermitianBundleBlockEncoding(BlockEncoding):
         outer = 0
         if n >= 2:
             sp = StatePreparationAliasSampling.from_lcu_probs(
-                [1.0] * n, probability_epsilon=_PREP_EPS)
+                [1.0] * n, probability_epsilon=self._prob_eps)
             outer = sum(r.bitsize for r in sp.signature) - self.PI._b_out
-        return max(0, outer) + _KAPPA          # + one QROM-load kappa batch
+        return max(0, outer) + self._kappa     # + one QROM-load kappa batch
 
     def _t_complexity_(self) -> TComplexity:
-        return hermitian_bundle_t_complexity(self.PI.atoms)
+        return hermitian_bundle_t_complexity(
+            self.PI.atoms, self._kappa, self._prob_eps)
 
 
-def estimate_hermitian_sparse_resources(mh, n_b, num_sites, num_pion_species=3):
+def estimate_hermitian_sparse_resources(mh, n_b, num_sites, num_pion_species=3,
+                                        delta_E=1.0, qpe_fraction=0.5):
     """Primitive-based COST-MODEL estimate for the Hermitian sparse bundle.
 
     Returns `{Walk_T_Count, Walk_Clifford_Count, Logical_Qubits, Physical_Lambda,
-    n_atoms}`. The *ideal* Hermitian construction qubitizes (validated on toys),
-    but `Walk_T_Count` is a hand-assembled cost model, **not compiler-derived**,
-    and is optimistic (omits controls/matching predicates/boundary/phase/precision
-    — see `SparseHermitianBundleBlockEncoding`). `Physical_Lambda` (the tighter
-    Hermitian α_tot) IS a valid subnormalization. Not for headline publication
-    numbers; use the PauliLCU anchor."""
+    n_atoms, budget}`. **Precision is now derived from the target energy accuracy
+    `delta_E` (MeV), not hard-coded** (P0-4): the block-encoding error budget sets
+    the alias-PREP precision (`probability_epsilon`) and the rotation-synthesis
+    precision (`kappa` bits + `circuit_precision`) — see `precision_budget`. The
+    `Physical_Lambda` (tighter Hermitian α_tot) IS a valid subnormalization.
+
+    The *ideal* Hermitian construction qubitizes (validated on toys); the
+    `Walk_T_Count` remains a cost model, **not compiler-derived** (the executable
+    composite lives in `compiled_bundle`), so it is not a headline publication
+    number — use the PauliLCU anchor. But it is now precision-consistent."""
+    from src_PI.estimation.sparse_oracle.precision_budget import qpe_error_budget
+
     pi = HermitianBundlePI(mh, n_b, num_sites, num_pion_species)
-    be = SparseHermitianBundleBlockEncoding(pi)
-    res = estimate_resources(QubitizedWalkOperator(be))
+    budget = qpe_error_budget(float(pi.alpha), delta_E, qpe_fraction)
+    be = SparseHermitianBundleBlockEncoding(
+        pi, kappa=budget['kappa'], prob_eps=budget['probability_epsilon'])
+    # rotation synthesis to the budgeted total circuit precision (pyLIQTR divides
+    # it across the rotations); the alias PREP precision is baked into _t_complexity_.
+    res = estimate_resources(
+        QubitizedWalkOperator(be), circuit_precision=budget['circuit_precision'])
     return {
         'Walk_T_Count': int(res['T']),
         'Walk_Clifford_Count': int(res['Clifford']),
         'Logical_Qubits': int(res['LogicalQubits']),
         'Physical_Lambda': float(be.alpha),
         'n_atoms': len(pi.atoms),
+        'budget': budget,
     }
