@@ -38,38 +38,43 @@ Commits on `remediation/vertex-fix` (newest first):
 | **D** — paper cleanup | ⬜ mostly parallel/low-compute; sign-problem writeup done (`docs/sign_problem.md`). |
 | **Phase 2/3** — regeneration | ⬜ not started; needs the corrected H + (quantum) C1 ✅/C2. HPC, launch-approval loop. |
 
-### ▶ Recommended action for the next C session (C1 Hermitization, THEN C2)
+### ▶ Recommended action — C1 walk-validity: defect is DEEP; feasibility spike DONE
 
-**C1's block encoding is built and its α is exact, but the walk it costs is not yet a valid
-qubitization** (quantum-algorithms review, 2026-08-18 — see the ⚠ in the status table + §C1). Before
-C1 can produce a headline number, the atoms must be **Hermitized**:
+**The walk-validity defect runs deeper than the C1 bundle.** The quantum-algorithms review
+(2026-08-18) found the compiled walk is not a valid qubitization (non-Hermitian `U`); investigating,
+**even the pre-existing `single_ladder.py` `(â+â†)` encoder is non-Hermitian** (`‖U−U†‖=5.66`,
+`U²≠I`) — so the whole BCK/sparse foundation is affected, not just C1. pyLIQTR's single-reflection
+walk needs a **Hermitian** `U`; there is **no off-the-shelf sparse-Hermitian encoder** (pyLIQTR
+1.3.4 ships only PauliLCU — Hermitian because Paulis are self-inverse — plus specialized
+fermionic/chemistry ones), and the cheap general Hermitization wrapper `(H_b)(|0⟩⟨0|⊗U+|1⟩⟨1|⊗U†)(H_b)`
+does **not** yield a Hermitian `U` (verified — walk still fails).
 
-1. **Re-pair conjugate boson monomials** `c·m + c̄·m†` (â↔â†; two-mode products with their h.c.)
-   into single Hermitian atoms, each encoded by a Hermitian d=2 BCK (generalize the *already-Hermitian*
-   `single_ladder.py` `(â+â†)` encoder to complex `c`). Hermitian **diagonal** atoms (`n̂`, gradient
-   diagonal) via a Hermitian 1-ancilla dilation. **Fermion PauliLCU atoms are already Hermitian —
-   no change.** α_tot is **preserved** under re-pairing (the d=2 α = sum of the two d=1 α's), so the
-   α invariant + all Λ downstream survive.
-   **Gate:** `test_bundle_walk_qubitizes_hermitian_H` (currently xfail, strict) flips to pass —
-   `W = (2Π−I)·U` has the spectrum `e^{±i arccos(E_k/α)}`.
-2. **Mixed-atom operator sim** (the α invariant is phase-blind — a dropped `i` inside an H_WT mixed
-   atom would pass silently): implement `_atom_sim_unitary` for `kind=='mixed'` (boson-circuit ⊗
-   fermion-dilation on disjoint supports) and check `α_l·⟨0|B_l|0⟩ = M_f⊗M_b` incl. an imaginary
-   boson factor.
-3. **Quantify the control-overhead undercount** (per-atom SELECT is charged *uncontrolled*): compare
-   `Σ uncontrolled` vs `Σ singly-controlled` atom cost on one bundle; fold into the A/B as an error
-   bar. **Tighten `LogicalQubits` junk** from a hardcoded `+8` to `max over atoms of inner-atom
-   ancilla` (fermion inner-PREP width; per-mode kappa×#modes; AddK).
+**Feasibility spike (DONE, `tests/test_hermitian_sparse_spike.py`, 7 pass):** a valid sparse-Hermitian
+encoder of `(â+â†)` **does** exist — **edge-colour into two 1-sparse Hermitian matchings** `M_a+M_b`;
+for a matching `M²` is diagonal, so the contraction dilation `[[M/α,√(I−M²/α²)],[√,−M/α]]` is sparse
++ Hermitian + self-inverse; LCU-combine with a Hermitian SELECT. Verified `U=U†`, `U²=I`,
+`α·⟨0|U|0⟩=(â+â†)`, and **walk qubitizes** (`e^{±i arccos(E/α)}`) at n_b=2,3,4. Bonus: **α is tighter**
+than single_ladder (3.15 vs 3.46 at n_b=2 → tighter Λ). **Cost of Hermiticity ≈4×** the per-atom
+boson SELECT (2 matchings × 2 amplitude oracles vs single_ladder's 1); fermion atoms unchanged;
+diagonal `n̂` cheap (diagonal dilation).
 
-**Then C2 — amplitude composed encoding** (real `H_pos+H_mom` block encoding + H_WT
-species-selective QFT, Watson Eqs. 102–104), **C4** (runtime bands), Phase 2/3 regeneration.
+**Decision pending (user):** with feasibility + bounded cost + tighter α established, either
+**(A) full sparse-Hermitian rebuild** — reimplement the boson encoders on the matching-dilation
+(single-mode `(â+â†)`-type, diagonal `n̂`, and the trickier two-mode H_WT Hermitization), re-pair
+atoms, flip `test_bundle_walk_qubitizes_hermitian_H` to pass, re-validate α invariant + toy sim +
+A/B (~1 session; main risk = two-mode H_WT) — or **(B) pivot** to PauliLCU as the sole *valid* walk
+cost + analytic PauliLCU scaling for L=10, demoting sparse to Λ + a labelled block-encoding-level
+estimate.
 
-**Do NOT flip the `sparse_oracle_mode` default to `'compiled'`** until the walk is Hermitized — the
-current compiled number is a block-encoding-level estimate for a not-yet-valid walk. Analytical stays
-default.
+**Do NOT flip `sparse_oracle_mode` to `'compiled'`** until the walk is Hermitized. Analytical stays
+default. **Also open regardless of path:** mixed-atom operator sim (α is phase-blind), control-overhead
++ junk undercounts.
+
+**Then C2 — amplitude composed encoding** (real `H_pos+H_mom` + H_WT species-selective QFT, Watson
+Eqs. 102–104), **C4** (runtime bands), Phase 2/3 regeneration.
 
 **Guardrails (unchanged):** env pinned pyLIQTR 1.3.4 / Qualtran 0.4.0; comparison-switch discipline;
-no heavy local compute (tiny sims only). The B proof gaps are the user's/Codex's to review.
+no heavy local compute. The B proof gaps are the user's/Codex's to review.
 
 ---
 
