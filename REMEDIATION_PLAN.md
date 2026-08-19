@@ -79,11 +79,16 @@ relabelled; the `253,908` is NOT a headline number).
    amplitudes; coefficient→PREP/rotation data).
 4. **Precision/error budget** — derive `kappa`/alias precision from energy accuracy × query count.
 
-**Nearer-term publication posture (until P0 lands):** PauliLCU (C3) is the compiler-derived quantum
-anchor. For L=10 (PauliLCU can't materialise the full operator), the honest route is **analytic
-PauliLCU scaling from one unit cell × site multiplicity** (compiler-derived per-cell cost × exact
-lattice combinatorics) — see the C-workstream note. Present the sparse result only as a
-validated-construction/prospective cost model with explicit omissions.
+**Nearer-term publication posture — PauliLCU anchor ✅ BUILT (user chose "both").**
+`src_PI/estimation/pauli_lcu_scaling.py` reaches **L=10** without materialising the operator, via
+exact lattice combinatorics (`λ = a·S + b·N_bonds`, verified 0.00% vs compiled PauliLCU at
+L=1,2,3 dim=3). **L=10 dim=3 anchor (EXACT):** `λ = 8.80e6`, `N_walk = 3.91e7`,
+**8,604 logical qubits**. **Total_T ≈ 1.2e16 (MODELLED, biased LOW** — `walk_T ≈ 64·total_weight`,
+1-2% at L=2,3, but total_weight is super-linear from JW Z-string growth for out-of-row bonds;
+asymmetric +100%/−15% band, **confirm on the cluster at L=4-6 dim=3** where materialisation is still
+feasible). λ/N_walk/qubits are the robust feasibility headline; total_T needs the cluster point.
+The sparse result stays a validated-construction / prospective cost model until P0. **Next: the
+sparse P0 composite build** (per the user decision).
 
 **Then C2 — amplitude composed encoding** (real `H_pos+H_mom` + H_WT species-selective QFT, Watson
 Eqs. 102–104), **C4** (runtime bands), Phase 2/3 regeneration.
