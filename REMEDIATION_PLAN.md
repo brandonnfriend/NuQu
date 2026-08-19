@@ -33,7 +33,7 @@ Hermitian encoder · `be345bd` Hermitization spike · `0653ce3` walk-validity de
 | **A** — Hamiltonian correctness | ✅ **DONE.** Vertex fix (3 builders) + physics-oracle suite (`tests/test_vertex_algebra.py`: Kronecker oracle for all 12 σ⊗τ channels, cross-builder equivalence, `[H_WT,n̂_x]=0`) + `a_L**dim`. |
 | **B** — Rigorous cutoff | ✅ **CODE DONE.** `boson_cutoff_method='tong_rigorous'` (exact Bogoliubov tail + variational bound), `classical/trimci/gaussian_cutoff.py`, tests. Draft `claude/research/bosonic-encodings/05_*.md` — audited & **rescoped honestly** (2 rigorous results; 2 open gaps: bound `‖Vψ‖` via Gaussian moments, control `|δ_true−δ_Gauss|`). **For user + Codex proof review.** `'heuristic'` stays default. |
 | **C3** — PauliLCU anchor | ✅ **DONE.** Genuinely circuit-level on corrected H (L=2,dim=1,n_b=2 → Λ=3077, Walk_T=214724, 31 qubits, 1.3s). Small-L validation anchor; ceiling is QubitOperator memory. |
-| **C1** — compiled sparse RE | ✅ **DONE — valid, wired.** The first build's single-reflection walk was invalid (non-Hermitian `U` — quantum-algorithms review; the defect ran deep, even `single_ladder` is non-Hermitian). **Rebuilt on a sparse-Hermitian encoder** (edge-coloured matching-dilation): `hermitian_boson_encoding.py` (single-/two-mode/multi-shift atoms, each **qubitizes**), `hermitian_bundle.py` (re-group into Hermitian atoms → Hermitian `U` → **walk qubitizes**: U=U†, U²=I, spectrum `e^{±i arccos(E/α)}` verified on boson + heterogeneous toys). **Valid compiled walk (full pipeline, incl. static nucleon): Walk_T = 253,908 @ L=2 dim=1** (cf. PauliLCU ~215k, analytical proxy 439k) with a **~13% TIGHTER Λ** (4471 vs 5058), 0.8 s. Wired behind `sparse_oracle_mode='compiled'`; non-Hermitian path retired. LogicalQubits includes a junk register; uncontrolled-SELECT caveat documented (walk-T rotation-dominated → sub-dominant). Mixed-atom operator sim covered. **Analytical stays the default; flipping to `'compiled'` is now a valid one-liner.** |
+| **C1** — sparse RE | ⚠ **MATH VALIDATED; COMPILED IMPLEMENTATION INCOMPLETE (Codex audit 2026-08-18).** Two rounds of defect-fixing: (1) the quantum-algorithms review found the first build's walk invalid (non-Hermitian `U`; defect ran deep — even `single_ladder` is non-Hermitian); (2) **rebuilt on a sparse-Hermitian encoder** (edge-coloured matching-dilation) whose *ideal* construction **qubitizes** — `U=U†`, `U²=I`, spectrum `e^{±i arccos(E/α)}` verified on boson + heterogeneous dense toys (`hermitian_boson_encoding.py`, `hermitian_bundle.py`). **But** Codex's audit is correct: `SparseHermitianBundleBlockEncoding` has **no `decompose_from_registers`** — `estimate_resources` just reads a hand-assembled `_t_complexity_`, so the reported **`Walk_T` is a COST MODEL, not a compiler-derived count**, and is optimistic (omits matching predicates/boundary, coherent SELECT controls, nonuniform PREP, real angle tables, precision budget). The **tighter Λ (4471 vs 5058) IS a valid subnormalization.** Mode renamed `'hermitian_cost_model'` (was `'compiled'`); **PauliLCU (C3) is the publication anchor** until a decomposable composite lands. See §C1 + the P0 remediation below. |
 | **C2** — amplitude composed encoding | ⬜ scoped, not started (next large build). |
 | **C4** — runtime bands | ⬜ scoped, not started (medium). |
 | **D** — paper cleanup | ⬜ mostly parallel/low-compute; sign-problem writeup done (`docs/sign_problem.md`). |
@@ -59,19 +59,33 @@ than single_ladder (3.15 vs 3.46 at n_b=2 → tighter Λ). **Cost of Hermiticity
 boson SELECT (2 matchings × 2 amplitude oracles vs single_ladder's 1); fermion atoms unchanged;
 diagonal `n̂` cheap (diagonal dilation).
 
-**Decision (user, 2026-08-18): full sparse-Hermitian rebuild — ✅ DONE (all 4 sub-steps).**
-Matching-dilation Hermitian encoders (single-/two-mode/multi-shift) + Hermitian bundle; walk
-qubitizes; valid compiled cost; wired behind the `compiled` switch (non-Hermitian path retired);
-LogicalQubits junk declared; control-overhead caveat documented; lazy-dense so the cost path scales
-(a cross-site nucleon bilinear's JW spans the interleaved register → dense blows up — built only for
-tiny-toy sims). Full Hermitian + sparse suite green.
+**Decision (user, 2026-08-18): full sparse-Hermitian rebuild — math done; compile incomplete.**
+Matching-dilation Hermitian encoders (single-/two-mode/multi-shift) + Hermitian bundle; the *ideal*
+walk qubitizes (dense toy sims). **Codex audit (2026-08-18, `codex_audit/c1_sparse_pipeline_audit_
+2026-08-18.md`) — accepted:** the resource number is a **primitive-based cost model**, not a
+compiler-derived count (no `decompose_from_registers`; `estimate_resources` reads the declared
+`_t_complexity_`). Terminology corrected (mode → `hermitian_cost_model`; docstrings + this plan
+relabelled; the `253,908` is NOT a headline number).
 
-**C1 is complete.** The one remaining *optional* cleanup: repoint or retire the
-`test_bundle_walk_qubitizes_hermitian_H` xfail (it still marks the retired non-Hermitian bundle) and
-the retired `estimate_sparse_resources_compiled` / `compiled_vs_analytical` in `resources.py` (kept,
-docstring-labelled non-Hermitian/invalid). Not blocking.
+**To make the sparse path publication-grade (Codex P0 — a real, multi-session build):**
+1. **Executable matching-dilation bloq** — decomposable, with the actual amplitude/√ tables,
+   endpoint/direction predicate, boundary (no-wrap) logic, shift + inverse, phase/sign, controls,
+   uncompute; small-instance extracted matrix matches the dense reference incl. unused states.
+2. **Actual Hermitian bundle composite** — PREP–SELECT–PREP† with nonuniform weights + coherent
+   heterogeneous dispatch, all flags reflected + junk exposed; leaf costs traversed by the estimator
+   (a call graph / decomposition, NOT a hand `_t_complexity_`).
+3. **Circuit-equivalence + decomposition tests** on the *production* class (it must decompose;
+   extracted block == H; Hermiticity/self-inverse/clean-junk/qubitization phases; boundary + complex
+   amplitudes; coefficient→PREP/rotation data).
+4. **Precision/error budget** — derive `kappa`/alias precision from energy accuracy × query count.
 
-**Next: C2 — amplitude composed encoding** (real `H_pos+H_mom` + H_WT species-selective QFT, Watson
+**Nearer-term publication posture (until P0 lands):** PauliLCU (C3) is the compiler-derived quantum
+anchor. For L=10 (PauliLCU can't materialise the full operator), the honest route is **analytic
+PauliLCU scaling from one unit cell × site multiplicity** (compiler-derived per-cell cost × exact
+lattice combinatorics) — see the C-workstream note. Present the sparse result only as a
+validated-construction/prospective cost model with explicit omissions.
+
+**Then C2 — amplitude composed encoding** (real `H_pos+H_mom` + H_WT species-selective QFT, Watson
 Eqs. 102–104), **C4** (runtime bands), Phase 2/3 regeneration.
 
 **Note for C2 (learned from C1):** whatever walk pyLIQTR wraps needs a **Hermitian** block encoding —

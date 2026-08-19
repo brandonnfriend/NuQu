@@ -61,25 +61,28 @@ class SparseStrategy:
         physical_lambda = lam_data['physical_lambda']
         identity_shift = lam_data['identity_shift']
 
-        # 'analytical' (default, mixed-bound proxy) vs 'compiled' (the genuinely
-        # circuit-level, walk-VALID Hermitian bundle — matching-dilation encoder;
-        # the earlier non-Hermitian SparseFullBundle path is retired: its
-        # single-reflection walk did not qubitize).
+        # 'analytical' (default, mixed-bound proxy) vs 'hermitian_cost_model'
+        # (the walk-VALID Hermitian matching-dilation construction, costed by a
+        # primitive-based COST MODEL — not a compiler-derived count; optimistic,
+        # omits controls/matching predicates/boundary/phase/precision budget).
+        # The earlier non-Hermitian SparseFullBundle path is retired.
         mode = getattr(config, 'sparse_oracle_mode', 'analytical')
 
-        if mode == 'compiled':
-            print("--- Sparse-oracle strategy (C1: COMPILED Hermitian walk, valid) ---")
+        if mode == 'hermitian_cost_model':
+            print("--- Sparse-oracle (Hermitian COST MODEL — not compiler-derived) ---")
             print(f"-> Identity (classical) shift:   {identity_shift:.4e}")
             res = estimate_hermitian_sparse_resources(mh, n_b, num_sites)
             physical_lambda = res['Physical_Lambda']         # tighter Hermitian Λ
             print(f"-> Physical Lambda (Hermitian, tighter): {physical_lambda:.4e}")
             print(f"-> Atoms (mode-set grouped): {res['n_atoms']}")
-            print(f"-> Walk T (Hermitian, estimate_resources) = {res['Walk_T_Count']:.4e}")
-            print(f"-> Logical qubits = {res['Logical_Qubits']}")
+            print(f"-> Walk T (COST MODEL, optimistic; omits control/matching/"
+                  f"boundary/phase/precision) = {res['Walk_T_Count']:.4e}")
+            print(f"-> Logical qubits (estimate) = {res['Logical_Qubits']}")
             walk_T = res['Walk_T_Count']
             walk_Cl = res['Walk_Clifford_Count']
             logical_q = res['Logical_Qubits']
-            breakdown = {'n_atoms': res['n_atoms'], 'hermitian': True}
+            breakdown = {'n_atoms': res['n_atoms'], 'hermitian_cost_model': True,
+                         'compiler_derived': False}
         else:
             print("--- Sparse-oracle strategy (analytical mixed-bound proxy) ---")
             print(f"-> Identity (classical) shift:   {identity_shift:.4e}")

@@ -25,13 +25,16 @@ Currently supported axes:
                  or 'lobe' (Ladder-Operator Block-Encoding, task 28).
                  Selects the strategy in `src_PI/estimation/block_encoders/`.
 - sparse_oracle_mode: 'analytical' (default — the Gilyén+LCU proxy that mixes a
-                 boson upper bound with a fermion lower bound; kept as the A/B
-                 baseline) or 'compiled' (the genuinely circuit-level
-                 SparseFullBundleBlockEncoding costed via pyLIQTR
-                 estimate_resources, C1). Only consulted when
-                 block_encoder='sparse'. Default stays 'analytical' so existing
-                 numbers are unchanged; the compiled path is validated (α_tot
-                 invariant + toy assembly sim) and ready to become the headline.
+                 boson upper bound with a fermion lower bound; A/B baseline) or
+                 'hermitian_cost_model' (the walk-VALID Hermitian matching-
+                 dilation construction, costed by a primitive-based **cost
+                 model** — NOT a compiler-derived count: the block encoding has
+                 no executable decomposition yet, and the model omits coherent
+                 controls / matching predicates / boundary logic / phase / a
+                 precision budget, so its T is an optimistic provisional
+                 estimate). Only consulted when block_encoder='sparse'. For
+                 publication-grade quantum resources use the PauliLCU anchor
+                 until the decomposable composite lands (Codex audit 2026-08-18).
 
 To add a new design axis (e.g. fermion_encoding): add a field here with
 a sensible default; downstream dispatch reads `config.<axis>` at the
@@ -47,7 +50,7 @@ _VALID_WALK_MODES = ('series', 'parallel')
 _VALID_CUTOFF_METHODS = ('energy_bound', 'ns')
 _VALID_BOSON_CUTOFF_METHODS = ('heuristic', 'tong', 'tong_rigorous')
 _VALID_BLOCK_ENCODERS = ('pauli_lcu', 'sparse', 'lobe')
-_VALID_SPARSE_ORACLE_MODES = ('analytical', 'compiled')
+_VALID_SPARSE_ORACLE_MODES = ('analytical', 'hermitian_cost_model')
 
 
 @dataclass
@@ -67,8 +70,9 @@ class Config:
     # behavior; 'sparse' / 'lobe' will be wired in by tasks 26 / 28.
     block_encoder: str = 'pauli_lcu'
     # Sparse-oracle costing mode (only consulted for block_encoder='sparse').
-    # 'analytical' = the mixed-bound Gilyén+LCU proxy (A/B baseline, current
-    # default); 'compiled' = the genuinely circuit-level full-bundle encoder (C1).
+    # 'analytical' = the mixed-bound Gilyén+LCU proxy (A/B baseline, default);
+    # 'hermitian_cost_model' = the walk-valid Hermitian construction costed by a
+    # primitive-based cost model (NOT compiler-derived; optimistic — see docstring).
     sparse_oracle_mode: str = 'analytical'
 
     # Free-form extras: anything the user wants to remember about the run

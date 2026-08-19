@@ -463,9 +463,9 @@ def test_bundle_walk_qubitizes_hermitian_H():
 def test_config_sparse_oracle_mode_axis():
     from src_PI.utils.Config import Config
     assert Config().sparse_oracle_mode == 'analytical'          # default unchanged
-    c = Config(block_encoder='sparse', sparse_oracle_mode='compiled')
-    assert c.sparse_oracle_mode == 'compiled'
-    assert Config.from_dict(c.to_dict()).sparse_oracle_mode == 'compiled'
+    c = Config(block_encoder='sparse', sparse_oracle_mode='hermitian_cost_model')
+    assert c.sparse_oracle_mode == 'hermitian_cost_model'
+    assert Config.from_dict(c.to_dict()).sparse_oracle_mode == 'hermitian_cost_model'
     with pytest.raises(ValueError, match='sparse_oracle_mode'):
         Config(sparse_oracle_mode='nope')
 
@@ -488,9 +488,9 @@ def test_sparse_switch_dispatches_both_modes():
     proxy's per-monomial 1-norm (edge colouring), and both walk numbers are
     positive."""
     a = _sparse_estimate('analytical')
-    c = _sparse_estimate('compiled')
+    c = _sparse_estimate('hermitian_cost_model')
     assert a['sparse_oracle_mode'] == 'analytical'
-    assert c['sparse_oracle_mode'] == 'compiled'
+    assert c['sparse_oracle_mode'] == 'hermitian_cost_model'
     # Hermitian Λ ≤ analytical Λ (tighter), both positive
     assert 0 < c['Physical_Lambda'] <= a['Physical_Lambda'] + 1e-6 * a['Physical_Lambda']
     assert a['Walk_T_Count'] > 0 and c['Walk_T_Count'] > 0

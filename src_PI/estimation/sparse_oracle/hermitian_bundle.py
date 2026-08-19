@@ -26,8 +26,10 @@ coloured 1-norm; `hermitian_boson_encoding.build_hermitian_boson_be`), which is
 *tighter* than the per-monomial sum `compute_native_lambda` uses — so the
 Hermitian bundle's `α_tot = Σ_l α_l` is a valid, tighter Λ.
 
-This module provides the exact simulation + walk-qubitization validation. The
-sparse compiled cost (matching-dilation `_t_complexity_`) is layered on top.
+This module provides the exact simulation + walk-qubitization validation (the
+*ideal* construction). The layered `_t_complexity_` is a primitive-based **cost
+model**, NOT a compiled decomposition — see `SparseHermitianBundleBlockEncoding`
+for the (Codex-audited) list of what it omits; use PauliLCU for publication.
 """
 
 import math
@@ -291,8 +293,10 @@ def _atom_cost(atom):
 
 
 def hermitian_bundle_t_complexity(atoms):
-    """Compiled `_t_complexity_` of the Hermitian bundle: 2·outer-PREP + AND-ladder
-    + Σ atom costs (all real Qualtran-bloq roll-ups)."""
+    """Cost-MODEL `_t_complexity_` of the Hermitian bundle: 2·outer-PREP + AND-ladder
+    + Σ atom costs. Leaf costs are real Qualtran bloqs, but the composition is
+    hand-asserted (not compiled) and omits controls/matching predicates/boundary/
+    phase/precision — an OPTIMISTIC estimate. See SparseHermitianBundleBlockEncoding."""
     total = 2 * _alias_prep_tc(len(atoms)) + _and_ladder_tc(len(atoms))
     for atom in atoms:
         total = total + _atom_cost(atom)
@@ -359,18 +363,23 @@ def _fermion_flag(fermion_op):
 
 
 class SparseHermitianBundleBlockEncoding(BlockEncoding):
-    """Valid (Hermitian) compiled block encoding of a MixedHamiltonian.
+    """Hermitian bundle carrying a primitive-based **cost MODEL** `_t_complexity_`.
 
-    `_t_complexity_` is the matching-dilation roll-up; the walk it costs IS a
-    valid qubitization (unlike the retired non-Hermitian `SparseFullBundle...`).
-
-    Cost caveats (documented, both push the estimate slightly LOW): the per-atom
-    SELECT is charged *uncontrolled* — the walk-T is rotation-synthesis-dominated
-    and a singly-controlled rotation synthesizes to ~the same T (control is a
-    Clifford addition), with the unary-dispatch control charged via the AND-ladder,
-    so the residual is a sub-dominant additive Clifford term. `LogicalQubits`
-    now includes a declared `junk` register (peak internal ancilla) rather than
-    silently dropping the qalloc'd temporaries."""
+    ⚠ **NOT a compiled block encoding (Codex audit 2026-08-18).** This class has
+    **no** `decompose_from_registers` / call graph — `estimate_resources` simply
+    reads the declared `_t_complexity_`, it does not compile or verify a
+    PREP–SELECT–PREP† circuit. The *ideal* Hermitian construction is validated
+    (it qubitizes — dense toy sims in the test suite), but the reported `Walk_T`
+    is a **hand-assembled cost model, not a compiler-derived count**, and is
+    OPTIMISTIC: it omits the matching endpoint/direction predicates + boundary
+    (no-wrap) logic (an `AddK` is charged where a real matching permutation is
+    needed), the coherent heterogeneous SELECT controls (per-atom cost charged
+    *uncontrolled*), the actual (nonuniform) PREP weights and folded phases, the
+    real amplitude/√ angle tables (synthetic tables are used), and a precision/
+    error budget (`kappa`, alias-eps hard-coded). **Use the PauliLCU anchor for
+    publication numbers** until an executable decomposable composite lands. A
+    declared `junk` register keeps `LogicalQubits` from silently dropping the
+    qalloc'd temporaries, but it too is heuristic (not compiler-scheduled)."""
 
     def __init__(self, problem_instance, control_val=None, **kwargs):
         if not isinstance(problem_instance, HermitianBundlePI):
@@ -417,11 +426,15 @@ class SparseHermitianBundleBlockEncoding(BlockEncoding):
 
 
 def estimate_hermitian_sparse_resources(mh, n_b, num_sites, num_pion_species=3):
-    """Genuine, VALID walk cost of the Hermitian sparse bundle.
+    """Primitive-based COST-MODEL estimate for the Hermitian sparse bundle.
 
     Returns `{Walk_T_Count, Walk_Clifford_Count, Logical_Qubits, Physical_Lambda,
-    n_atoms}`. The walk is a true qubitization (Hermitian U), unlike the retired
-    non-Hermitian compiled path."""
+    n_atoms}`. The *ideal* Hermitian construction qubitizes (validated on toys),
+    but `Walk_T_Count` is a hand-assembled cost model, **not compiler-derived**,
+    and is optimistic (omits controls/matching predicates/boundary/phase/precision
+    — see `SparseHermitianBundleBlockEncoding`). `Physical_Lambda` (the tighter
+    Hermitian α_tot) IS a valid subnormalization. Not for headline publication
+    numbers; use the PauliLCU anchor."""
     pi = HermitianBundlePI(mh, n_b, num_sites, num_pion_species)
     be = SparseHermitianBundleBlockEncoding(pi)
     res = estimate_resources(QubitizedWalkOperator(be))
