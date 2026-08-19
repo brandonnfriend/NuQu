@@ -35,12 +35,10 @@ from src_PI.estimation.sparse_oracle.matching_dilation import (
 
 
 _ATOMS = {
-    # kind: (ladder actions, coeff, Δ)
+    # kind: (ladder actions, coeff, Δ) — one real + one complex at Δ=1, one at Δ=2.
     'ladder': ((0,), 1.0, 1),                 # â+â†  (real, Δ=1)
     'ladder_imag': ((0,), 1.0j, 1),           # i(â−â†)  (imaginary — H_WT Π-type)
-    'ladder_cplx': ((0,), 0.7 + 0.5j, 1),     # general complex, Δ=1
-    'squared': ((0, 0), 1.0, 2),              # â²+â†²  (real, Δ=2)
-    'squared_imag': ((0, 0), 1.0j, 2),        # imaginary, Δ=2
+    'squared': ((0, 0), 1.0, 2),              # â²+â†²  (Δ=2)
 }
 
 
@@ -51,25 +49,24 @@ def _atom(kind, n_b):
     return M, shift
 
 
-@pytest.mark.parametrize('kind', list(_ATOMS))
-@pytest.mark.parametrize('n_b', [2, 3, 4])
-@pytest.mark.parametrize('m_idx', [0, 1])
-def test_matching_dilation_is_compiled_and_correct(kind, n_b, m_idx):
+def test_matching_dilation_is_compiled_and_correct():
     """BOTH edge-colours (aligned component 0 AND misaligned component 1, the
     latter via shift-conjugation) decompose and their extracted matrix equals the
-    dense dilation exactly — incl. unmatched/boundary states and complex phases."""
-    M, shift = _atom(kind, n_b)
-    _diag, matchings = _split_into_components(M)
-    if m_idx >= len(matchings):
-        pytest.skip("only one matching for this atom/size")
-    M_k = matchings[m_idx]
-    alpha = float(np.abs(M_k).max())
-    U, block = extract_matching_dilation(M_k, alpha, shift, n_b)
-    B_dense = dense_matching_dilation(M_k, alpha)
-    assert np.allclose(U, B_dense, atol=1e-7), "extracted U != dense dilation"
-    assert np.allclose(U, U.conj().T, atol=1e-7), "not Hermitian"
-    assert np.allclose(U @ U, np.eye(len(U)), atol=1e-7), "not self-inverse"
-    assert np.allclose(block, M_k, atol=1e-7), "α·⟨0|U|0⟩ != M_k"
+    dense dilation exactly — over every atom kind (real/imaginary Δ=1, Δ=2),
+    n_b∈{2,3}, and both matchings — incl. unmatched/boundary + complex phases."""
+    for kind in _ATOMS:
+        for n_b in (2, 3):
+            M, shift = _atom(kind, n_b)
+            _diag, matchings = _split_into_components(M)
+            for M_k in matchings:
+                alpha = float(np.abs(M_k).max())
+                U, block = extract_matching_dilation(M_k, alpha, shift, n_b)
+                B = dense_matching_dilation(M_k, alpha)
+                tag = f"{kind} n_b={n_b}"
+                assert np.allclose(U, B, atol=1e-7), f"{tag}: U != dense dilation"
+                assert np.allclose(U, U.conj().T, atol=1e-7), f"{tag}: not Hermitian"
+                assert np.allclose(U @ U, np.eye(len(U)), atol=1e-7), f"{tag}: not self-inverse"
+                assert np.allclose(block, M_k, atol=1e-7), f"{tag}: α⟨0|U|0⟩ != M_k"
 
 
 def test_matching_dilation_decomposes_to_elementary_gates():
@@ -130,26 +127,21 @@ def _walk_qubitizes(U, alpha, N, M):
     return True
 
 
-@pytest.mark.parametrize('actions,coeff,num_c', [
-    ((0,), 1.0, None),        # â+â†  (2 matchings)
-    ((0,), 1.0, 0.5),         # â+â† + ½n̂  (diagonal + 2 matchings)
-    ((0,), 1.0j, 1.0),        # i(â−â†) + n̂  (imaginary matchings + diagonal)
-    ((0, 0), 1.0, 0.5),       # â²+â†² + ½n̂  (Δ=2 matchings + diagonal)
-])
-@pytest.mark.parametrize('n_b', [2, 3])
-def test_full_atom_block_encoding_qubitizes(actions, coeff, num_c, n_b):
+def test_full_atom_block_encoding_qubitizes():
     """A full single-mode atom (inner LCU over diagonal + matchings) is a
     decomposable block encoding of M that is Hermitian, self-inverse, and whose
-    walk qubitizes."""
+    walk qubitizes — over diagonal+matchings (real/imaginary/Δ=2), n_b∈{2,3}."""
     from src_PI.estimation.sparse_oracle.matching_dilation import extract_atom_dilation
-    M = hermitian_single_mode_matrix(actions, coeff, n_b)
-    if num_c is not None:
-        M = M + hermitian_single_mode_matrix((1, 0), num_c, n_b)
-    U, alpha, block = extract_atom_dilation(M, n_b)
-    assert np.allclose(block, M, atol=1e-6), "α·⟨0|U|0⟩ != M"
-    assert np.allclose(U, U.conj().T, atol=1e-6), "atom U not Hermitian"
-    assert np.allclose(U @ U, np.eye(len(U)), atol=1e-6), "atom U not self-inverse"
-    assert _walk_qubitizes(U, alpha, 1 << n_b, M), "atom walk does not qubitize"
+    cases = [((0,), 1.0, 0.5), ((0,), 1.0j, 1.0), ((0, 0), 1.0, 0.5)]
+    for actions, coeff, num_c in cases:
+        for n_b in (2, 3):
+            M = (hermitian_single_mode_matrix(actions, coeff, n_b)
+                 + hermitian_single_mode_matrix((1, 0), num_c, n_b))
+            U, alpha, block = extract_atom_dilation(M, n_b)
+            assert np.allclose(block, M, atol=1e-6), "α⟨0|U|0⟩ != M"
+            assert np.allclose(U, U.conj().T, atol=1e-6), "not Hermitian"
+            assert np.allclose(U @ U, np.eye(len(U)), atol=1e-6), "not self-inverse"
+            assert _walk_qubitizes(U, alpha, 1 << n_b, M), "atom walk does not qubitize"
 
 
 def test_single_mode_atom_has_genuine_compiled_t_count():

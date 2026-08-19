@@ -40,55 +40,34 @@ def test_lambda_picks_up_identity_shift_from_boson_part():
     assert abs(data['identity_shift'] - 7.5) < 1e-12
 
 
-def test_lambda_for_single_ladder_monomial():
-    """C3d.3a: `â_0` is d=1 with max|A| = √(N_f−1). At n_b=3: λ = √7 ≈ 2.65."""
+def test_compute_native_lambda_per_sector_values():
+    """compute_native_lambda's per-sector rescale (n_b=3, N_f=8): boson d=1 max
+    amplitude (â=√7, n̂=7·m_π), fermion Pauli 1-norm, and the Gilyén mixed
+    product λ_mixed = |c|·λ_f·λ_b — plus the per-monomial max-amplitude values."""
     import math
-    mh = MixedHamiltonian(boson_part=BosonOperator('0', 1.0))
-    data = compute_native_lambda(mh, n_b=3)
-    expected = math.sqrt(7.0)  # max element of â on the 8-level register
-    assert abs(data['physical_lambda'] - expected) < 1e-9
-
-
-def test_lambda_for_number_operator():
-    """C3d.3a: `â_0^† â_0` is diagonal (d=1) with max|A| = N_f−1. At n_b=3: λ = 7·m_π."""
-    m_pi = 135.0
-    mh = MixedHamiltonian(boson_part=BosonOperator('0^ 0', m_pi))
-    data = compute_native_lambda(mh, n_b=3)
-    expected = m_pi * 7.0  # max diagonal entry of n̂ on the 8-level register
-    assert abs(data['physical_lambda'] - expected) < 1e-6
-
-
-def test_lambda_pure_fermion_uses_pauli_one_norm():
-    """`c · a_0^† a_1 + h.c.` → JW gives 4 Pauli terms with |c|=0.5 each → 1-norm = 2|c|."""
-    c = 3.0
-    f = c * (FermionOperator('0^ 1') + FermionOperator('1^ 0'))
-    mh = MixedHamiltonian(fermion_part=f)
-    data = compute_native_lambda(mh, n_b=3)
-    # JW of `c · (a_0^ a_1 + a_1^ a_0)` is `c/2 · (X_0 X_1 + Y_0 Y_1)` → 1-norm = c.
-    assert abs(data['physical_lambda'] - abs(c)) < 1e-9
-
-
-def test_mixed_term_lambda_is_product_of_factors():
-    """Gilyén product: λ_mixed = |c| · λ_f · λ_b (C3d.3a: λ_b = √7 for â at n_b=3)."""
-    import math
-    c = 2.5
-    F = FermionOperator('0^ 1') + FermionOperator('1^ 0')  # JW 1-norm = 1
-    B = BosonOperator('0')                                 # d=1, max|A| = √7
-    mh = MixedHamiltonian(mixed_terms=[MixedTerm(coeff=c, fermion_factor=F, boson_factor=B)])
-    data = compute_native_lambda(mh, n_b=3)
-    expected = abs(c) * 1.0 * math.sqrt(7.0)
-    assert abs(data['physical_lambda'] - expected) < 1e-9
-
-
-def test_lambda_monomial_max_amplitude_exact_values():
-    """C3d.3a: spot-check exact max-amplitude per monomial at n_b=3 (N_f=8)."""
-    import math
-    from src_PI.estimation.sparse_oracle.lambda_compute import _sparse_lambda_for_boson_monomial
-    # â†â†  maps |n⟩ → √((n+1)(n+2))|n+2⟩; max at n=N_f−3=5 → √(6·7)=√42.
+    from src_PI.estimation.sparse_oracle.lambda_compute import (
+        _sparse_lambda_for_boson_monomial,
+    )
+    # boson: â → √7
+    assert abs(compute_native_lambda(
+        MixedHamiltonian(boson_part=BosonOperator('0', 1.0)), 3)['physical_lambda']
+        - math.sqrt(7.0)) < 1e-9
+    # boson: n̂ (diagonal) → 7·m_π
+    assert abs(compute_native_lambda(
+        MixedHamiltonian(boson_part=BosonOperator('0^ 0', 135.0)), 3)['physical_lambda']
+        - 135.0 * 7.0) < 1e-6
+    # fermion: c·(a0†a1 + h.c.) → Pauli 1-norm = c
+    assert abs(compute_native_lambda(
+        MixedHamiltonian(fermion_part=3.0 * (FermionOperator('0^ 1') + FermionOperator('1^ 0'))),
+        3)['physical_lambda'] - 3.0) < 1e-9
+    # mixed: Gilyén product |c|·λ_f·λ_b = 2.5·1·√7
+    mt = MixedTerm(coeff=2.5, fermion_factor=FermionOperator('0^ 1') + FermionOperator('1^ 0'),
+                   boson_factor=BosonOperator('0'))
+    assert abs(compute_native_lambda(MixedHamiltonian(mixed_terms=[mt]), 3)['physical_lambda']
+               - 2.5 * math.sqrt(7.0)) < 1e-9
+    # per-monomial max amplitudes: â†â† → √42, two-mode â0â1 → 7, identity → 1
     assert abs(_sparse_lambda_for_boson_monomial(((0, 1), (0, 1)), 3) - math.sqrt(42.0)) < 1e-9
-    # two-mode â_0 â_1: product of per-mode maxes = √7·√7 = 7.
     assert abs(_sparse_lambda_for_boson_monomial(((0, 0), (1, 0)), 3) - 7.0) < 1e-9
-    # identity returns 1.
     assert _sparse_lambda_for_boson_monomial((), 3) == 1.0
 
 

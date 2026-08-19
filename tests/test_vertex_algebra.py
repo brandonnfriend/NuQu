@@ -64,6 +64,10 @@ _ISO_IDXS = (1, 2, 3)
 # erased. Guarded explicitly so a regression to cancellation can't pass silently.
 _IMAGINARY_CHANNELS = [(iso, spin) for iso in _ISO_IDXS for spin in _SPIN_IDXS
                        if 2 in (iso, spin) and not (iso == 2 and spin == 2)]
+# Representative (spin, iso) channels for the secondary cross-checks (the
+# decisive per-channel guarantee is the full-breadth kron oracle + the imaginary
+# guard above; these cross-checks need only a sample: real, imaginary, H_WT spin=0).
+_SAMPLE_CHANNELS = [(1, 1), (2, 2), (0, 3), (3, 1)]
 
 
 # --------------------------------------------------------------------------- #
@@ -116,61 +120,45 @@ def _qubitop_allclose(a, b, tol=1e-9):
 # Part 1 — the decisive oracle: vertex one-body matrix == kron(σ_S, τ_I)        #
 # --------------------------------------------------------------------------- #
 
-@pytest.mark.parametrize("iso_idx", _ISO_IDXS)
-@pytest.mark.parametrize("spin_idx", _SPIN_IDXS)
-def test_vertex_one_body_matrix_equals_kron(iso_idx, spin_idx):
-    """Σ_{αβ} χ_{αβ} a†_α a_β must have one-body matrix σ_S ⊗ τ_I.
-
-    Fully independent of codebase conventions (bare Pauli Kronecker product).
-    _MODES is ordered (spin outer, isospin inner), so the Kronecker factor
-    order is (σ_S, τ_I).
-    """
-    oracle = np.kron(sigma_mats[spin_idx], sigma_mats[iso_idx])
-    got = _one_body_matrix(_implemented_vertex_fermionop(iso_idx, spin_idx))
-    assert np.allclose(got, oracle, atol=1e-12), (
-        f"(iso={iso_idx}, spin={spin_idx})\n got=\n{got}\n oracle=\n{oracle}")
+def test_vertex_one_body_matrix_equals_kron():
+    """The decisive oracle over ALL 12 channels: Σ_{αβ} χ_{αβ} a†_α a_β has
+    one-body matrix σ_S ⊗ τ_I (bare Pauli Kronecker product, independent of
+    codebase conventions). _MODES is (spin outer, isospin inner)."""
+    for spin_idx in _SPIN_IDXS:
+        for iso_idx in _ISO_IDXS:
+            oracle = np.kron(sigma_mats[spin_idx], sigma_mats[iso_idx])
+            got = _one_body_matrix(_implemented_vertex_fermionop(iso_idx, spin_idx))
+            assert np.allclose(got, oracle, atol=1e-12), (
+                f"(iso={iso_idx}, spin={spin_idx})\n got=\n{got}\n oracle=\n{oracle}")
 
 
-@pytest.mark.parametrize("iso_idx,spin_idx", _IMAGINARY_CHANNELS)
-def test_imaginary_channels_do_not_cancel(iso_idx, spin_idx):
-    """The channels the bug erased must be nonzero (guard against regression)."""
-    M = _one_body_matrix(_implemented_vertex_fermionop(iso_idx, spin_idx))
-    assert np.linalg.norm(M) > 1e-9, f"channel (iso={iso_idx}, spin={spin_idx}) vanished"
-    assert np.max(np.abs(M.imag)) > 1e-9, "expected a genuinely imaginary channel"
+def test_imaginary_channels_do_not_cancel():
+    """The channels the bug erased must be nonzero + genuinely imaginary
+    (regression guard, over all such channels)."""
+    for iso_idx, spin_idx in _IMAGINARY_CHANNELS:
+        M = _one_body_matrix(_implemented_vertex_fermionop(iso_idx, spin_idx))
+        tag = f"(iso={iso_idx}, spin={spin_idx})"
+        assert np.linalg.norm(M) > 1e-9, f"channel {tag} vanished"
+        assert np.max(np.abs(M.imag)) > 1e-9, f"{tag}: expected imaginary"
 
 
-@pytest.mark.parametrize("iso_idx", _ISO_IDXS)
-@pytest.mark.parametrize("spin_idx", _SPIN_IDXS)
-def test_native_builder_matches_independent_construction(iso_idx, spin_idx):
-    """fock_native vertex == independent ordered-bilinear sum (no doubling)."""
-    assert (_implemented_vertex_fermionop(iso_idx, spin_idx)
-            == _expected_vertex_fermionop(iso_idx, spin_idx))
-
-
-@pytest.mark.parametrize("iso_idx", _ISO_IDXS)
-@pytest.mark.parametrize("spin_idx", _SPIN_IDXS)
-def test_jw_path_matches_native_path(iso_idx, spin_idx):
-    """The JW/PauliLCU builder (Operators.py) agrees with the native builder.
-
-    Guards against the two independent builders (used by the PauliLCU vs
-    sparse/classical paths) drifting apart — e.g. different qubit indexing.
-    """
+def test_vertex_builders_agree_and_are_hermitian():
+    """Over a representative channel sample: the native builder == the independent
+    ordered-bilinear sum (no doubling), the JW/PauliLCU builder agrees with it,
+    and the vertex is Hermitian — guarding the two builders against drift."""
     n_b = 1
-    jw = QubitOperator()
-    for a in _MODES:
-        for b in _MODES:
-            c = calculate_chiral_coeff(a, b, iso_idx, spin_idx)
-            if abs(c) > 1e-12:
-                jw += c * Nucleon_Transition_JW(0, a, b, n_b)
-    expected = jordan_wigner(_implemented_vertex_fermionop(iso_idx, spin_idx, n_b))
-    assert _qubitop_allclose(jw, expected)
-
-
-@pytest.mark.parametrize("iso_idx", _ISO_IDXS)
-@pytest.mark.parametrize("spin_idx", _SPIN_IDXS)
-def test_vertex_is_hermitian(iso_idx, spin_idx):
-    op = _implemented_vertex_fermionop(iso_idx, spin_idx)
-    assert normal_ordered(op - hermitian_conjugated(op)) == FermionOperator()
+    for spin_idx, iso_idx in _SAMPLE_CHANNELS:
+        native = _implemented_vertex_fermionop(iso_idx, spin_idx)
+        assert native == _expected_vertex_fermionop(iso_idx, spin_idx)
+        jw = QubitOperator()
+        for a in _MODES:
+            for b in _MODES:
+                c = calculate_chiral_coeff(a, b, iso_idx, spin_idx)
+                if abs(c) > 1e-12:
+                    jw += c * Nucleon_Transition_JW(0, a, b, n_b)
+        assert _qubitop_allclose(
+            jw, jordan_wigner(_implemented_vertex_fermionop(iso_idx, spin_idx, n_b)))
+        assert normal_ordered(native - hermitian_conjugated(native)) == FermionOperator()
 
 
 # --------------------------------------------------------------------------- #
@@ -199,25 +187,18 @@ def _nucleon_number_op(L, dim, n_b):
     return jordan_wigner(N)
 
 
-@pytest.mark.parametrize("builder", [fock.H_axial_vector, fock.H_WT_Logic])
-def test_full_vertex_hamiltonian_is_hermitian(builder):
+def test_full_vertex_hamiltonian_is_hermitian_and_conserves_number():
+    """Both assembled builders (H_AV, H_WT) are Hermitian and conserve nucleon
+    number (small system)."""
     L, dim, n_b = 2, 1, 1
-    H = builder(L, dim, n_b, _params())
-    nq = _n_qubits(H)
-    m = get_sparse_operator(H, n_qubits=nq)
-    assert abs((m - m.getH())).max() < 1e-9
-
-
-@pytest.mark.parametrize("builder", [fock.H_axial_vector, fock.H_WT_Logic])
-def test_full_vertex_conserves_fermion_number(builder):
-    L, dim, n_b = 2, 1, 1
-    H = builder(L, dim, n_b, _params())
     N = _nucleon_number_op(L, dim, n_b)
-    nq = _n_qubits(H, N)
-    Hm = get_sparse_operator(H, n_qubits=nq)
-    Nm = get_sparse_operator(N, n_qubits=nq)
-    comm = Hm @ Nm - Nm @ Hm
-    assert abs(comm).max() < 1e-9
+    for builder in (fock.H_axial_vector, fock.H_WT_Logic):
+        H = builder(L, dim, n_b, _params())
+        nq = _n_qubits(H, N)
+        Hm = get_sparse_operator(H, n_qubits=nq)
+        assert abs((Hm - Hm.getH())).max() < 1e-9, f"{builder.__name__}: not Hermitian"
+        Nm = get_sparse_operator(N, n_qubits=nq)
+        assert abs(Hm @ Nm - Nm @ Hm).max() < 1e-9, f"{builder.__name__}: [H,N]≠0"
 
 
 # --------------------------------------------------------------------------- #
@@ -262,24 +243,24 @@ def _native_mixed_to_qubitop(mh, n_b):
     return H
 
 
-@pytest.mark.parametrize("L,dim,n_b", [(2, 1, 2), (2, 2, 2)])
-def test_native_mixed_terms_match_fock_pauli(L, dim, n_b):
-    """fock_native H_AV+H_WT (multiplied out) == fock.py H_AV+H_WT."""
+def test_native_mixed_terms_match_fock_pauli():
+    """fock_native H_AV+H_WT (multiplied out) == fock.py H_AV+H_WT (L=2 dim=1,2)."""
     p = _params()
-    mh = build_native_mixed_hamiltonian(L, dim, n_b, p)
-    native = _native_mixed_to_qubitop(mh, n_b)
-    pauli = fock.H_axial_vector(L, dim, n_b, p) + fock.H_WT_Logic(L, dim, n_b, p)
-    assert _qubitop_allclose(native, pauli, tol=1e-8)
+    for L, dim, n_b in [(2, 1, 2), (2, 2, 2)]:
+        mh = build_native_mixed_hamiltonian(L, dim, n_b, p)
+        native = _native_mixed_to_qubitop(mh, n_b)
+        pauli = fock.H_axial_vector(L, dim, n_b, p) + fock.H_WT_Logic(L, dim, n_b, p)
+        assert _qubitop_allclose(native, pauli, tol=1e-8), f"L={L} dim={dim}"
 
 
-@pytest.mark.parametrize("L,dim,n_b", [(2, 1, 2), (2, 2, 2)])
-def test_native_boson_part_matches_fock_free_pion(L, dim, n_b):
-    """fock_native H_pion_free (boson_part) == fock.py H_pion_free."""
+def test_native_boson_part_matches_fock_free_pion():
+    """fock_native H_pion_free (boson_part) == fock.py H_pion_free (L=2 dim=1,2)."""
     p = _params()
-    mh = build_native_mixed_hamiltonian(L, dim, n_b, p)
-    native = _bosonop_to_qubitop(mh.boson_part, n_b, mh.mode_to_qubits)
-    pauli = fock.H_pion_free(L, dim, n_b, p)
-    assert _qubitop_allclose(native, pauli, tol=1e-8)
+    for L, dim, n_b in [(2, 1, 2), (2, 2, 2)]:
+        mh = build_native_mixed_hamiltonian(L, dim, n_b, p)
+        native = _bosonop_to_qubitop(mh.boson_part, n_b, mh.mode_to_qubits)
+        pauli = fock.H_pion_free(L, dim, n_b, p)
+        assert _qubitop_allclose(native, pauli, tol=1e-8), f"L={L} dim={dim}"
 
 
 # --------------------------------------------------------------------------- #

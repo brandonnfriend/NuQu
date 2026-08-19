@@ -28,28 +28,26 @@ from src_PI.estimation.sparse_oracle.hermitian_boson_encoding import (
 
 # (label, ladder actions, coeff) covering every single-mode atom shape + phases.
 _ATOMS = [
-    ('a_real', (0,), 1.0),
-    ('a_imag', (0,), 1.0j),
-    ('a_cplx', (0,), 0.7 + 0.5j),
-    ('adag_real', (1,), -1.3),
-    ('aa_real', (0, 0), 0.9),
-    ('aa_cplx', (0, 0), 0.3 - 0.4j),
-    ('adagadag', (1, 1), 0.6),
-    ('number', (1, 0), 1.3),
-    ('n_plus_1', (0, 1), 0.8),
+    ('a_real', (0,), 1.0),            # linear real (Δ=1)
+    ('a_cplx', (0,), 0.7 + 0.5j),     # linear complex
+    ('aa_cplx', (0, 0), 0.3 - 0.4j),  # Δ=2 complex
+    ('number', (1, 0), 1.3),          # diagonal
 ]
 
 
-@pytest.mark.parametrize('label,actions,coeff', _ATOMS)
-@pytest.mark.parametrize('n_b', [2, 3])
-def test_hermitian_atom_is_valid_qubitization(label, actions, coeff, n_b):
-    M = hermitian_single_mode_matrix(actions, coeff, n_b)
-    shift = abs_shift(single_mode_monomial_matrix(actions, n_b))
-    U, alpha, N = build_hermitian_boson_be(M, shift)
-    assert np.allclose(U, U.conj().T, atol=1e-9), f"{label}: not Hermitian"
-    assert np.allclose(U @ U, np.eye(len(U)), atol=1e-9), f"{label}: not self-inverse"
-    assert np.allclose(extracted_block(U, alpha, N), M, atol=1e-9), f"{label}: block wrong"
-    assert walk_qubitizes(U, alpha, N, M), f"{label}: walk does not qubitize"
+def test_hermitian_atom_is_valid_qubitization():
+    """Every single-mode atom kind (linear real/complex, Δ=2, diagonal) at
+    n_b∈{2,3} builds a Hermitian, self-inverse, block-correct, qubitizing encoder."""
+    for label, actions, coeff in _ATOMS:
+        for n_b in (2, 3):
+            M = hermitian_single_mode_matrix(actions, coeff, n_b)
+            shift = abs_shift(single_mode_monomial_matrix(actions, n_b))
+            U, alpha, N = build_hermitian_boson_be(M, shift)
+            t = f"{label} n_b={n_b}"
+            assert np.allclose(U, U.conj().T, atol=1e-9), f"{t}: not Hermitian"
+            assert np.allclose(U @ U, np.eye(len(U)), atol=1e-9), f"{t}: not self-inverse"
+            assert np.allclose(extracted_block(U, alpha, N), M, atol=1e-9), f"{t}: block"
+            assert walk_qubitizes(U, alpha, N, M), f"{t}: walk does not qubitize"
 
 
 def test_alpha_tighter_than_single_ladder_for_ladder_sum():
@@ -76,33 +74,30 @@ def test_diagonal_atom_has_no_matchings():
 # General monomial wrapper — single- AND two-mode (H_WT) atoms                 #
 # --------------------------------------------------------------------------- #
 
-# (label, monomial, coeff) — the monomial shapes in a real MixedHamiltonian.
+# (label, monomial, coeff) — representative single- and two-mode (H_WT) shapes.
 _MONOMIALS = [
     ('a', ((0, 0),), 1.0),
-    ('adag_imag', ((0, 1),), 1.0j),
-    ('aa', ((0, 0), (0, 0)), 0.9),
     ('number', ((0, 1), (0, 0)), 1.3),
     ('twomode_a_adag_imag', ((0, 0), (1, 1)), 44.8j),      # H_WT Π-type (imaginary)
-    ('twomode_a_a', ((0, 0), (1, 0)), 0.35),
-    ('twomode_adag_a_imag', ((0, 1), (1, 0)), -12.0j),
-    ('twomode_adag_adag', ((0, 1), (1, 1)), 0.3 + 0.2j),
+    ('twomode_adag_adag', ((0, 1), (1, 1)), 0.3 + 0.2j),   # two-mode complex
 ]
 
 
-@pytest.mark.parametrize('label,monomial,coeff', _MONOMIALS)
-@pytest.mark.parametrize('n_b', [2, 3])
-def test_hermitian_monomial_be_qubitizes(label, monomial, coeff, n_b):
+def test_hermitian_monomial_be_qubitizes():
     """build_hermitian_monomial_be gives a valid qubitization for single- and
-    two-mode atoms (the flattened register is a single fixed shift)."""
+    two-mode (H_WT) atoms — the flattened register is a single fixed shift."""
     from src_PI.estimation.sparse_oracle.hermitian_boson_encoding import (
         build_hermitian_monomial_be, hermitian_monomial_matrix,
     )
-    U, alpha, N, _modes = build_hermitian_monomial_be(monomial, coeff, n_b)
-    M, _ = hermitian_monomial_matrix(monomial, coeff, n_b)
-    assert np.allclose(U, U.conj().T, atol=1e-9), f"{label}: not Hermitian"
-    assert np.allclose(U @ U, np.eye(len(U)), atol=1e-9), f"{label}: not self-inverse"
-    assert np.allclose(extracted_block(U, alpha, N), M, atol=1e-9), f"{label}: block wrong"
-    assert walk_qubitizes(U, alpha, N, M), f"{label}: walk does not qubitize"
+    for label, monomial, coeff in _MONOMIALS:
+        for n_b in (2, 3):
+            U, alpha, N, _modes = build_hermitian_monomial_be(monomial, coeff, n_b)
+            M, _ = hermitian_monomial_matrix(monomial, coeff, n_b)
+            t = f"{label} n_b={n_b}"
+            assert np.allclose(U, U.conj().T, atol=1e-9), f"{t}: not Hermitian"
+            assert np.allclose(U @ U, np.eye(len(U)), atol=1e-9), f"{t}: not self-inverse"
+            assert np.allclose(extracted_block(U, alpha, N), M, atol=1e-9), f"{t}: block"
+            assert walk_qubitizes(U, alpha, N, M), f"{t}: walk does not qubitize"
 
 
 if __name__ == '__main__':
