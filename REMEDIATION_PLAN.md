@@ -22,9 +22,10 @@ core results on its own**; B, C1, C2 extend the claim set.
 ## Current status & handoff (2026-08-18)
 
 Commits on `remediation/vertex-fix` (newest first):
-`a4a38f9` C1 step 5 (Config switch+cache) · `47c662e` C1 step 4 (A/B) · `91ca3de` C1 step 3
-(full-bundle) · `fe7fdf5` C1 step 2 (fermion atom) · `524b1c8` C1 step 1 (boson monomial) ·
-`5ec99be`/`9bc2e7a` C1 design · `644d94f` C scoping + C3 anchor · `11beb50` B `tong_rigorous` ·
+`12cc43d` valid compiled Hermitian walk cost · `f26f105` Hermitian bundle (walk qubitizes) ·
+`5fdeaf2` two-mode Hermitian · `3c1a45f` single-mode Hermitian encoder · `be345bd` Hermitization
+spike · `0653ce3` walk-validity defect recorded · `a4a38f9`..`524b1c8` C1 steps 1–5 (first,
+non-Hermitian build) · `644d94f` C scoping + C3 anchor · `11beb50` B `tong_rigorous` ·
 `d532857` A3 + cross-builder tests · `9404fac` A vertex fix + oracle suite.
 
 | Workstream | State |
@@ -32,7 +33,7 @@ Commits on `remediation/vertex-fix` (newest first):
 | **A** — Hamiltonian correctness | ✅ **DONE.** Vertex fix (3 builders) + physics-oracle suite (`tests/test_vertex_algebra.py`: Kronecker oracle for all 12 σ⊗τ channels, cross-builder equivalence, `[H_WT,n̂_x]=0`) + `a_L**dim`. |
 | **B** — Rigorous cutoff | ✅ **CODE DONE.** `boson_cutoff_method='tong_rigorous'` (exact Bogoliubov tail + variational bound), `classical/trimci/gaussian_cutoff.py`, tests. Draft `claude/research/bosonic-encodings/05_*.md` — audited & **rescoped honestly** (2 rigorous results; 2 open gaps: bound `‖Vψ‖` via Gaussian moments, control `|δ_true−δ_Gauss|`). **For user + Codex proof review.** `'heuristic'` stays default. |
 | **C3** — PauliLCU anchor | ✅ **DONE.** Genuinely circuit-level on corrected H (L=2,dim=1,n_b=2 → Λ=3077, Walk_T=214724, 31 qubits, 1.3s). Small-L validation anchor; ceiling is QubitOperator memory. |
-| **C1** — compiled sparse RE | ⚠ **BLOCK ENCODING DONE; WALK HERMITIZATION PENDING.** `SparseFullBundleBlockEncoding` built (5 steps): the block encoding `α_tot·⟨0|U|0⟩ = H` and `α_tot` (= Λ) are **exact & validated** (α invariant to machine precision incl. fermion sector; heterogeneous toy assembly sim ~1e-15). **BUT** the quantum-algorithms review found the d=1 atoms make `U` non-Hermitian, so the single-reflection `QubitizedWalkOperator` is **not a valid qubitization** (walk spectrum lacks `e^{±i arccos(E/α)}` — confirmed, xfail regression test). The compiled `Walk_T` (0.89×/0.92× the proxy) is a **block-encoding-level estimate, not a genuine walk cost**, until the atoms are Hermitized (re-pair `c·m+c̄·m†`; fermion atoms already Hermitian; α_tot preserved). Also open: mixed-atom operator sim (α is phase-blind), control-overhead + junk undercounts. **See §C1 below — needs a Hermitization pass before it feeds a figure.** |
+| **C1** — compiled sparse RE | ✅ **VALID WALK DONE (Hermitian rebuild); cost polish remains.** The first build's single-reflection walk was invalid (non-Hermitian `U` — quantum-algorithms review; the defect ran deep, even `single_ladder` is non-Hermitian). **Rebuilt on a sparse-Hermitian encoder** (edge-coloured matching-dilation): `hermitian_boson_encoding.py` (single-/two-mode/multi-shift atoms, each **qubitizes**), `hermitian_bundle.py` (re-group into Hermitian atoms → Hermitian `U` → **walk qubitizes**, verified U=U†, U²=I, spectrum `e^{±i arccos(E/α)}` on boson + heterogeneous toys). **Valid compiled walk T = 240,460 (L=2 dim=1) / 1.45M (dim=3)** at n_b=2 (cf. PauliLCU ~215k) with a **~13% TIGHTER Λ** (3905 vs 4492) from edge-colouring. Mixed-atom operator sim now covered. **Remaining (secondary, documented):** wire the Hermitian bundle behind the `compiled` switch (retire the non-Hermitian path); quantify the uncontrolled-SELECT + junk-width undercounts. **See §C1 below.** |
 | **C2** — amplitude composed encoding | ⬜ scoped, not started (next large build). |
 | **C4** — runtime bands | ⬜ scoped, not started (medium). |
 | **D** — paper cleanup | ⬜ mostly parallel/low-compute; sign-problem writeup done (`docs/sign_problem.md`). |
@@ -58,17 +59,23 @@ than single_ladder (3.15 vs 3.46 at n_b=2 → tighter Λ). **Cost of Hermiticity
 boson SELECT (2 matchings × 2 amplitude oracles vs single_ladder's 1); fermion atoms unchanged;
 diagonal `n̂` cheap (diagonal dilation).
 
-**Decision pending (user):** with feasibility + bounded cost + tighter α established, either
-**(A) full sparse-Hermitian rebuild** — reimplement the boson encoders on the matching-dilation
-(single-mode `(â+â†)`-type, diagonal `n̂`, and the trickier two-mode H_WT Hermitization), re-pair
-atoms, flip `test_bundle_walk_qubitizes_hermitian_H` to pass, re-validate α invariant + toy sim +
-A/B (~1 session; main risk = two-mode H_WT) — or **(B) pivot** to PauliLCU as the sole *valid* walk
-cost + analytic PauliLCU scaling for L=10, demoting sparse to Λ + a labelled block-encoding-level
-estimate.
+**Decision (user, 2026-08-18): full sparse-Hermitian rebuild — DONE (core).** Built the
+matching-dilation Hermitian encoders + Hermitian bundle; the walk now qubitizes and the compiled
+cost is valid (numbers above). Sub-steps 1–3 complete (single-/two-mode/multi-shift Hermitian atoms;
+re-grouped Hermitian bundle; valid `estimate_hermitian_sparse_resources`). Mixed-atom operator sim
+covered by the Hermitian bundle sim.
 
-**Do NOT flip `sparse_oracle_mode` to `'compiled'`** until the walk is Hermitized. Analytical stays
-default. **Also open regardless of path:** mixed-atom operator sim (α is phase-blind), control-overhead
-+ junk undercounts.
+**Sub-step 4 (remaining polish, not blocking the valid number):**
+1. **Wire the Hermitian bundle behind the `compiled` `sparse_oracle_mode` switch** (in
+   `block_encoders/sparse.py`), retiring the non-Hermitian `SparseFullBundleBlockEncoding` /
+   `estimate_sparse_resources_compiled` as the compiled path (keep the analytical proxy as the A/B
+   baseline). Then the `test_bundle_walk_qubitizes_hermitian_H` xfail can be repointed to the
+   Hermitian bundle (→ pass) or the old bundle retired.
+2. **Quantify the residual undercounts** (documented, optimistic): per-atom SELECT charged
+   *uncontrolled* (the walk-T could rise once the unary-dispatch control is fully charged); the
+   `LogicalQubits` junk width is estimated. Fold a control-overhead error bar into the reported
+   number.
+3. Update the `compiled` docstrings + this plan to state the walk is now valid; refresh the A/B.
 
 **Then C2 — amplitude composed encoding** (real `H_pos+H_mom` + H_WT species-selective QFT, Watson
 Eqs. 102–104), **C4** (runtime bands), Phase 2/3 regeneration.
