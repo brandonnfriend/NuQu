@@ -161,6 +161,40 @@ def test_no_dense_matrixgate_at_counting_boundary():
     assert bad == 0, f"{bad} dense ≥2-qubit MatrixGate(s) at the counting boundary"
 
 
+# --------------------------------------------------------------------------- #
+# Gate 5 — production config integration                                      #
+# --------------------------------------------------------------------------- #
+
+
+def test_config_accepts_compiled_mode():
+    from src_PI.utils.Config import Config
+    c = Config(pion_basis='fock', block_encoder='sparse', sparse_oracle_mode='compiled')
+    assert c.sparse_oracle_mode == 'compiled'
+    assert Config.from_dict(c.to_dict()).sparse_oracle_mode == 'compiled'
+    with pytest.raises(ValueError):
+        Config(sparse_oracle_mode='nonsense')
+
+
+def test_sparse_strategy_dispatches_compiled():
+    """`sparse_oracle_mode='compiled'` routes SparseStrategy to the genuinely
+    compiled walk (compiler_derived=True), reporting a synthesized Walk_T and the
+    ΔE budget — the production config integration (gate 5)."""
+    from src_PI.hamiltonians.core.HamiltonianBundle import HamiltonianBundle
+    from src_PI.hamiltonians.core.SubHamiltonian import SubHamiltonian
+    from src_PI.estimation.block_encoders.sparse import SparseStrategy
+    from src_PI.utils.Config import Config
+
+    mh = _mh()                                            # native (fast; no static fermion)
+    sub = SubHamiltonian('fock', mh, algebra='fermion_boson')
+    bundle = HamiltonianBundle([sub], walk_mode='series')
+    cfg = Config(pion_basis='fock', block_encoder='sparse', sparse_oracle_mode='compiled')
+    out = SparseStrategy().estimate(bundle, 2, 2, cfg)
+    assert out['sparse_oracle_mode'] == 'compiled'
+    assert out['Walk_T_Count'] > 0
+    assert out['Sparse_Breakdown']['compiler_derived'] is True
+    assert 'budget' in out['Sparse_Breakdown']
+
+
 if __name__ == '__main__':
     import sys
     sys.exit(pytest.main([__file__, '-q']))

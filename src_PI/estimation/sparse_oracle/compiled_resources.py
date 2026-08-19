@@ -251,12 +251,12 @@ def _atom_cost(atom, n_b, budget):
 
     if atom.kind == 'fermion':
         enc = fermion_atom_encoding(atom.payload['fermion_op'])
-        return _traverse_bloq(enc, circ_prec), float(enc.alpha)
+        return _fermion_traverse(atom.payload['fermion_op'], circ_prec), float(enc.alpha)
 
     if atom.kind == 'mixed':
         # Gilyén product BE_F ⊗ (⊗_group BE_B): costs add, α = |c|·α_F·∏α_group.
         enc_F = fermion_atom_encoding(atom.payload['fermion_factor'])
-        cost = _traverse_bloq(enc_F, circ_prec)
+        cost = _fermion_traverse(atom.payload['fermion_factor'], circ_prec)
         alpha = abs(complex(atom.payload['coeff'])) * float(enc_F.alpha)
         for Mg, nb in zip(atom.payload['boson_group_mats'],
                           atom.payload['boson_group_bits']):
@@ -275,6 +275,22 @@ def _traverse_bloq(bloq, circuit_precision):
     if tc.rotations:
         t += get_T_counts_from_rotations(tc.rotations, circuit_precision=circuit_precision)
     return TComplexity(t=t, clifford=tc.clifford + (2 * tc.rotations if tc.rotations else 0))
+
+
+# The fermion PauliLCU t_complexity is the expensive leaf (many identical
+# χ-channel bilinears across the bundle). Cache on the JW pauli signature.
+_FERMION_TC_CACHE = {}
+
+
+def _fermion_traverse(fermion_op, circuit_precision):
+    """Cached rotation-synthesized cost of the fermion factor's PauliLCU encoding."""
+    from src_PI.estimation.sparse_oracle.fermion_atom import fermion_pauli_dict
+    pd = fermion_pauli_dict(fermion_op)
+    key = (frozenset((p, round(c, 12)) for p, c in pd.items()), round(circuit_precision, 15))
+    if key not in _FERMION_TC_CACHE:
+        _FERMION_TC_CACHE[key] = _traverse_bloq(
+            fermion_atom_encoding(fermion_op), circuit_precision)
+    return _FERMION_TC_CACHE[key]
 
 
 # --------------------------------------------------------------------------- #
@@ -321,10 +337,17 @@ def compiled_walk_resources(mh, n_b, num_sites, num_pion_species=3,
     flag_w = _flag_width(atoms, n_b)
     reflection = pylqt_t_complexity(QubitizedReflection(flag_w))
 
+    # Logical qubits: system (nucleon + pion registers) + reflected flag + a
+    # fermion PauliLCU ancilla + one alias-junk batch (~mu bits). An estimate,
+    # but honest (no register silently dropped).
+    w_sys = 4 * int(num_sites) + num_pion_species * int(num_sites) * n_b
+    logical_qubits = w_sys + flag_w + budget['alias_mu_bits'] + 4
+
     walk = 2 * prep_outer + dispatch + select + reflection
     return {
         'Walk_T_Count': int(walk.t),
         'Walk_Clifford_Count': int(walk.clifford),
+        'Logical_Qubits': int(logical_qubits),
         'Physical_Lambda': alpha_tot,
         'n_walk': budget['walk_queries'],
         'n_atoms': len(atoms),

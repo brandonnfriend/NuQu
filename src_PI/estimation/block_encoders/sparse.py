@@ -61,14 +61,40 @@ class SparseStrategy:
         physical_lambda = lam_data['physical_lambda']
         identity_shift = lam_data['identity_shift']
 
-        # 'analytical' (default, mixed-bound proxy) vs 'hermitian_cost_model'
-        # (the walk-VALID Hermitian matching-dilation construction, costed by a
-        # primitive-based COST MODEL — not a compiler-derived count; optimistic,
-        # omits controls/matching predicates/boundary/phase/precision budget).
-        # The earlier non-Hermitian SparseFullBundle path is retired.
+        # Modes (sparse_oracle_mode):
+        #   'analytical'           — mixed-bound Gilyén+LCU proxy (default, A/B baseline);
+        #   'hermitian_cost_model' — walk-valid Hermitian construction, hand-assembled
+        #                            cost (optimistic; omits synthesis/controls);
+        #   'compiled'             — GENUINELY compiled walk: every rotation synthesized
+        #                            to Clifford+T at the ΔE-derived precision, scalable
+        #                            primitives (AddK/alias/PauliLCU, no dense MatrixGate),
+        #                            full physical Hamiltonian incl. mixed atoms
+        #                            (compiled_resources; Codex follow-up 2026-08-19).
         mode = getattr(config, 'sparse_oracle_mode', 'analytical')
 
-        if mode == 'hermitian_cost_model':
+        if mode == 'compiled':
+            from src_PI.estimation.sparse_oracle.compiled_resources import (
+                compiled_walk_resources,
+            )
+            delta_E = float(getattr(config, 'extras', {}).get('delta_E_MeV', 1.0))
+            print("--- Sparse-oracle (COMPILED walk — rotations synthesized, ΔE-wired) ---")
+            print(f"-> Identity (classical) shift:   {identity_shift:.4e}")
+            res = compiled_walk_resources(mh, n_b, num_sites, delta_E=delta_E)
+            physical_lambda = res['Physical_Lambda']
+            bd = res['breakdown']
+            print(f"-> Physical Lambda (Hermitian, tighter): {physical_lambda:.4e}")
+            print(f"-> Atoms: {res['n_atoms']}   ΔE={delta_E} MeV   "
+                  f"circ_prec={res['budget']['circuit_precision']:.2e}")
+            print(f"-> Walk T (compiled, synthesized) = {res['Walk_T_Count']:.4e}  "
+                  f"(PREP {bd['prep_outer_T']}, dispatch {bd['dispatch_T']}, "
+                  f"SELECT {bd['select_T']}, reflection {bd['reflection_T']})")
+            print(f"-> Logical qubits = {res['Logical_Qubits']}")
+            walk_T = res['Walk_T_Count']
+            walk_Cl = res['Walk_Clifford_Count']
+            logical_q = res['Logical_Qubits']
+            breakdown = {'n_atoms': res['n_atoms'], 'compiled': True,
+                         'compiler_derived': True, 'budget': res['budget']}
+        elif mode == 'hermitian_cost_model':
             print("--- Sparse-oracle (Hermitian COST MODEL — not compiler-derived) ---")
             print(f"-> Identity (classical) shift:   {identity_shift:.4e}")
             res = estimate_hermitian_sparse_resources(mh, n_b, num_sites)

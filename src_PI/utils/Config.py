@@ -50,7 +50,7 @@ _VALID_WALK_MODES = ('series', 'parallel')
 _VALID_CUTOFF_METHODS = ('energy_bound', 'ns')
 _VALID_BOSON_CUTOFF_METHODS = ('heuristic', 'tong', 'tong_rigorous')
 _VALID_BLOCK_ENCODERS = ('pauli_lcu', 'sparse', 'lobe')
-_VALID_SPARSE_ORACLE_MODES = ('analytical', 'hermitian_cost_model')
+_VALID_SPARSE_ORACLE_MODES = ('analytical', 'hermitian_cost_model', 'compiled')
 
 
 @dataclass
@@ -71,8 +71,10 @@ class Config:
     block_encoder: str = 'pauli_lcu'
     # Sparse-oracle costing mode (only consulted for block_encoder='sparse').
     # 'analytical' = the mixed-bound Gilyén+LCU proxy (A/B baseline, default);
-    # 'hermitian_cost_model' = the walk-valid Hermitian construction costed by a
-    # primitive-based cost model (NOT compiler-derived; optimistic — see docstring).
+    # 'hermitian_cost_model' = walk-valid Hermitian construction, hand-assembled
+    # cost (optimistic); 'compiled' = genuinely compiled walk — every rotation
+    # synthesized to Clifford+T at the ΔE-derived precision, scalable primitives,
+    # full Hamiltonian incl. mixed atoms (compiled_resources).
     sparse_oracle_mode: str = 'analytical'
 
     # Free-form extras: anything the user wants to remember about the run
