@@ -51,16 +51,18 @@ _TOL = 1e-12
 
 
 def _edges_of_matching(M_k):
-    """Return `[(lo, hi, amplitude), ...]` for a 1-sparse Hermitian matching `M_k`.
+    """Return `[(lo, hi, magnitude, phase), ...]` for a 1-sparse Hermitian matching.
 
-    `lo < hi` are the coupled basis states; `amplitude = |M_k[hi, lo]|` (real,
-    non-negative — a boson matching has non-negative amplitudes)."""
+    `lo < hi` are the coupled basis states; `M_k[hi, lo] = magnitude·e^{i·phase}`
+    (H_WT's conjugate-momentum pieces give imaginary matchings, so the phase is
+    load-bearing)."""
     N = M_k.shape[0]
     edges = []
     for lo in range(N):
         for hi in range(lo + 1, N):
-            if abs(M_k[hi, lo]) > _TOL:
-                edges.append((lo, hi, abs(M_k[hi, lo])))
+            z = M_k[hi, lo]
+            if abs(z) > _TOL:
+                edges.append((lo, hi, abs(z), float(np.angle(z))))
     return edges
 
 
@@ -104,16 +106,27 @@ def _aligned_ops(b_dil, sys_qubits, M_k, alpha, j):
         if (lo >> j) & 1:                           # only lower endpoints (bit j = 0)
             continue
         hi = lo | shift
-        a = abs(M_k[hi, lo]) / alpha                # 0 for unmatched pairs → X_b
+        z = M_k[hi, lo]
+        a = abs(z) / alpha                          # 0 for unmatched pairs → X_b
+        psi = float(np.angle(z)) if abs(z) > _TOL else 0.0
         ctrl_vals = [(lo >> k) & 1 for k in range(n_b) if k != j]
-        for op in _g_ops(q, b_dil, a):
+        # complex amplitude v·e^{iψ}: the edge block must be (v/α)(cosψ·X+sinψ·Y),
+        # i.e. the unitary Rz(ψ)_q·G(a)·Rz(−ψ)_q. cirq applies ops first→last, so
+        # emit Rz(−ψ), then G(a), then Rz(+ψ).
+        edge_ops = []
+        if abs(psi) > _TOL:
+            edge_ops.append(cirq.rz(-psi).on(q))
+        edge_ops.extend(_g_ops(q, b_dil, a))
+        if abs(psi) > _TOL:
+            edge_ops.append(cirq.rz(psi).on(q))
+        for op in edge_ops:
             yield op.controlled_by(*other, control_values=ctrl_vals) if other else op
 
 
 def _is_aligned(M_k, shift):
     """True iff every edge's lower endpoint has bit `log2(shift)` = 0."""
     j = int(round(math.log2(shift)))
-    return all(not ((lo >> j) & 1) for lo, _hi, _v in _edges_of_matching(M_k))
+    return all(not ((lo >> j) & 1) for lo, *_rest in _edges_of_matching(M_k))
 
 
 def _cyclic_shift_gate(k, n_b):

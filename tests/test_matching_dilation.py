@@ -34,24 +34,30 @@ from src_PI.estimation.sparse_oracle.matching_dilation import (
 )
 
 
+_ATOMS = {
+    # kind: (ladder actions, coeff, Δ)
+    'ladder': ((0,), 1.0, 1),                 # â+â†  (real, Δ=1)
+    'ladder_imag': ((0,), 1.0j, 1),           # i(â−â†)  (imaginary — H_WT Π-type)
+    'ladder_cplx': ((0,), 0.7 + 0.5j, 1),     # general complex, Δ=1
+    'squared': ((0, 0), 1.0, 2),              # â²+â†²  (real, Δ=2)
+    'squared_imag': ((0, 0), 1.0j, 2),        # imaginary, Δ=2
+}
+
+
 def _atom(kind, n_b):
-    """Return (M, shift). 'ladder' = â+â† (Δ=1); 'squared' = â²+â†² (Δ=2)."""
-    if kind == 'ladder':
-        M = (hermitian_single_mode_matrix((0,), 1.0, n_b)
-             + hermitian_single_mode_matrix((1,), 0.0, n_b))
-        return M, 1
-    M = (hermitian_single_mode_matrix((0, 0), 1.0, n_b)
-         + hermitian_single_mode_matrix((1, 1), 0.0, n_b))
-    return M, 2
+    """Return (M, shift) for the named single-mode Hermitian atom `c·m + c̄·m†`."""
+    actions, coeff, shift = _ATOMS[kind]
+    M = hermitian_single_mode_matrix(actions, coeff, n_b)
+    return M, shift
 
 
-@pytest.mark.parametrize('kind,n_b', [('ladder', 2), ('ladder', 3),
-                                      ('ladder', 4), ('squared', 3), ('squared', 4)])
+@pytest.mark.parametrize('kind', list(_ATOMS))
+@pytest.mark.parametrize('n_b', [2, 3, 4])
 @pytest.mark.parametrize('m_idx', [0, 1])
 def test_matching_dilation_is_compiled_and_correct(kind, n_b, m_idx):
     """BOTH edge-colours (aligned component 0 AND misaligned component 1, the
     latter via shift-conjugation) decompose and their extracted matrix equals the
-    dense dilation exactly, incl. unmatched/boundary states."""
+    dense dilation exactly — incl. unmatched/boundary states and complex phases."""
     M, shift = _atom(kind, n_b)
     _diag, matchings = _split_into_components(M)
     if m_idx >= len(matchings):
