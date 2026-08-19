@@ -2,6 +2,17 @@
 
 Deep context for the NuQu project. Loaded on demand (not every conversation). For standing rules and commands, see `CLAUDE.md`.
 
+## ⛔ RETIRED DATA — all pre-vertex-fix data is inadmissible (2026-08-18)
+
+**Every result generated before the nucleon spin-isospin vertex fix (commit `9404fac`, 2026-08-18)
+is RETIRED and must NOT feed any plot, table, or paper number.** A vertex bug doubled the real
+channels and cancelled the imaginary τ_y / σ_y·τ_y channels to zero, corrupting *everything touching
+H_AV or H_WT* — all classical energies/frames/binding, all λ/T-count/runtime, all cutoff studies.
+The static-only sector was clean, but no dynamical-coupling result survives. **When making plots
+with Codex or me: use ONLY data regenerated on/after the Phase-R runs** (corrected H, manifest-
+versioned). See `REMEDIATION_PLAN.md` (paper-first, reframed 2026-08-19) and
+`data/00_RETIRED_PRE_VERTEX_FIX.md`. If a data file predates 2026-08-18, treat it as inadmissible.
+
 ## The reference paper
 - Watson, Bringewatt, Shaw, Childs, Gorshkov, Davoudi, *"Quantum Algorithms for Simulating Nuclear Effective Field Theories"* — arXiv:2312.05344 (2023/2025). Local PDF at `claude/Watson2025.pdf`.
 - Watson et al. estimate fault-tolerant resources for several nuclear EFTs (pionless, one-pion-exchange / static-pion, dynamical-pion) using **Trotterization** for `e^{iHt}`. Pionless is cheapest; **dynamical pion is by far the most expensive**, and that is the regime this project targets.
