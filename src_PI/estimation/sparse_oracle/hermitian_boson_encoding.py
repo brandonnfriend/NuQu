@@ -122,27 +122,35 @@ def abs_shift(matrix):
 # --------------------------------------------------------------------------- #
 
 
-def _split_into_components(M, shift):
+def _split_into_components(M, shift=None):
     """Decompose Hermitian `M` into (diagonal_vector, [matching matrices]).
 
-    The ±`shift` off-diagonal graph (a union of paths within each residue class
-    mod shift) is edge-2-coloured by `(n // shift) mod 2`, giving ≤2 disjoint
-    Hermitian matchings. `shift == 0` ⇒ no matchings (pure diagonal).
-    """
+    Handles **any** fixed-structure Hermitian matrix (any set of off-diagonal
+    shifts). For each shift value `s>0` present, the ±s off-diagonal graph (a
+    union of paths within each residue class mod s) is edge-2-coloured by
+    `(n // s) mod 2` into ≤2 disjoint Hermitian matchings; every matching has a
+    *diagonal* square, so its dilation is sparse. Diagonal entries collect into
+    `diagonal_vector`. `shift` may be passed to assert a single expected shift
+    (else all shifts are auto-detected)."""
     N = M.shape[0]
     diag = np.real(np.diag(M)).copy()
-    if shift == 0:
-        return diag, []
-    Ma = np.zeros((N, N), dtype=complex)
-    Mb = np.zeros((N, N), dtype=complex)
-    for n in range(N - shift):
-        val = M[n + shift, n]                       # sub-diagonal (row>col)
-        if abs(val) <= _TOL:
-            continue
-        target = Ma if (n // shift) % 2 == 0 else Mb
-        target[n + shift, n] = val
-        target[n, n + shift] = np.conj(val)         # keep each matching Hermitian
-    matchings = [X for X in (Ma, Mb) if np.abs(X).max() > _TOL]
+    if shift is not None:
+        shifts = [] if shift == 0 else [shift]
+    else:
+        shifts = sorted({int(r - c) for r, c in np.argwhere(np.abs(M) > _TOL)
+                         if r > c})
+    matchings = []
+    for s in shifts:
+        Ma = np.zeros((N, N), dtype=complex)
+        Mb = np.zeros((N, N), dtype=complex)
+        for n in range(N - s):
+            val = M[n + s, n]                       # sub-diagonal (row>col)
+            if abs(val) <= _TOL:
+                continue
+            target = Ma if (n // s) % 2 == 0 else Mb
+            target[n + s, n] = val
+            target[n, n + s] = np.conj(val)         # keep each matching Hermitian
+        matchings.extend(X for X in (Ma, Mb) if np.abs(X).max() > _TOL)
     return diag, matchings
 
 
@@ -161,12 +169,13 @@ def _diag_matrix(diag_vec):
     return np.diag(diag_vec.astype(complex))
 
 
-def build_hermitian_boson_be(M, shift):
-    """Build the sparse-Hermitian block encoding of fixed-shift Hermitian `M`.
+def build_hermitian_boson_be(M, shift=None):
+    """Build the sparse-Hermitian block encoding of fixed-structure Hermitian `M`.
 
     Returns `(U, alpha_tot, N)` where `U` (on `flag = LCU-select ⊕ dilation
     ancilla`, then the `N`-dim system) satisfies `α_tot·⟨0|_flag U |0⟩_flag = M`,
-    `U = U†`, `U² = I`. `N = M.shape[0]`.
+    `U = U†`, `U² = I`. `N = M.shape[0]`. Handles any set of off-diagonal shifts
+    (single monomial-pair or a whole mode-set group).
     """
     N = M.shape[0]
     diag, matchings = _split_into_components(M, shift)
