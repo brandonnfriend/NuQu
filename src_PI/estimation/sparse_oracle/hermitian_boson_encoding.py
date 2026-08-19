@@ -46,6 +46,7 @@ conditional shifts, all Qualtran bloqs).
 import numpy as np
 
 from src_PI.estimation.sparse_oracle.boson_monomial_encoding import (
+    monomial_mode_groups,
     single_mode_monomial_matrix,
 )
 
@@ -66,6 +67,42 @@ def hermitian_single_mode_matrix(actions, coeff, n_b):
     m = single_mode_monomial_matrix(actions, n_b).astype(complex)
     c = complex(coeff)
     return c * m + np.conj(c) * m.conj().T
+
+
+def monomial_flat_matrix(monomial, n_b):
+    """Flattened matrix of a (multi-mode) boson monomial on the touched modes.
+
+    Modes are laid out in sorted order with the first (lowest-index) mode as the
+    MSB — the index is `Σ_k n_{mode_k}·N_f^(K−1−k)`, matching the reference
+    layout in `boson_monomial_encoding.monomial_reference_matrix`. Returns
+    `(prod, sorted_modes)`."""
+    prod = np.array([[1.0 + 0j]])
+    modes = []
+    for mode, actions in monomial_mode_groups(monomial):
+        prod = np.kron(prod, single_mode_monomial_matrix(actions, n_b))
+        modes.append(mode)
+    return prod.astype(complex), modes
+
+
+def hermitian_monomial_matrix(monomial, coeff, n_b):
+    """`M = c·prod + c̄·prod†` for a general boson monomial (Hermitian).
+
+    Handles single-mode (`â`, `n̂`) and multi-mode (H_WT `â_b â_c†`) alike — on
+    the flattened touched-mode register the monomial is a single fixed shift, so
+    `build_hermitian_boson_be(M, abs_shift(M))` gives a valid qubitization iterate.
+    Returns `(M, sorted_modes)`."""
+    prod, modes = monomial_flat_matrix(monomial, n_b)
+    c = complex(coeff)
+    return c * prod + np.conj(c) * prod.conj().T, modes
+
+
+def build_hermitian_monomial_be(monomial, coeff, n_b):
+    """Sparse-Hermitian block encoding of `c·monomial + c̄·monomial†`.
+
+    Returns `(U, alpha_tot, N, sorted_modes)`; `N = N_f^(#touched modes)`."""
+    M, modes = hermitian_monomial_matrix(monomial, coeff, n_b)
+    U, alpha, N = build_hermitian_boson_be(M, abs_shift(M))
+    return U, alpha, N, modes
 
 
 def abs_shift(matrix):

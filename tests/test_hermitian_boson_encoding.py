@@ -72,6 +72,39 @@ def test_diagonal_atom_has_no_matchings():
     assert np.abs(diag).max() > 0
 
 
+# --------------------------------------------------------------------------- #
+# General monomial wrapper — single- AND two-mode (H_WT) atoms                 #
+# --------------------------------------------------------------------------- #
+
+# (label, monomial, coeff) — the monomial shapes in a real MixedHamiltonian.
+_MONOMIALS = [
+    ('a', ((0, 0),), 1.0),
+    ('adag_imag', ((0, 1),), 1.0j),
+    ('aa', ((0, 0), (0, 0)), 0.9),
+    ('number', ((0, 1), (0, 0)), 1.3),
+    ('twomode_a_adag_imag', ((0, 0), (1, 1)), 44.8j),      # H_WT Π-type (imaginary)
+    ('twomode_a_a', ((0, 0), (1, 0)), 0.35),
+    ('twomode_adag_a_imag', ((0, 1), (1, 0)), -12.0j),
+    ('twomode_adag_adag', ((0, 1), (1, 1)), 0.3 + 0.2j),
+]
+
+
+@pytest.mark.parametrize('label,monomial,coeff', _MONOMIALS)
+@pytest.mark.parametrize('n_b', [2, 3])
+def test_hermitian_monomial_be_qubitizes(label, monomial, coeff, n_b):
+    """build_hermitian_monomial_be gives a valid qubitization for single- and
+    two-mode atoms (the flattened register is a single fixed shift)."""
+    from src_PI.estimation.sparse_oracle.hermitian_boson_encoding import (
+        build_hermitian_monomial_be, hermitian_monomial_matrix,
+    )
+    U, alpha, N, _modes = build_hermitian_monomial_be(monomial, coeff, n_b)
+    M, _ = hermitian_monomial_matrix(monomial, coeff, n_b)
+    assert np.allclose(U, U.conj().T, atol=1e-9), f"{label}: not Hermitian"
+    assert np.allclose(U @ U, np.eye(len(U)), atol=1e-9), f"{label}: not self-inverse"
+    assert np.allclose(extracted_block(U, alpha, N), M, atol=1e-9), f"{label}: block wrong"
+    assert walk_qubitizes(U, alpha, N, M), f"{label}: walk does not qubitize"
+
+
 if __name__ == '__main__':
     import sys
     sys.exit(pytest.main([__file__, '-q']))
