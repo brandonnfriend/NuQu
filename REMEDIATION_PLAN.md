@@ -22,18 +22,18 @@ core results on its own**; B, C1, C2 extend the claim set.
 ## Current status & handoff (2026-08-18)
 
 Commits on `remediation/vertex-fix` (newest first):
-`12cc43d` valid compiled Hermitian walk cost · `f26f105` Hermitian bundle (walk qubitizes) ·
-`5fdeaf2` two-mode Hermitian · `3c1a45f` single-mode Hermitian encoder · `be345bd` Hermitization
-spike · `0653ce3` walk-validity defect recorded · `a4a38f9`..`524b1c8` C1 steps 1–5 (first,
-non-Hermitian build) · `644d94f` C scoping + C3 anchor · `11beb50` B `tong_rigorous` ·
-`d532857` A3 + cross-builder tests · `9404fac` A vertex fix + oracle suite.
+`f1a6bd2` wire `compiled`→Hermitian (sub-step 4) · `12cc43d` valid compiled Hermitian walk cost ·
+`f26f105` Hermitian bundle (walk qubitizes) · `5fdeaf2` two-mode Hermitian · `3c1a45f` single-mode
+Hermitian encoder · `be345bd` Hermitization spike · `0653ce3` walk-validity defect recorded ·
+`a4a38f9`..`524b1c8` C1 steps 1–5 (first, non-Hermitian build) · `644d94f` C scoping + C3 anchor ·
+`11beb50` B `tong_rigorous` · `d532857` A3 + cross-builder tests · `9404fac` A vertex fix + oracle suite.
 
 | Workstream | State |
 |---|---|
 | **A** — Hamiltonian correctness | ✅ **DONE.** Vertex fix (3 builders) + physics-oracle suite (`tests/test_vertex_algebra.py`: Kronecker oracle for all 12 σ⊗τ channels, cross-builder equivalence, `[H_WT,n̂_x]=0`) + `a_L**dim`. |
 | **B** — Rigorous cutoff | ✅ **CODE DONE.** `boson_cutoff_method='tong_rigorous'` (exact Bogoliubov tail + variational bound), `classical/trimci/gaussian_cutoff.py`, tests. Draft `claude/research/bosonic-encodings/05_*.md` — audited & **rescoped honestly** (2 rigorous results; 2 open gaps: bound `‖Vψ‖` via Gaussian moments, control `|δ_true−δ_Gauss|`). **For user + Codex proof review.** `'heuristic'` stays default. |
 | **C3** — PauliLCU anchor | ✅ **DONE.** Genuinely circuit-level on corrected H (L=2,dim=1,n_b=2 → Λ=3077, Walk_T=214724, 31 qubits, 1.3s). Small-L validation anchor; ceiling is QubitOperator memory. |
-| **C1** — compiled sparse RE | ✅ **VALID WALK DONE (Hermitian rebuild); cost polish remains.** The first build's single-reflection walk was invalid (non-Hermitian `U` — quantum-algorithms review; the defect ran deep, even `single_ladder` is non-Hermitian). **Rebuilt on a sparse-Hermitian encoder** (edge-coloured matching-dilation): `hermitian_boson_encoding.py` (single-/two-mode/multi-shift atoms, each **qubitizes**), `hermitian_bundle.py` (re-group into Hermitian atoms → Hermitian `U` → **walk qubitizes**, verified U=U†, U²=I, spectrum `e^{±i arccos(E/α)}` on boson + heterogeneous toys). **Valid compiled walk T = 240,460 (L=2 dim=1) / 1.45M (dim=3)** at n_b=2 (cf. PauliLCU ~215k) with a **~13% TIGHTER Λ** (3905 vs 4492) from edge-colouring. Mixed-atom operator sim now covered. **Remaining (secondary, documented):** wire the Hermitian bundle behind the `compiled` switch (retire the non-Hermitian path); quantify the uncontrolled-SELECT + junk-width undercounts. **See §C1 below.** |
+| **C1** — compiled sparse RE | ✅ **DONE — valid, wired.** The first build's single-reflection walk was invalid (non-Hermitian `U` — quantum-algorithms review; the defect ran deep, even `single_ladder` is non-Hermitian). **Rebuilt on a sparse-Hermitian encoder** (edge-coloured matching-dilation): `hermitian_boson_encoding.py` (single-/two-mode/multi-shift atoms, each **qubitizes**), `hermitian_bundle.py` (re-group into Hermitian atoms → Hermitian `U` → **walk qubitizes**: U=U†, U²=I, spectrum `e^{±i arccos(E/α)}` verified on boson + heterogeneous toys). **Valid compiled walk (full pipeline, incl. static nucleon): Walk_T = 253,908 @ L=2 dim=1** (cf. PauliLCU ~215k, analytical proxy 439k) with a **~13% TIGHTER Λ** (4471 vs 5058), 0.8 s. Wired behind `sparse_oracle_mode='compiled'`; non-Hermitian path retired. LogicalQubits includes a junk register; uncontrolled-SELECT caveat documented (walk-T rotation-dominated → sub-dominant). Mixed-atom operator sim covered. **Analytical stays the default; flipping to `'compiled'` is now a valid one-liner.** |
 | **C2** — amplitude composed encoding | ⬜ scoped, not started (next large build). |
 | **C4** — runtime bands | ⬜ scoped, not started (medium). |
 | **D** — paper cleanup | ⬜ mostly parallel/low-compute; sign-problem writeup done (`docs/sign_problem.md`). |
@@ -59,26 +59,24 @@ than single_ladder (3.15 vs 3.46 at n_b=2 → tighter Λ). **Cost of Hermiticity
 boson SELECT (2 matchings × 2 amplitude oracles vs single_ladder's 1); fermion atoms unchanged;
 diagonal `n̂` cheap (diagonal dilation).
 
-**Decision (user, 2026-08-18): full sparse-Hermitian rebuild — DONE (core).** Built the
-matching-dilation Hermitian encoders + Hermitian bundle; the walk now qubitizes and the compiled
-cost is valid (numbers above). Sub-steps 1–3 complete (single-/two-mode/multi-shift Hermitian atoms;
-re-grouped Hermitian bundle; valid `estimate_hermitian_sparse_resources`). Mixed-atom operator sim
-covered by the Hermitian bundle sim.
+**Decision (user, 2026-08-18): full sparse-Hermitian rebuild — ✅ DONE (all 4 sub-steps).**
+Matching-dilation Hermitian encoders (single-/two-mode/multi-shift) + Hermitian bundle; walk
+qubitizes; valid compiled cost; wired behind the `compiled` switch (non-Hermitian path retired);
+LogicalQubits junk declared; control-overhead caveat documented; lazy-dense so the cost path scales
+(a cross-site nucleon bilinear's JW spans the interleaved register → dense blows up — built only for
+tiny-toy sims). Full Hermitian + sparse suite green.
 
-**Sub-step 4 (remaining polish, not blocking the valid number):**
-1. **Wire the Hermitian bundle behind the `compiled` `sparse_oracle_mode` switch** (in
-   `block_encoders/sparse.py`), retiring the non-Hermitian `SparseFullBundleBlockEncoding` /
-   `estimate_sparse_resources_compiled` as the compiled path (keep the analytical proxy as the A/B
-   baseline). Then the `test_bundle_walk_qubitizes_hermitian_H` xfail can be repointed to the
-   Hermitian bundle (→ pass) or the old bundle retired.
-2. **Quantify the residual undercounts** (documented, optimistic): per-atom SELECT charged
-   *uncontrolled* (the walk-T could rise once the unary-dispatch control is fully charged); the
-   `LogicalQubits` junk width is estimated. Fold a control-overhead error bar into the reported
-   number.
-3. Update the `compiled` docstrings + this plan to state the walk is now valid; refresh the A/B.
+**C1 is complete.** The one remaining *optional* cleanup: repoint or retire the
+`test_bundle_walk_qubitizes_hermitian_H` xfail (it still marks the retired non-Hermitian bundle) and
+the retired `estimate_sparse_resources_compiled` / `compiled_vs_analytical` in `resources.py` (kept,
+docstring-labelled non-Hermitian/invalid). Not blocking.
 
-**Then C2 — amplitude composed encoding** (real `H_pos+H_mom` + H_WT species-selective QFT, Watson
+**Next: C2 — amplitude composed encoding** (real `H_pos+H_mom` + H_WT species-selective QFT, Watson
 Eqs. 102–104), **C4** (runtime bands), Phase 2/3 regeneration.
+
+**Note for C2 (learned from C1):** whatever walk pyLIQTR wraps needs a **Hermitian** block encoding —
+verify the amplitude-basis encoder's `U=U†` and that `W=(2Π−I)U` has the qubitization spectrum
+`e^{±i arccos(E/α)}` (the `walk_qubitizes` check in `hermitian_boson_encoding` / the tests is reusable).
 
 **Guardrails (unchanged):** env pinned pyLIQTR 1.3.4 / Qualtran 0.4.0; comparison-switch discipline;
 no heavy local compute. The B proof gaps are the user's/Codex's to review.
