@@ -29,12 +29,15 @@ has the closed rotation form
 so it is a Clifford-framed single-parameter rotation — the angle `φ_edge` is the
 only Hamiltonian-dependent datum (QROM-loadable in the cost-optimised form).
 
-Status: this is the **base case** — single-mode, Δ a power of two, real
-amplitudes, one matching. It decomposes to elementary gates (no
-`DecomposeNotImplementedError`) and its extracted matrix == the dense dilation.
-Generalisation (multi-shift, two-mode/non-power-of-two Δ, complex phase, the
-inner-LCU over components, and the QROM-multiplexed cost form) + the bundle
-composite + a precision budget are the remaining P0 work.
+Status: the **single-mode atom is complete** — aligned + misaligned edge-colours
+(the latter via ±Δ shift-conjugation), unmatched/boundary states, complex phases,
+diagonal components, and the inner LCU that combines them (`atom_dilation_ops`)
+into a full block encoding of the atom matrix `M`. Every piece decomposes to
+elementary gates (no `DecomposeNotImplementedError`); the extracted matrices
+match the dense references and the full atom **qubitizes**. Remaining P0 work:
+two-mode / non-power-of-two Δ, the QROM-multiplexed **cost** form (the per-edge
+control here is O(N), the cost-optimised form is O(log N)), the outer bundle
+composite (P0-2), and a precision/error budget (P0-4).
 """
 
 import math
@@ -177,3 +180,108 @@ def extract_matching_dilation(M_k, alpha, shift, n_b):
 def dense_matching_dilation(M_k, alpha):
     """Reference dense dilation `[[A, S],[S, −A]]` (b_dil outer)."""
     return _dilation(M_k, alpha)
+
+
+# --------------------------------------------------------------------------- #
+# Diagonal component + full-atom inner LCU                                     #
+# --------------------------------------------------------------------------- #
+
+
+def diagonal_dilation_ops(b_dil, sys_qubits, diag, alpha):
+    """Yield the decomposable dilation of a real diagonal component `diag`.
+
+    The dilation `[[D/α, √(I−D²/α²)],[√, −D/α]]` is block-diagonal in the Fock
+    basis: on state `n` it is the single-qubit reflection `[[c,s],[s,−c]]` on
+    `b_dil`, `c=diag[n]/α`, `s=√(1−c²)` — a multiplexed single-qubit gate."""
+    n_b = len(sys_qubits)
+    for n in range(1 << n_b):
+        c = float(np.real(diag[n])) / alpha
+        s = math.sqrt(max(0.0, 1.0 - c * c))
+        refl = cirq.MatrixGate(np.array([[c, s], [s, -c]], dtype=complex),
+                               name='Dref')
+        ctrl = [(n >> (n_b - 1 - k)) & 1 for k in range(n_b)]
+        yield refl.on(b_dil).controlled_by(*sys_qubits, control_values=ctrl)
+
+
+def _prep_gate(weights):
+    """MatrixGate mapping |0⟩ → Σ_k √(w_k/Σw)|k⟩ on ceil(log2 len) qubits."""
+    import numpy as _np
+    n = len(weights)
+    b = max(1, int(math.ceil(math.log2(max(1, n)))))
+    dim = 1 << b
+    v = _np.zeros(dim)
+    v[:n] = _np.sqrt(_np.asarray(weights, float) / float(sum(weights)))
+    # Householder |0>->v
+    e0 = _np.zeros(dim); e0[0] = 1.0
+    u = e0 - v
+    nu = _np.linalg.norm(u)
+    P = _np.eye(dim) if nu < _TOL else _np.eye(dim) - 2.0 * _np.outer(u / nu, u / nu)
+    return cirq.MatrixGate(P.astype(complex), name='iPREP'), b
+
+
+def atom_dilation_ops(inner_sel, b_dil, sys_qubits, M, shift_of=None):
+    """Yield the decomposable block encoding of a full Hermitian single-mode atom.
+
+    `M` is the atom matrix (diagonal + one/two fixed-shift off-diagonals). It is
+    split into components (diagonal + matchings), each block-encoded by its
+    Hermitian self-inverse dilation, and combined by an inner Hermitian LCU:
+    `PREP · SELECT(components) · PREP†` over `inner_sel`. `inner_sel` is the
+    inner-LCU select register (`ceil(log2 #components)` qubits); `b_dil` the
+    shared 1-qubit dilation ancilla.
+
+    `α_atom·⟨0|_{inner_sel,b_dil} U |0⟩ = M`, α_atom = Σ_component α, and `U`
+    is Hermitian + self-inverse (the atom qubitizes)."""
+    from src_PI.estimation.sparse_oracle.hermitian_boson_encoding import (
+        _split_into_components,
+    )
+    diag, matchings = _split_into_components(M)
+    N = M.shape[0]
+    # component list: (kind, data, alpha)
+    comps = []
+    if np.abs(diag).max() > _TOL:
+        comps.append(('diag', diag, float(np.abs(diag).max())))
+    for Mk in matchings:
+        a = float(np.abs(Mk).max())
+        sh = abs_shift_of(Mk)
+        comps.append(('match', (Mk, sh), a))
+    weights = [c[2] for c in comps]
+    prep, b_sel = _prep_gate(weights)
+    sel = list(inner_sel)
+    assert len(sel) == b_sel, f"inner_sel needs {b_sel} qubits"
+
+    yield prep.on(*sel)
+    for k, (kind, data, a) in enumerate(comps):
+        cvals = [(k >> (b_sel - 1 - i)) & 1 for i in range(b_sel)]
+        if kind == 'diag':
+            comp_ops = diagonal_dilation_ops(b_dil, sys_qubits, data, a)
+        else:
+            Mk, sh = data
+            comp_ops = matching_dilation_ops(b_dil, sys_qubits, Mk, a, sh)
+        for op in comp_ops:
+            yield op.controlled_by(*sel, control_values=cvals) if sel else op
+    yield cirq.inverse(prep).on(*sel)
+
+
+def abs_shift_of(M_k):
+    """|shift| of a 1-sparse matching matrix."""
+    nz = np.argwhere(np.abs(M_k) > _TOL)
+    return abs(int(nz[0][0] - nz[0][1])) if len(nz) else 1
+
+
+def extract_atom_dilation(M, n_b):
+    """Build the full-atom block encoding on named qubits; return `(U, α, block)`."""
+    from src_PI.estimation.sparse_oracle.hermitian_boson_encoding import (
+        _split_into_components,
+    )
+    diag, matchings = _split_into_components(M)
+    n_comp = (1 if np.abs(diag).max() > _TOL else 0) + len(matchings)
+    b_sel = max(1, int(math.ceil(math.log2(max(1, n_comp)))))
+    alpha = (float(np.abs(diag).max()) if np.abs(diag).max() > _TOL else 0.0) \
+        + sum(float(np.abs(Mk).max()) for Mk in matchings)
+    sel = [cirq.NamedQubit(f'isel{i}') for i in range(b_sel)]
+    b_dil = cirq.NamedQubit('b_dil')
+    sysq = [cirq.NamedQubit(f's{i}') for i in range(n_b)]
+    circ = cirq.Circuit(atom_dilation_ops(sel, b_dil, sysq, M))
+    U = circ.unitary(qubit_order=[*sel, b_dil, *sysq])
+    N = 1 << n_b
+    return U, alpha, U[:N, :N] * alpha

@@ -112,3 +112,41 @@ def test_misaligned_matching_uses_shift_conjugation():
 if __name__ == '__main__':
     import sys
     sys.exit(pytest.main([__file__, '-q']))
+
+
+# --------------------------------------------------------------------------- #
+# Full single-mode atom (inner LCU over diagonal + matchings)                  #
+# --------------------------------------------------------------------------- #
+
+
+def _walk_qubitizes(U, alpha, N, M):
+    Pi = np.diag([1.0] * N + [0.0] * (len(U) - N))
+    W = (2 * Pi - np.eye(len(U))) @ U
+    wph = np.angle(np.linalg.eigvals(W))
+    for e in np.linalg.eigvalsh((M + M.conj().T) / 2):
+        th = np.arccos(np.clip(e / alpha, -1, 1))
+        if np.min(np.abs((wph - th + np.pi) % (2 * np.pi) - np.pi)) > 1e-6:
+            return False
+    return True
+
+
+@pytest.mark.parametrize('actions,coeff,num_c', [
+    ((0,), 1.0, None),        # â+â†  (2 matchings)
+    ((0,), 1.0, 0.5),         # â+â† + ½n̂  (diagonal + 2 matchings)
+    ((0,), 1.0j, 1.0),        # i(â−â†) + n̂  (imaginary matchings + diagonal)
+    ((0, 0), 1.0, 0.5),       # â²+â†² + ½n̂  (Δ=2 matchings + diagonal)
+])
+@pytest.mark.parametrize('n_b', [2, 3])
+def test_full_atom_block_encoding_qubitizes(actions, coeff, num_c, n_b):
+    """A full single-mode atom (inner LCU over diagonal + matchings) is a
+    decomposable block encoding of M that is Hermitian, self-inverse, and whose
+    walk qubitizes."""
+    from src_PI.estimation.sparse_oracle.matching_dilation import extract_atom_dilation
+    M = hermitian_single_mode_matrix(actions, coeff, n_b)
+    if num_c is not None:
+        M = M + hermitian_single_mode_matrix((1, 0), num_c, n_b)
+    U, alpha, block = extract_atom_dilation(M, n_b)
+    assert np.allclose(block, M, atol=1e-6), "α·⟨0|U|0⟩ != M"
+    assert np.allclose(U, U.conj().T, atol=1e-6), "atom U not Hermitian"
+    assert np.allclose(U @ U, np.eye(len(U)), atol=1e-6), "atom U not self-inverse"
+    assert _walk_qubitizes(U, alpha, 1 << n_b, M), "atom walk does not qubitize"
