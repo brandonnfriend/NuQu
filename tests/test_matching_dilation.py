@@ -12,11 +12,11 @@ circuit that
   * is Hermitian and self-inverse (so the qubitization walk is valid), and
   * projects to `α·⟨0|_{b_dil} U|0⟩ = M_k`.
 
-The **misaligned** matching (edges crossing the `Δ` block boundary — the second
-edge-colour) is a documented WIP (`xfail`): its intra-edge swap is a ±Δ shift,
-not a single-bit flip, so it needs the shift-based generalisation (next P0-1
-step). Together the two colours make one atom; both are needed before the sparse
-walk-T is compiler-derived.
+Covers the complete P0-1 surface: both edge-colours (aligned + misaligned via
+shift-conjugation), boundary/unmatched states, complex phases, the diagonal
+component, the inner-LCU full single-mode atom, its genuine compiled T-count, and
+the two-mode (H_WT) atoms via mode_c fold-conjugation — all Hermitian,
+self-inverse, matrix-verified, and qubitizing.
 
 Run: `python -m pytest tests/test_matching_dilation.py -q`
 """
@@ -154,3 +154,29 @@ def test_single_mode_atom_has_genuine_compiled_t_count():
          + hermitian_single_mode_matrix((1, 0), 0.5, 2))     # â+â† + ½n̂
     t, cliff = compiled_atom_cost(M, 2)
     assert 0 < t < 10000 and cliff > 0
+
+
+def test_two_mode_atom_qubitizes():
+    """Two-mode (H_WT) atoms — all four shapes (hopping â_bâ_c†, co-ladder â_bâ_c
+    / â_b†â_c†, and â_b†â_c), real + complex — compile via mode_c fold-conjugation
+    to Hermitian, self-inverse block encodings whose walk qubitizes."""
+    from src_PI.estimation.sparse_oracle.hermitian_boson_encoding import (
+        hermitian_monomial_matrix,
+    )
+    from src_PI.estimation.sparse_oracle.matching_dilation import extract_two_mode_atom
+    cases = [
+        (((0, 0), (1, 1)), 1.0j),        # â_b â_c†  (imaginary, H_WT Π-type)
+        (((0, 0), (1, 0)), 0.35),        # â_b â_c   (real co-annihilation)
+        (((0, 1), (1, 1)), 0.3 + 0.2j),  # â_b† â_c† (complex co-creation)
+        (((0, 1), (1, 0)), -12.0j),      # â_b† â_c  (imaginary hopping)
+    ]
+    for mono, coeff in cases:
+        for n_b in (1, 2):
+            M, _modes = hermitian_monomial_matrix(mono, coeff, n_b)
+            U, alpha, block = extract_two_mode_atom(M, n_b)
+            N = 1 << (2 * n_b)
+            t = f"{mono} n_b={n_b}"
+            assert np.allclose(block, M, atol=1e-6), f"{t}: α⟨0|U|0⟩ != M"
+            assert np.allclose(U, U.conj().T, atol=1e-6), f"{t}: not Hermitian"
+            assert np.allclose(U @ U, np.eye(len(U)), atol=1e-6), f"{t}: not self-inverse"
+            assert _walk_qubitizes(U, alpha, N, M), f"{t}: walk does not qubitize"

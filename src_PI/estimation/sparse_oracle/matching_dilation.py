@@ -46,9 +46,17 @@ choice; QROM is a large-n_b generalisation we don't need. (It also can't be
 `cirq.unitary`-verified — its measurement-based uncompute is validated as a
 standard Qualtran primitive, with structure checked via the explicit form.)
 
-Remaining P0 work: **two-mode / non-power-of-two Δ** (the genuinely hard piece —
-arbitrary-Δ matchings need a general-swap construction), the outer bundle
-composite (P0-2), and a precision/error budget (P0-4).
+**Two-mode atoms (H_WT products) — DONE** (`two_mode_atom_dilation_ops`). A
+coupling `(n_b,n_c) ↔ (n_b±1, n_c∓1)` has a non-power-of-two flattened shift, but
+a conditional **fold** on `mode_c` (a controlled ±1 shift) removes the `n_c` step,
+leaving a pure `mode_b` +1 coupling whose flattened shift is `N_c = 2^{n_b}` — a
+power of two the single-mode machinery handles (aligned + misaligned). The atom =
+inner LCU over its two (folded) matchings, split by lower-`n_b` parity. All four
+shapes (hopping / co-ladder, real + complex) block-encode `M`, are Hermitian +
+self-inverse, and qubitize (n_b=1,2).
+
+**P0-1 is complete** (single-mode + two-mode). Remaining P0: the outer composite
+production cost-swaps (alias PREP; fermion → PauliLCU) and a precision budget (P0-4).
 """
 
 import math
@@ -320,3 +328,106 @@ def compiled_atom_cost(M, n_b):
             if op.gate in (cirq.T, cirq.T ** -1))
     cliff = sum(1 for _ in flat.all_operations()) - t
     return t, cliff
+
+
+# --------------------------------------------------------------------------- #
+# Two-mode atoms (H_WT products): fold mode_c → single-mode machinery          #
+# --------------------------------------------------------------------------- #
+
+
+def _detect_dc(M, n_bpm):
+    """The mode_c step `Δ_c ∈ {+1,−1}` accompanying a `+1` mode_b step, read from
+    the first off-diagonal of the two-mode matrix (`+1/−1`: hopping vs co-ladder)."""
+    N_f = 1 << n_bpm
+    for lo in range(N_f * N_f):
+        for hi in range(lo + 1, N_f * N_f):
+            if abs(M[hi, lo]) > _TOL:
+                return (hi % N_f) - (lo % N_f)
+    return -1
+
+
+def _two_mode_matchings(M, n_bpm, dc):
+    """Split a two-mode Hermitian atom `M` (flattened `mode_b`⊗`mode_c`, each
+    `n_bpm` qubits) into two matchings by the lower endpoint's `n_b` parity, using
+    the `+1 on b / +dc on c` edge direction (so mode_b's step is a clean bit flip).
+    Returns `[M_even, M_odd]` (edges with even / odd lower `n_b`)."""
+    N_f = 1 << n_bpm
+    N = N_f * N_f
+    Me = np.zeros((N, N), dtype=complex)
+    Mo = np.zeros((N, N), dtype=complex)
+    for nb in range(N_f - 1):
+        for nc in range(N_f):
+            nc_hi = nc + dc
+            if not (0 <= nc_hi < N_f):
+                continue
+            lo = nb * N_f + nc
+            hi = (nb + 1) * N_f + nc_hi
+            v = M[hi, lo]
+            if abs(v) > _TOL:
+                tgt = Me if nb % 2 == 0 else Mo
+                tgt[hi, lo] = v
+                tgt[lo, hi] = np.conj(v)
+    return [Me, Mo]
+
+
+def _fold_shift_matrix(upper_parity, n_bpm, dc):
+    """Permutation shifting `mode_c` by `−dc` when `bit0(n_b) == upper_parity`, so
+    each matched edge's endpoints share `n_c` (residual coupling = pure `mode_b`
+    +1 step → flattened shift `N_c`, a power of two)."""
+    N_f = 1 << n_bpm
+    N = N_f * N_f
+    P = np.zeros((N, N))
+    for nb in range(N_f):
+        for nc in range(N_f):
+            nc2 = (nc - dc) % N_f if (nb & 1) == upper_parity else nc
+            P[nb * N_f + nc2, nb * N_f + nc] = 1.0
+    return P
+
+
+def two_mode_matching_ops(b_dil, sys_qubits, M_k, alpha, n_bpm, upper_parity, dc):
+    """Yield the dilation ops for one two-mode matching, via fold-conjugation:
+    `F† · matching_dilation_ops(F·M_k·F†, shift=N_c) · F`, `F` the mode_c fold."""
+    N_f = 1 << n_bpm
+    F = _fold_shift_matrix(upper_parity, n_bpm, dc)
+    M_folded = F @ M_k @ F.conj().T
+    yield cirq.MatrixGate(F, name='Fold').on(*sys_qubits)             # F (fold)
+    yield from matching_dilation_ops(b_dil, sys_qubits, M_folded, alpha, N_f)
+    yield cirq.MatrixGate(F.conj().T, name='Fold†').on(*sys_qubits)   # F†
+
+
+def two_mode_atom_dilation_ops(inner_sel, b_dil, sys_qubits, M, n_bpm):
+    """Yield the decomposable block encoding of a full two-mode Hermitian atom
+    `c·(â_b·op_c) + h.c.` — inner Hermitian LCU over its two (folded) matchings.
+
+    `α_atom·⟨0|_{inner_sel,b_dil} U|0⟩ = M`, α_atom = Σ α_matching, U Hermitian +
+    self-inverse (the atom qubitizes)."""
+    dc = _detect_dc(M, n_bpm)
+    matchings = [(m, up) for m, up in
+                 zip(_two_mode_matchings(M, n_bpm, dc), (1, 0))
+                 if np.abs(m).max() > _TOL]
+    weights = [float(np.abs(m).max()) for m, _up in matchings]
+    prep, b_sel = _prep_gate(weights)
+    sel = list(inner_sel)
+    assert len(sel) == b_sel, f"inner_sel needs {b_sel} qubits"
+    yield prep.on(*sel)
+    for k, (M_k, up) in enumerate(matchings):
+        alpha = float(np.abs(M_k).max())
+        cvals = [(k >> (b_sel - 1 - i)) & 1 for i in range(b_sel)]
+        for op in two_mode_matching_ops(b_dil, sys_qubits, M_k, alpha, n_bpm, up, dc):
+            yield op.controlled_by(*sel, control_values=cvals) if sel else op
+    yield cirq.inverse(prep).on(*sel)
+
+
+def extract_two_mode_atom(M, n_bpm):
+    """Build the two-mode atom block encoding on named qubits; return (U, α, block)."""
+    dc = _detect_dc(M, n_bpm)
+    matchings = [m for m in _two_mode_matchings(M, n_bpm, dc) if np.abs(m).max() > _TOL]
+    b_sel = max(1, int(math.ceil(math.log2(max(1, len(matchings))))))
+    alpha = sum(float(np.abs(m).max()) for m in matchings)
+    sel = [cirq.NamedQubit(f'isel{i}') for i in range(b_sel)]
+    b_dil = cirq.NamedQubit('b_dil')
+    sysq = [cirq.NamedQubit(f's{i}') for i in range(2 * n_bpm)]
+    circ = cirq.Circuit(two_mode_atom_dilation_ops(sel, b_dil, sysq, M, n_bpm))
+    U = circ.unitary(qubit_order=[*sel, b_dil, *sysq])
+    N = 1 << (2 * n_bpm)
+    return U, alpha, U[:N, :N] * alpha
