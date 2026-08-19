@@ -46,13 +46,17 @@ def _atom(kind, n_b):
 
 
 @pytest.mark.parametrize('kind,n_b', [('ladder', 2), ('ladder', 3),
-                                      ('ladder', 4), ('squared', 3)])
-def test_aligned_matching_dilation_is_compiled_and_correct(kind, n_b):
-    """The aligned matching (component 0) decomposes and its extracted matrix
-    equals the dense dilation exactly."""
+                                      ('ladder', 4), ('squared', 3), ('squared', 4)])
+@pytest.mark.parametrize('m_idx', [0, 1])
+def test_matching_dilation_is_compiled_and_correct(kind, n_b, m_idx):
+    """BOTH edge-colours (aligned component 0 AND misaligned component 1, the
+    latter via shift-conjugation) decompose and their extracted matrix equals the
+    dense dilation exactly, incl. unmatched/boundary states."""
     M, shift = _atom(kind, n_b)
     _diag, matchings = _split_into_components(M)
-    M_k = matchings[0]                                  # the aligned edge-colour
+    if m_idx >= len(matchings):
+        pytest.skip("only one matching for this atom/size")
+    M_k = matchings[m_idx]
     alpha = float(np.abs(M_k).max())
     U, block = extract_matching_dilation(M_k, alpha, shift, n_b)
     B_dense = dense_matching_dilation(M_k, alpha)
@@ -79,16 +83,24 @@ def test_matching_dilation_decomposes_to_elementary_gates():
         assert cirq.has_unitary(op)
 
 
-@pytest.mark.xfail(reason="misaligned (odd) matching: edges cross the Δ block "
-                          "boundary; needs the shift-based swap (next P0-1 step)",
-                   strict=True)
-def test_misaligned_matching_dilation_wip():
+def test_misaligned_matching_uses_shift_conjugation():
+    """The misaligned edge-colour is compiled (not skipped): its ops include the
+    ±Δ cyclic shifts that reduce it to the aligned case."""
+    import cirq
+    from src_PI.estimation.sparse_oracle.matching_dilation import (
+        matching_dilation_ops, _is_aligned,
+    )
     M, shift = _atom('ladder', 3)
     _d, matchings = _split_into_components(M)
-    M_k = matchings[1]                                  # the misaligned edge-colour
+    M_k = matchings[1]
+    assert not _is_aligned(M_k, shift)
     alpha = float(np.abs(M_k).max())
-    U, _block = extract_matching_dilation(M_k, alpha, shift, 3)
-    assert np.allclose(U, dense_matching_dilation(M_k, alpha), atol=1e-7)
+    b = cirq.NamedQubit('b')
+    sysq = [cirq.NamedQubit(f's{i}') for i in range(3)]
+    ops = list(matching_dilation_ops(b, sysq, M_k, alpha, shift))
+    n_shifts = sum(1 for op in ops
+                   if isinstance(op.gate, cirq.MatrixGate) and len(op.qubits) == 3)
+    assert n_shifts == 2, "misaligned should sandwich with two ±Δ cyclic shifts"
 
 
 if __name__ == '__main__':

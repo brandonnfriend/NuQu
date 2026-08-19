@@ -88,29 +88,67 @@ def _g_ops(q, b, a):
     yield from _r_k_ops(q, b, -phi)
 
 
+def _aligned_ops(b_dil, sys_qubits, M_k, alpha, j):
+    """Yield the aligned matching-dilation ops (edges pair `n ↔ n+2^j` within a
+    `2^{j+1}` block, i.e. every `lo` has bit `j` = 0).
+
+    Loops over **all** aligned pairs, applying `G(a)` on (bit-`j` qubit, b_dil)
+    controlled by the pair's other bits. Non-edge pairs (both states unmatched)
+    get `a=0 → G(0)=X_b`, flipping `b_dil` to |1⟩ so the projected block is 0 —
+    the boundary/unmatched handling."""
+    n_b = len(sys_qubits)
+    shift = 1 << j
+    q = sys_qubits[n_b - 1 - j]                      # the bit-j qubit (flips in a pair)
+    other = [sys_qubits[n_b - 1 - k] for k in range(n_b) if k != j]
+    for lo in range(1 << n_b):
+        if (lo >> j) & 1:                           # only lower endpoints (bit j = 0)
+            continue
+        hi = lo | shift
+        a = abs(M_k[hi, lo]) / alpha                # 0 for unmatched pairs → X_b
+        ctrl_vals = [(lo >> k) & 1 for k in range(n_b) if k != j]
+        for op in _g_ops(q, b_dil, a):
+            yield op.controlled_by(*other, control_values=ctrl_vals) if other else op
+
+
+def _is_aligned(M_k, shift):
+    """True iff every edge's lower endpoint has bit `log2(shift)` = 0."""
+    j = int(round(math.log2(shift)))
+    return all(not ((lo >> j) & 1) for lo, _hi, _v in _edges_of_matching(M_k))
+
+
+def _cyclic_shift_gate(k, n_b):
+    """`|n⟩ → |(n+k) mod 2^n_b⟩` as a MatrixGate on the `n_b` system qubits."""
+    N = 1 << n_b
+    P = np.zeros((N, N))
+    for n in range(N):
+        P[(n + k) % N, n] = 1.0
+    return cirq.MatrixGate(P, name=f'Shift{k:+d}')
+
+
 def matching_dilation_ops(b_dil, sys_qubits, M_k, alpha, shift):
     """Yield the decomposable matching-dilation ops for one matching component.
 
     `b_dil` is the 1-qubit dilation ancilla; `sys_qubits` the `n_b` system qubits
-    (big-endian, `sys_qubits[-1]` = LSB). `M_k` is the 1-sparse Hermitian matching
-    on `N=2^n_b` states with a single fixed `shift = Δ` (a power of two here); the
-    edges pair `n ↔ n+Δ`. Emits, per edge, `G(a_edge)` on (edge-LSB, b_dil)
-    controlled by the edge index (the system bits above the LSB block).
+    (big-endian). `M_k` is a 1-sparse Hermitian matching with a single fixed
+    `shift = Δ = 2^j`; edges pair `n ↔ n+Δ`. Aligned matchings (lower endpoints
+    on the `Δ` boundary) compile directly; **misaligned** matchings (the second
+    edge-colour, edges crossing the block boundary) are reduced to aligned by
+    shift-conjugation `AddK(+Δ)·aligned(M')·AddK(−Δ)`, `M'[m,n]=M_k[(m+Δ)%N,(n+Δ)%N]`.
 
-    `α·⟨0|_{b_dil} U |0⟩_{b_dil} = M_k` and `U = U† = U⁻¹` (validated by the
-    extraction test).
+    `α·⟨0|_{b_dil} U |0⟩_{b_dil} = M_k` and `U = U† = U⁻¹`.
     """
     n_b = len(sys_qubits)
-    lsb_bit = int(round(math.log2(shift)))          # Δ = 2^lsb_bit → the edge low bit
-    q = sys_qubits[n_b - 1 - lsb_bit]                # the qubit that flips within an edge
-    other = [sys_qubits[n_b - 1 - k] for k in range(n_b) if k != lsb_bit]  # edge-index bits
-    for lo, hi, v in _edges_of_matching(M_k):
-        a = v / alpha
-        # edge index = the value of `lo` on the non-`q` bits (lo has q-bit = 0).
-        ctrl_vals = [(lo >> k) & 1 for k in range(n_b) if k != lsb_bit]
-        g = list(_g_ops(q, b_dil, a))
-        for op in g:
-            yield op.controlled_by(*other, control_values=ctrl_vals) if other else op
+    j = int(round(math.log2(shift)))
+    if _is_aligned(M_k, shift):
+        yield from _aligned_ops(b_dil, sys_qubits, M_k, alpha, j)
+        return
+    # misaligned → cyclic shift so lower endpoints land on the Δ boundary.
+    N = 1 << n_b
+    M_shift = np.array([[M_k[(m + shift) % N, (n + shift) % N] for n in range(N)]
+                        for m in range(N)])
+    yield _cyclic_shift_gate(-shift, n_b).on(*sys_qubits)
+    yield from _aligned_ops(b_dil, sys_qubits, M_shift, alpha, j)
+    yield _cyclic_shift_gate(+shift, n_b).on(*sys_qubits)
 
 
 def extract_matching_dilation(M_k, alpha, shift, n_b):
