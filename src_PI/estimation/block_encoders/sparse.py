@@ -24,9 +24,9 @@ Refer to `tasks/26-sparse-oracle-fock.md` and
 """
 
 from src_PI.estimation.sparse_oracle.lambda_compute import compute_native_lambda
-from src_PI.estimation.sparse_oracle.resources import (
-    estimate_sparse_resources,
-    estimate_sparse_resources_compiled,
+from src_PI.estimation.sparse_oracle.resources import estimate_sparse_resources
+from src_PI.estimation.sparse_oracle.hermitian_bundle import (
+    estimate_hermitian_sparse_resources,
 )
 from src_PI.hamiltonians.core.MixedHamiltonian import MixedHamiltonian
 from src_PI.hamiltonians.core.SubHamiltonian import SubHamiltonian
@@ -54,31 +54,32 @@ class SparseStrategy:
 
         mh = sub[0].operator
 
-        # Λ + identity shift from native algebra (C1).
+        # Λ + identity shift from native algebra. The identity (classical) shift
+        # is Hermitization-invariant; the analytical path's Λ is the per-monomial
+        # 1-norm, the compiled (Hermitian) path's Λ is the tighter edge-coloured α.
         lam_data = compute_native_lambda(mh, n_b)
         physical_lambda = lam_data['physical_lambda']
         identity_shift = lam_data['identity_shift']
 
-        # C1: 'analytical' (default, mixed-bound proxy) vs 'compiled' (genuinely
-        # circuit-level SparseFullBundleBlockEncoding). Both share this exact
-        # α_tot (compute_native_lambda == be.alpha, the α invariant).
+        # 'analytical' (default, mixed-bound proxy) vs 'compiled' (the genuinely
+        # circuit-level, walk-VALID Hermitian bundle — matching-dilation encoder;
+        # the earlier non-Hermitian SparseFullBundle path is retired: its
+        # single-reflection walk did not qubitize).
         mode = getattr(config, 'sparse_oracle_mode', 'analytical')
 
         if mode == 'compiled':
-            print("--- Sparse-oracle strategy (C1: COMPILED full-bundle estimate) ---")
+            print("--- Sparse-oracle strategy (C1: COMPILED Hermitian walk, valid) ---")
             print(f"-> Identity (classical) shift:   {identity_shift:.4e}")
-            print(f"-> Physical Lambda (total):      {physical_lambda:.4e}")
-            res = estimate_sparse_resources_compiled(mh, n_b, num_sites)
-            bd = res['compiled_breakdown']
-            print(f"-> Atoms: {bd['n_atoms']}  per-kind: "
-                  + ", ".join(f"{k}={v['count']}" for k, v in bd['per_kind'].items()))
-            print(f"-> Walk T (compiled, estimate_resources) = {res['Walk_T_Count']:.4e}")
-            print(f"-> Logical qubits (flag {bd['w_flag']} + sys {bd['w_sys']}) "
-                  f"= {res['Logical_Qubits']}")
+            res = estimate_hermitian_sparse_resources(mh, n_b, num_sites)
+            physical_lambda = res['Physical_Lambda']         # tighter Hermitian Λ
+            print(f"-> Physical Lambda (Hermitian, tighter): {physical_lambda:.4e}")
+            print(f"-> Atoms (mode-set grouped): {res['n_atoms']}")
+            print(f"-> Walk T (Hermitian, estimate_resources) = {res['Walk_T_Count']:.4e}")
+            print(f"-> Logical qubits = {res['Logical_Qubits']}")
             walk_T = res['Walk_T_Count']
             walk_Cl = res['Walk_Clifford_Count']
             logical_q = res['Logical_Qubits']
-            breakdown = bd
+            breakdown = {'n_atoms': res['n_atoms'], 'hermitian': True}
         else:
             print("--- Sparse-oracle strategy (analytical mixed-bound proxy) ---")
             print(f"-> Identity (classical) shift:   {identity_shift:.4e}")

@@ -483,17 +483,18 @@ def _sparse_estimate(mode):
 
 
 def test_sparse_switch_dispatches_both_modes():
-    """The 'compiled' switch routes SparseStrategy to the compiled encoder while
-    'analytical' keeps the proxy; both share the exact same Physical_Lambda (the
-    α invariant, now including the static nucleon fermion sector)."""
+    """The 'compiled' switch routes SparseStrategy to the walk-VALID Hermitian
+    bundle; 'analytical' keeps the proxy. The Hermitian Λ is *tighter* than the
+    proxy's per-monomial 1-norm (edge colouring), and both walk numbers are
+    positive."""
     a = _sparse_estimate('analytical')
     c = _sparse_estimate('compiled')
     assert a['sparse_oracle_mode'] == 'analytical'
     assert c['sparse_oracle_mode'] == 'compiled'
-    assert abs(a['Physical_Lambda'] - c['Physical_Lambda']) < 1e-6 * a['Physical_Lambda']
-    # genuinely different walk numbers (compiled is not the proxy)
+    # Hermitian Λ ≤ analytical Λ (tighter), both positive
+    assert 0 < c['Physical_Lambda'] <= a['Physical_Lambda'] + 1e-6 * a['Physical_Lambda']
+    assert a['Walk_T_Count'] > 0 and c['Walk_T_Count'] > 0
     assert a['Walk_T_Count'] != c['Walk_T_Count']
-    assert c['Walk_T_Count'] > 0
 
 
 def test_compiled_estimate_cache_returns_identical():

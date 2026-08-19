@@ -82,10 +82,10 @@ class HermitianAtom:
 
     def __init__(self, kind, M, alpha, support, sign=1.0, payload=None):
         self.kind = kind
-        self.M = M
+        self.M = M                                  # None on the cost path
         self.alpha = float(alpha)
         self.sign = float(sign)
-        self.support = list(support)
+        self.support = list(support) if support is not None else None
         self.payload = payload or {}
 
     @property
@@ -93,11 +93,18 @@ class HermitianAtom:
         return self.alpha
 
 
-def extract_hermitian_atoms(mh, n_b, mode_to_qubits):
-    """Group `mh` into Hermitian atoms (see module docstring)."""
+def extract_hermitian_atoms(mh, n_b, mode_to_qubits, need_dense=False):
+    """Group `mh` into Hermitian atoms (see module docstring).
+
+    `need_dense=False` (the default, used by the **cost** path) computes only
+    each atom's `α` and cost payload — it never materialises the (potentially
+    huge) dense operator of a fermion/mixed atom, whose JW image can span the
+    whole interleaved register. `need_dense=True` (the **sim** path, tiny toys
+    only) also builds `atom.M` / `atom.support` for `build_hermitian_bundle_sim`.
+    """
     atoms = []
 
-    # --- boson: group by touched-mode set ---
+    # --- boson: group by touched-mode set (matrices are small: ≤ few modes) ---
     groups = defaultdict(list)
     for mono, coeff in mh.boson_part.terms.items():
         if mono == () or abs(complex(coeff)) <= _TOL:
@@ -113,11 +120,12 @@ def extract_hermitian_atoms(mh, n_b, mode_to_qubits):
         atoms.append(HermitianAtom('boson', M, alpha, support,
                                    payload={'n_bits': len(support)}))
 
-    # --- fermion: whole static nucleon part ---
+    # --- fermion: whole static nucleon part (α via 1-norm; dense only for sim) ---
     if len(mh.fermion_part.terms) > 0:
         stats = fermion_jw_stats(mh.fermion_part)
         if stats['one_norm'] > _TOL:
-            M, support = _fermion_dense(mh.fermion_part)
+            M, support = (_fermion_dense(mh.fermion_part) if need_dense
+                          else (None, None))
             atoms.append(HermitianAtom('fermion', M, stats['one_norm'], support,
                                        payload={'fermion_op': mh.fermion_part}))
 
@@ -126,9 +134,8 @@ def extract_hermitian_atoms(mh, n_b, mode_to_qubits):
         c = complex(mt.coeff)
         if abs(c) <= _TOL:
             continue
-        fstats = fermion_jw_stats(mt.fermion_factor)
-        alpha_f = fstats['one_norm']
-        # boson factor: group by mode-set, sum into one Hermitian boson matrix.
+        alpha_f = fermion_jw_stats(mt.fermion_factor)['one_norm']
+        # boson factor: group by mode-set (small matrices).
         b_groups = defaultdict(list)
         for mono, bc in mt.boson_factor.terms.items():
             if mono == () or abs(complex(bc)) <= _TOL:
@@ -136,15 +143,6 @@ def extract_hermitian_atoms(mh, n_b, mode_to_qubits):
             b_groups[tuple(sorted({m for m, _a in mono}))].append((mono, bc))
         if alpha_f <= _TOL or not b_groups:
             continue
-        # single mode-set for our H_WT factors; handle the general case by summing
-        # the (disjoint-support) boson groups into one operator via embed.
-        b_modes = sorted({m for ms in b_groups for m in ms})
-        Fdense, fsupport = _fermion_dense(mt.fermion_factor)
-        bsupport = [q for m in b_modes for q in mode_to_qubits[m]]
-        # Bdense on the boson support (sum of the mode-set groups, embedded).
-        Bdim = 1 << len(bsupport)
-        Bdense = np.zeros((Bdim, Bdim), dtype=complex)
-        bpos = {q: i for i, q in enumerate(bsupport)}
         alpha_b = 0.0
         boson_group_bits = []
         boson_group_mats = []
@@ -152,14 +150,23 @@ def extract_hermitian_atoms(mh, n_b, mode_to_qubits):
             Mg = _boson_group_matrix(monos, ms, n_b)
             _U, a_g, _N = build_hermitian_boson_be(Mg)
             alpha_b += a_g
-            gsupport = [bpos[q] for m in ms for q in mode_to_qubits[m]]
-            Bdense += _embed_operator(Mg, gsupport, len(bsupport))
             boson_group_bits.append(len({q for m in ms for q in mode_to_qubits[m]}))
             boson_group_mats.append(Mg)
-        support = list(fsupport) + list(bsupport)
-        # M_l = |c| * (F ⊗ B) with the sign carried separately (Hermitian ±B).
-        M = np.kron(Fdense, Bdense) * abs(c)
         alpha = abs(c) * alpha_f * alpha_b
+
+        M = support = None
+        if need_dense:                              # tiny toys only
+            b_modes = sorted({m for ms in b_groups for m in ms})
+            Fdense, fsupport = _fermion_dense(mt.fermion_factor)
+            bsupport = [q for m in b_modes for q in mode_to_qubits[m]]
+            bpos = {q: i for i, q in enumerate(bsupport)}
+            Bdense = np.zeros((1 << len(bsupport), 1 << len(bsupport)), dtype=complex)
+            for (ms, monos), Mg in zip(b_groups.items(), boson_group_mats):
+                gsupport = [bpos[q] for m in ms for q in mode_to_qubits[m]]
+                Bdense += _embed_operator(Mg, gsupport, len(bsupport))
+            M = np.kron(Fdense, Bdense) * abs(c)
+            support = list(fsupport) + list(bsupport)
+
         atoms.append(HermitianAtom(
             'mixed', M, alpha, support,
             sign=(-1.0 if c.real < 0 else 1.0),
@@ -177,7 +184,7 @@ def build_hermitian_bundle_sim(mh, n_b, mode_to_qubits, w_sys):
     `α_tot·⟨0|_flag U|0⟩_flag = H` and `U = U†` (⇒ the walk qubitizes)."""
     if not isinstance(mh, MixedHamiltonian):
         raise TypeError("expected a MixedHamiltonian")
-    atoms = extract_hermitian_atoms(mh, n_b, mode_to_qubits)
+    atoms = extract_hermitian_atoms(mh, n_b, mode_to_qubits, need_dense=True)
     alpha_tot = sum(a.alpha for a in atoms)
     b_out = max(1, int(math.ceil(math.log2(max(1, len(atoms))))))
     L = 1 << b_out
@@ -204,7 +211,7 @@ def build_hermitian_bundle_sim(mh, n_b, mode_to_qubits, w_sys):
 
 def hermitian_bundle_reference(mh, n_b, mode_to_qubits, w_sys):
     """Exact `H = Σ_l (±)M_l` on the `w_sys` system register."""
-    atoms = extract_hermitian_atoms(mh, n_b, mode_to_qubits)
+    atoms = extract_hermitian_atoms(mh, n_b, mode_to_qubits, need_dense=True)
     H = np.zeros((1 << w_sys, 1 << w_sys), dtype=complex)
     for atom in atoms:
         H += atom.sign * _embed_operator(atom.M, atom.support, w_sys)
@@ -355,7 +362,15 @@ class SparseHermitianBundleBlockEncoding(BlockEncoding):
     """Valid (Hermitian) compiled block encoding of a MixedHamiltonian.
 
     `_t_complexity_` is the matching-dilation roll-up; the walk it costs IS a
-    valid qubitization (unlike the retired non-Hermitian `SparseFullBundle...`)."""
+    valid qubitization (unlike the retired non-Hermitian `SparseFullBundle...`).
+
+    Cost caveats (documented, both push the estimate slightly LOW): the per-atom
+    SELECT is charged *uncontrolled* — the walk-T is rotation-synthesis-dominated
+    and a singly-controlled rotation synthesizes to ~the same T (control is a
+    Clifford addition), with the unary-dispatch control charged via the AND-ladder,
+    so the residual is a sub-dominant additive Clifford term. `LogicalQubits`
+    now includes a declared `junk` register (peak internal ancilla) rather than
+    silently dropping the qalloc'd temporaries."""
 
     def __init__(self, problem_instance, control_val=None, **kwargs):
         if not isinstance(problem_instance, HermitianBundlePI):
@@ -376,8 +391,26 @@ class SparseHermitianBundleBlockEncoding(BlockEncoding):
         return (Register('system', QAny(self.PI._w_sys)),)
 
     @property
+    def junk_registers(self) -> Tuple[Register, ...]:
+        j = self._peak_junk_width()
+        return (Register('junk', QAny(j)),) if j > 0 else ()
+
+    @property
     def signature(self) -> Signature:
-        return Signature([*self.selection_registers, *self.target_registers])
+        return Signature([*self.selection_registers, *self.junk_registers,
+                          *self.target_registers])
+
+    def _peak_junk_width(self):
+        """Peak internal ancilla: outer alias-PREP temporaries + one atom's inner
+        QROM-load (kappa) / inner alias PREP. Atoms fire one at a time, so the
+        per-atom junk is a max, not a sum."""
+        n = len(self.PI.atoms)
+        outer = 0
+        if n >= 2:
+            sp = StatePreparationAliasSampling.from_lcu_probs(
+                [1.0] * n, probability_epsilon=_PREP_EPS)
+            outer = sum(r.bitsize for r in sp.signature) - self.PI._b_out
+        return max(0, outer) + _KAPPA          # + one QROM-load kappa batch
 
     def _t_complexity_(self) -> TComplexity:
         return hermitian_bundle_t_complexity(self.PI.atoms)
