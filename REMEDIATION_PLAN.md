@@ -67,7 +67,22 @@ compiler-derived count (no `decompose_from_registers`; `estimate_resources` read
 `_t_complexity_`). Terminology corrected (mode → `hermitian_cost_model`; docstrings + this plan
 relabelled; the `253,908` is NOT a headline number).
 
-**To make the sparse path publication-grade (Codex P0 — a real, multi-session build):**
+**P0 progress (sparse compile — the decisive answer to Codex is now demonstrated):**
+- **P0-1 single-mode atom: ✅ DONE.** `matching_dilation.py` compiles the full single-mode boson
+  atom (aligned + misaligned via ±Δ shift-conjugation, boundary/unmatched, complex phases, diagonal,
+  inner LCU) to a **gate-level decomposable circuit** whose extracted matrix == the dense reference,
+  Hermitian, self-inverse, **qubitizes**, with a genuine compiled T-count (≲2k T/atom at n_b=2).
+  **QROM cost form: measured, NOT needed at n_b=2** (its fixed ~2.4k T rotation overhead loses to
+  the per-edge form until n_b≈4-5). Covers ~88% of Λ.
+- **P0-2 composite: ✅ DONE (dominant sectors).** `compiled_bundle.py` assembles the compiled boson
+  atoms + fermion into a real `PREP·SELECT·PREP†` composite (heterogeneous dispatch); on small
+  instances the **production circuit** gives `α_tot·⟨0|U|0⟩ = H`, qubitizes, and **fully decomposes
+  to a genuine circuit-traversed T-count** (no `DecomposeNotImplementedError`, no hand
+  `_t_complexity_`). Two-mode atoms raise (nothing silently dropped).
+- **Remaining:** P0-1 two-mode / arbitrary-Δ (fold construction, ~12% boson); production cost-swaps
+  (alias-sampling outer PREP; fermion → PauliLCU for the real bundle); **P0-4 precision/error budget**.
+
+**Original Codex P0 list (for reference):**
 1. **Executable matching-dilation bloq** — decomposable, with the actual amplitude/√ tables,
    endpoint/direction predicate, boundary (no-wrap) logic, shift + inverse, phase/sign, controls,
    uncompute; small-instance extracted matrix matches the dense reference incl. unused states.
