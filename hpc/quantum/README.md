@@ -18,29 +18,41 @@ qis1–4 allocation, and the self-provisioning pattern all apply here unchanged.
 ## Series (design-axis columns)
 | series | basis | encoder | cutoff | role |
 |---|---|---|---|---|
+| `fock_pauli` | fock | **pauli_lcu** | `--n-b` / frame | **THE compiled PauliLCU anchor (N4)** |
 | `watson` | amplitude | pauli_lcu | energy_bound | Watson Lemma-5 baseline (Tier 0) |
 | `ns` | amplitude | pauli_lcu | ns / tong | Nyquist-Shannon |
-| `sparse` | fock | sparse | tong | deep-L workhorse; Tier-1 realistic |
+| `sparse` | fock | sparse | tong | FROZEN feasibility path (not a headline) |
 | `sparse_heuristic` | fock | sparse | heuristic | tong-vs-heuristic comparison |
+
+**`fock_pauli` is the paper's quantum anchor** (REMEDIATION_PLAN N4): the Fock-basis
+Hamiltonian materialized as a Pauli sum and block-encoded by pyLIQTR's PauliLCU
+(genuinely compiler-derived). It is **A-independent at a fixed n_b** — the block
+encoding encodes the *operator*, not the A-nucleon state; A enters only via the
+cutoff. So the deep-L anchor is one estimate per `(L, n_b)`: pass `--n-b` (anchor +
+convergence sweep) or `--frame-occupation <n>` (the seam picks n_b from a measured
+⟨n⟩ via the 5σ rule). `--n-b` wins over both the series cutoff and the frame seam.
 
 ## Launch (on the pinned submit node)
 ```sh
 ssh hep-submit
-# Reconcile to the CAMPAIGN BRANCH (this harness is not on main yet). Untracked
-# campaign_*/ output dirs survive the reset.
+# Reconcile to the ACTIVE CAMPAIGN BRANCH (currently remediation/vertex-fix — the
+# corrected-Hamiltonian regeneration). Untracked campaign_*/ output dirs survive.
 cd /nfs_scratch/bfriend3/NuQu/NuQu && git fetch origin -q \
-  && git checkout quantum-frame-qpe-campaign \
-  && git reset --hard origin/quantum-frame-qpe-campaign
+  && git checkout remediation/vertex-fix \
+  && git reset --hard origin/remediation/vertex-fix
 cd hpc/quantum
 
-# 1) SMOKE TEST FIRST — one job that imports pyLIQTR via a real L=2 A=1 estimate.
-#    This is what surfaces any Julia/GMP provisioning problem before a campaign.
-sh submit_quantum_sweep.sh test
-#    then check: grep '[qshard:test] OK' campaign_<CID>/logs/smoketest.out
+# --- Vertex-fix regeneration, round 1 (the current campaign) ------------------
+# 1) SMOKE TEST FIRST — ONE real fock_pauli L=2 n_b=2 anchor estimate on a qis node
+#    (validates the pyLIQTR/Julia/GMP deps AND the actual compiled anchor path).
+sh submit_vertexfix_quantum.sh test
+#    then check: grep '[qshard] done status=0' campaign_<CID>/logs/smoketest.out
+# 2) the full Q1-Q4 grid (28 shards) after the smoke test passes:
+sh submit_vertexfix_quantum.sh
 
-# 2) the real campaign (after the smoke test passes)
-sh submit_quantum_sweep.sh "2 3 4 6 8" "sparse"        # deep-L, one column
-sh submit_quantum_sweep.sh "2 3 4" "watson ns sparse"  # A/B across columns
+# --- generic ad-hoc sweeps (older harness, still valid) -----------------------
+sh submit_quantum_sweep.sh "2 3 4 6 8" "fock_pauli"    # deep-L, one column
+sh submit_quantum_sweep.sh "2 3 4" "watson ns fock_pauli"  # A/B across columns
 ```
 Each submit prints `CAMPAIGN=<ts>`, the job count, and the combine command. Report
 the cluster/batch ID back per the launch-approval loop.

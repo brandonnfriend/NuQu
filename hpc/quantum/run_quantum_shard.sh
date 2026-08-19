@@ -22,6 +22,9 @@ FRAMEOCC="${6:-}"
 # $7 = amplitude field-cutoff epsilon (Option A budget-derived value, e.g. 6.275e-6).
 # "-" / empty = the series' own default. Only the amplitude (watson/ns) paths use it.
 EPSCUT="${7:-}"
+# $8 = boson register size override n_b (fock_pauli anchor / n_b convergence sweep).
+# "-" / empty = the series' own cutoff. Wins over the series cutoff and --frame-occupation.
+NBOVR="${8:-}"
 REPO=/nfs_scratch/bfriend3/NuQu/NuQu
 SANDBOX="$(pwd)"
 [ -r "$REPO/misc/run_quantum_shard.py" ] || { echo "ERROR: cannot read repo at $REPO" >&2; exit 1; }
@@ -71,10 +74,16 @@ case "$EPSCUT" in
     ""|"-") : ;;
     *) EPS_ARG="--epsilon-cut $EPSCUT"; EPS_TAG="_ec${EPSCUT}" ;;
 esac
-OUT="$OUTDIR/L${L}_${SERIES}${FOCC_TAG}${EPS_TAG}.json"
+NB_ARG=""
+NB_TAG=""
+case "$NBOVR" in
+    ""|"-") : ;;
+    *) NB_ARG="--n-b $NBOVR"; NB_TAG="_nb${NBOVR}" ;;
+esac
+OUT="$OUTDIR/L${L}_${SERIES}${NB_TAG}${FOCC_TAG}${EPS_TAG}.json"
 # shellcheck disable=SC2086
 "$PY" -m misc.run_quantum_shard --L "$L" --series "$SERIES" --dim 3 \
-    --A-values "$AVALS" $FOCC_ARG $EPS_ARG --out "$OUT"
+    --A-values "$AVALS" $FOCC_ARG $EPS_ARG $NB_ARG --out "$OUT"
 status=$?
 echo "[qshard] done status=$status -> $OUT"
 exit "$status"

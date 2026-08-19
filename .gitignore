@@ -44,6 +44,9 @@ hpc/detsvsL/rundir-*/
 hpc/detsvsL/probe/
 hpc/detsvsL/.uvcache/
 hpc/detsvsL/.uvpy/
+
+# HPC quantum resource-estimation campaign artifacts — keep tracked scripts, ignore runtime
+hpc/quantum/campaign_*/
 hpc/HPC_WORKFLOW.md
 
 paper/

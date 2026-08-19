@@ -8,10 +8,19 @@ robustness pattern as the classical `run_frame_shard.py`.
 
 A "series" is one design-axis column of the campaign (basis + encoder + cutoff):
 
+    fock_pauli = fock  / (n_b) / pauli_lcu   (THE compiled PauliLCU anchor, task N4)
     watson  = amplitude / energy_bound / pauli_lcu   (Watson Lemma-5 baseline)
     ns      = amplitude / ns          / pauli_lcu     (Nyquist-Shannon, tong register)
-    sparse  = fock      / sparse      / tong          (deep-L workhorse; Tier-1 realistic)
+    sparse  = fock      / sparse      / tong          (FROZEN feasibility path; not a headline)
     sparse_heuristic = fock / sparse  / heuristic     (comparison against tong)
+
+The paper's quantum anchor (REMEDIATION_PLAN N4) is `fock_pauli`: the Fock-basis
+Hamiltonian materialized as a Pauli sum and block-encoded by pyLIQTR's PauliLCU
+(genuinely compiler-derived). It is **A-independent at a fixed n_b** (the block
+encoding encodes the operator, not the state — A enters only through the cutoff),
+so the deep-L anchor runs one estimate per (L, n_b) with `--n-b` set. Sweep `--n-b`
+for the resource-vs-cutoff curve; a measured framed ⟨n⟩ picks the physical n_b via
+`--frame-occupation` (recommended_n_b_from_occupation).
 
 Smoke test (run FIRST on a qis node before any real campaign):
 
@@ -72,6 +81,11 @@ def _reaction_depth(breakdown, n_b, n_walk):
 
 # Campaign design-axis columns (basis + encoder + cutoff prescription).
 SERIES = {
+    # THE compiled PauliLCU anchor (N4): Fock basis, PauliLCU encoder. n_b is set
+    # by --n-b (anchor / convergence sweep) or --frame-occupation; the tong cutoff
+    # is only the fallback when neither is given. A-independent at fixed n_b.
+    'fock_pauli': dict(pion_basis='fock', cutoff_method='energy_bound',
+                       block_encoder='pauli_lcu', boson_cutoff_method='tong'),
     'watson': dict(pion_basis='amplitude', cutoff_method='energy_bound',
                    block_encoder='pauli_lcu', boson_cutoff_method='heuristic'),
     'ns': dict(pion_basis='amplitude', cutoff_method='ns',
@@ -93,7 +107,7 @@ def _config_from_series(series):
 
 def run_shard(L, series, A_values, dim=3, frame_occupation=None,
               delta_E=DEFAULT_DELTA_E_MEV, out=None, extra_manifest=None,
-              epsilon_cut=None):
+              epsilon_cut=None, n_b_override=None):
     s = SERIES[series]
     config = _config_from_series(series)
     cfg_kw = dict(L=L, dim=dim, frame_occupation=frame_occupation, **s)
@@ -102,6 +116,12 @@ def run_shard(L, series, A_values, dim=3, frame_occupation=None,
     # energy_bound/ns amplitude paths; ignored by fock/tong.
     if epsilon_cut is not None:
         cfg_kw['epsilon_cut'] = epsilon_cut
+    # n_b override: fixes the boson register size directly (wins over the series
+    # cutoff AND over frame_occupation, per _compute_cutoffs). This is how the
+    # compiled PauliLCU anchor is run A-independently at a chosen n_b, and how the
+    # resource-vs-cutoff convergence curve is swept.
+    if n_b_override is not None:
+        cfg_kw['n_b_override'] = int(n_b_override)
     run_cfg = get_sweep_config(**cfg_kw)
     params = get_physical_parameters()
 
@@ -110,6 +130,7 @@ def run_shard(L, series, A_values, dim=3, frame_occupation=None,
             'kind': 'quantum_shard', 'L': L, 'dim': dim, 'series': series,
             'series_config': s, 'delta_E_MeV': delta_E,
             'frame_occupation': frame_occupation, 'epsilon_cut': epsilon_cut,
+            'n_b_override': int(n_b_override) if n_b_override is not None else None,
             'params': params,
             'config': config.to_dict(),
             'manifest': build_manifest(extra=extra_manifest),
@@ -194,6 +215,11 @@ def main():
                     help="comma-separated nucleon counts (default 1,2,4)")
     ap.add_argument('--frame-occupation', type=float, default=None,
                     help="per-mode <n> -> frame-reduced Fock register (task 34 seam a)")
+    ap.add_argument('--n-b', type=int, default=None, dest='n_b_override',
+                    help="fix the boson register size n_b directly (wins over the "
+                         "series cutoff and over --frame-occupation). Used to run the "
+                         "compiled PauliLCU anchor A-independently and to sweep the "
+                         "resource-vs-cutoff convergence curve.")
     ap.add_argument('--epsilon-cut', type=float, default=None,
                     help="override the amplitude-basis field-cutoff error (Option A: the "
                          "Watson budget-derived value, e.g. 6.275e-6, so amplitude n_b "
@@ -209,8 +235,8 @@ def main():
     A_values = [int(x) for x in args.A_values.split(',') if x.strip()]
     data = run_shard(args.L, args.series, A_values, dim=args.dim,
                      frame_occupation=args.frame_occupation, delta_E=args.delta_E,
-                     epsilon_cut=args.epsilon_cut, out=args.out,
-                     extra_manifest={'run_args': vars(args)})
+                     epsilon_cut=args.epsilon_cut, n_b_override=args.n_b_override,
+                     out=args.out, extra_manifest={'run_args': vars(args)})
     n = len(data['results'])
     print(f"[qshard] done: {n} points, wall={data.get('wall_s', 0):.1f}s -> {args.out}")
 
