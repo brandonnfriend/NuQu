@@ -32,7 +32,10 @@ import math
 import cirq
 import numpy as np
 
-from src_PI.estimation.sparse_oracle.matching_dilation import atom_dilation_ops
+from src_PI.estimation.sparse_oracle.matching_dilation import (
+    atom_dilation_ops,
+    two_mode_atom_dilation_ops,
+)
 from src_PI.estimation.sparse_oracle.hermitian_bundle import (
     extract_hermitian_atoms,
 )
@@ -72,20 +75,20 @@ def _atom_inner_bits(atom, n_b):
 
 
 def _dominant_atoms(mh, n_b, mode_to_qubits):
-    """The single-mode boson atoms + the static fermion atom (dense M) — the
-    dominant sectors this composite compiles.
+    """The single-mode + two-mode boson atoms + the static fermion atom (dense M).
 
-    Raises on two-mode boson atoms (P0-1 remaining) so nothing is silently
-    dropped. The fermion atom uses a dense contraction dilation here (toy-
-    verifiable); the production cost swaps it for the PauliLCU encoder."""
+    Single- and two-mode boson atoms are dispatched to the compiled matching-
+    dilation; the fermion atom uses a dense contraction dilation here (toy-
+    verifiable), which the production cost swaps for the PauliLCU encoder. Raises
+    on boson atoms spanning >2 modes (none arise in this Hamiltonian)."""
     atoms = extract_hermitian_atoms(mh, n_b, mode_to_qubits, need_dense=True)
     kept = []
     for a in atoms:
-        if a.kind == 'boson' and len(a.support) != n_b:
+        if a.kind == 'boson' and len(a.support) not in (n_b, 2 * n_b):
             raise NotImplementedError(
-                "two-mode boson atom not yet compiled (P0-1 remaining)")
+                f"boson atom on {len(a.support) // n_b} modes not compiled")
         if a.kind == 'mixed':
-            raise NotImplementedError("mixed atom needs two-mode boson (P0-1)")
+            raise NotImplementedError("mixed atom compile not yet wired")
         kept.append(a)
     return kept
 
@@ -108,8 +111,12 @@ def compiled_bundle_ops(outer_sel, inner_sel, b_dil, sys_qubits,
         cvals = [(l >> (b_out - 1 - i)) & 1 for i in range(b_out)]
         if atom.kind == 'boson':
             support = [sys_qubits[q] for q in atom.support]
-            isel = list(inner_sel)[:_atom_inner_bits(atom, n_b)]
-            atom_ops = atom_dilation_ops(isel, b_dil, support, atom.M)
+            if len(atom.support) == 2 * n_b:           # two-mode (H_WT / gradient)
+                atom_ops = two_mode_atom_dilation_ops(
+                    list(inner_sel)[:1], b_dil, support, atom.M, n_b)
+            else:                                       # single-mode
+                isel = list(inner_sel)[:_atom_inner_bits(atom, n_b)]
+                atom_ops = atom_dilation_ops(isel, b_dil, support, atom.M)
         else:                                          # fermion (dense dilation)
             support = [sys_qubits[q] for q in atom.support]
             B = _contraction_dilation(atom.M, atom.alpha)   # Hermitian self-inverse
@@ -123,8 +130,8 @@ def compiled_bundle_widths(mh, n_b, mode_to_qubits):
     """`(b_out, b_inner, w_sys, atoms)` for the compiled composite."""
     atoms = _dominant_atoms(mh, n_b, mode_to_qubits)
     b_out = max(1, int(math.ceil(math.log2(max(1, len(atoms))))))
-    b_inner = max((_atom_inner_bits(a, n_b) for a in atoms if a.kind == 'boson'),
-                  default=1)
+    b_inner = max((_atom_inner_bits(a, n_b) for a in atoms
+                   if a.kind == 'boson' and len(a.support) == n_b), default=1)
     w_sys = 1 + max((max(a.support) for a in atoms if a.support), default=0)
     return b_out, b_inner, w_sys, atoms
 

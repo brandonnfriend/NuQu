@@ -93,13 +93,15 @@ def test_composite_decomposes_with_genuine_t_count():
     assert 0 < t < 100000, f"genuine compiled T-count = {t}"
 
 
-def test_two_mode_atom_raises_not_silently_dropped():
-    """A bundle with a two-mode boson atom raises (P0-1 remaining) rather than
-    silently dropping it."""
-    bp = BosonOperator('0 1', 0.7) + BosonOperator('0^ 1^', 0.7)   # two-mode
+def test_composite_with_two_mode_atom_qubitizes():
+    """The composite dispatches two-mode (H_WT-style) boson atoms too — full
+    boson-sector coverage. A single + two-mode bundle block-encodes H and
+    qubitizes."""
+    bp = (BosonOperator('0', 1.0) + BosonOperator('0^', 1.0)
+          + BosonOperator('1', 1.0) + BosonOperator('1^', 1.0)
+          + BosonOperator('0 1^', 0.6) + BosonOperator('0^ 1', 0.6))  # Hermitian 2-mode
     mh = MixedHamiltonian(boson_part=bp, mode_to_qubits={0: [0, 1], 1: [2, 3]})
-    with pytest.raises(NotImplementedError, match="two-mode"):
-        extract_compiled_bundle(mh, 2, mh.mode_to_qubits)
+    _assert_valid_composite(mh, 2)
 
 
 if __name__ == '__main__':
