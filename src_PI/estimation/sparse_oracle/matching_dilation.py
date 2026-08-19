@@ -152,7 +152,8 @@ def _is_aligned(M_k, shift):
 
 
 def _cyclic_shift_gate(k, n_b):
-    """`|n⟩ → |(n+k) mod 2^n_b⟩` as a MatrixGate on the `n_b` system qubits."""
+    """`|n⟩ → |(n+k) mod 2^n_b⟩` as a MatrixGate on the `n_b` system qubits
+    (VERIFICATION path — `cirq.unitary`-simulable but charged as a generic gate)."""
     N = 1 << n_b
     P = np.zeros((N, N))
     for n in range(N):
@@ -160,7 +161,21 @@ def _cyclic_shift_gate(k, n_b):
     return cirq.MatrixGate(P, name=f'Shift{k:+d}')
 
 
-def matching_dilation_ops(b_dil, sys_qubits, M_k, alpha, shift):
+def _shift_op(k, sys_qubits, as_bloq):
+    """A modular shift `|n⟩→|(n+k) mod 2^n_b⟩`. `as_bloq=True` (COST path) emits a
+    Qualtran `AddK` (properly T-costed); `False` (VERIFICATION path) emits the dense
+    `MatrixGate` (simulable). The two implement the same permutation
+    (`test_matching_dilation` checks AddK vs the dense shift)."""
+    n_b = len(sys_qubits)
+    if as_bloq:
+        from qualtran.bloqs.arithmetic.addition import AddK
+        from qualtran.cirq_interop import BloqAsCirqGate
+        return BloqAsCirqGate(
+            AddK(bitsize=n_b, k=k % (1 << n_b), signed=False)).on(*sys_qubits)
+    return _cyclic_shift_gate(k, n_b).on(*sys_qubits)
+
+
+def matching_dilation_ops(b_dil, sys_qubits, M_k, alpha, shift, as_bloq=False):
     """Yield the decomposable matching-dilation ops for one matching component.
 
     `b_dil` is the 1-qubit dilation ancilla; `sys_qubits` the `n_b` system qubits
@@ -169,6 +184,8 @@ def matching_dilation_ops(b_dil, sys_qubits, M_k, alpha, shift):
     on the `Δ` boundary) compile directly; **misaligned** matchings (the second
     edge-colour, edges crossing the block boundary) are reduced to aligned by
     shift-conjugation `AddK(+Δ)·aligned(M')·AddK(−Δ)`, `M'[m,n]=M_k[(m+Δ)%N,(n+Δ)%N]`.
+    `as_bloq=True` emits `AddK` shifts (COST path, T-costed) instead of the dense
+    `MatrixGate` (VERIFICATION path).
 
     `α·⟨0|_{b_dil} U |0⟩_{b_dil} = M_k` and `U = U† = U⁻¹`.
     """
@@ -181,9 +198,9 @@ def matching_dilation_ops(b_dil, sys_qubits, M_k, alpha, shift):
     N = 1 << n_b
     M_shift = np.array([[M_k[(m + shift) % N, (n + shift) % N] for n in range(N)]
                         for m in range(N)])
-    yield _cyclic_shift_gate(-shift, n_b).on(*sys_qubits)
+    yield _shift_op(-shift, sys_qubits, as_bloq)
     yield from _aligned_ops(b_dil, sys_qubits, M_shift, alpha, j)
-    yield _cyclic_shift_gate(+shift, n_b).on(*sys_qubits)
+    yield _shift_op(+shift, sys_qubits, as_bloq)
 
 
 def extract_matching_dilation(M_k, alpha, shift, n_b):
@@ -384,15 +401,35 @@ def _fold_shift_matrix(upper_parity, n_bpm, dc):
     return P
 
 
-def two_mode_matching_ops(b_dil, sys_qubits, M_k, alpha, n_bpm, upper_parity, dc):
+def _fold_op(upper_parity, n_bpm, dc, sys_qubits, inverse, as_bloq):
+    """The mode_c fold as a controlled shift: shift `mode_c` by `∓dc` when
+    `bit0(mode_b) == upper_parity`. `as_bloq=True` (COST) emits a controlled
+    `AddK` on mode_c (T-costed); `False` (VERIFICATION) emits the dense fold
+    `MatrixGate`. `inverse` gives `F†` (opposite shift direction)."""
+    if not as_bloq:
+        F = _fold_shift_matrix(upper_parity, n_bpm, dc)
+        M = F.conj().T if inverse else F
+        return cirq.MatrixGate(M, name='Fold†' if inverse else 'Fold').on(*sys_qubits)
+    from qualtran.bloqs.arithmetic.addition import AddK
+    from qualtran.cirq_interop import BloqAsCirqGate
+    mode_b_bit0 = sys_qubits[n_bpm - 1]          # LSB of mode_b
+    mode_c = sys_qubits[n_bpm:]
+    step = dc if inverse else -dc                # F shifts by -dc; F† by +dc
+    return BloqAsCirqGate(
+        AddK(bitsize=n_bpm, k=step % (1 << n_bpm), cvs=(upper_parity,),
+             signed=False)).on(mode_b_bit0, *mode_c)
+
+
+def two_mode_matching_ops(b_dil, sys_qubits, M_k, alpha, n_bpm, upper_parity, dc,
+                          as_bloq=False):
     """Yield the dilation ops for one two-mode matching, via fold-conjugation:
     `F† · matching_dilation_ops(F·M_k·F†, shift=N_c) · F`, `F` the mode_c fold."""
     N_f = 1 << n_bpm
     F = _fold_shift_matrix(upper_parity, n_bpm, dc)
     M_folded = F @ M_k @ F.conj().T
-    yield cirq.MatrixGate(F, name='Fold').on(*sys_qubits)             # F (fold)
-    yield from matching_dilation_ops(b_dil, sys_qubits, M_folded, alpha, N_f)
-    yield cirq.MatrixGate(F.conj().T, name='Fold†').on(*sys_qubits)   # F†
+    yield _fold_op(upper_parity, n_bpm, dc, sys_qubits, inverse=False, as_bloq=as_bloq)
+    yield from matching_dilation_ops(b_dil, sys_qubits, M_folded, alpha, N_f, as_bloq)
+    yield _fold_op(upper_parity, n_bpm, dc, sys_qubits, inverse=True, as_bloq=as_bloq)
 
 
 def two_mode_atom_dilation_ops(inner_sel, b_dil, sys_qubits, M, n_bpm):

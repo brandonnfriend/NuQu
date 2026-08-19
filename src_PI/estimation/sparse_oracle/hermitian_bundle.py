@@ -172,7 +172,8 @@ def extract_hermitian_atoms(mh, n_b, mode_to_qubits, need_dense=False):
         atoms.append(HermitianAtom(
             'mixed', M, alpha, support,
             sign=(-1.0 if c.real < 0 else 1.0),
-            payload={'fermion_factor': mt.fermion_factor,
+            payload={'coeff': c,
+                     'fermion_factor': mt.fermion_factor,
                      'boson_group_mats': boson_group_mats,
                      'boson_group_bits': boson_group_bits}))
     return atoms
