@@ -627,54 +627,122 @@ def growing_ladder(H, A, rungs, phase0_runs=64, seed=0, pt2_diag=None,
     return out
 
 
+def phase2_ceiling(L, floor=1 << 15):
+    """L-scaled determinant ceiling (our PRACTICAL wall, not the TrimCI papers'
+    molecular 5e9). Anchored on measured data: L=2 reached ~1e6, L=3 hit a wall at
+    512k. `2^(22-L)` reproduces BOTH (L=2 -> 1,048,576 ≈ 1e6; L=3 -> 524,288 = 512k)
+    and keeps halving per L (L=4 -> 262k, L=5 -> 131k...), floored at `floor` (=32768,
+    reached by L=7). The thousands-of-terms mixed Hamiltonian makes per-solve cost
+    far higher than the molecular systems, so these ceilings are much lower than the
+    paper's; higher-L walls are UNEXPLORED, so treat this as an overridable default."""
+    return max(int(floor), 1 << max(0, int(22 - L)))
+
+
+def default_ladder(L, profile="hpc", phase0_core=1000):
+    """Project-scaled (phase0, phase1_max, phase2_max) det counts. `hpc` = the full
+    L-scaled ladder (Phase 1 co-evolves up to ceiling/10, Phase 2 freezes-and-doubles
+    to the L-ceiling); `smoke` = tiny laptop caps (one system at a time, per the
+    no-heavy-local-compute rule). Phase 0 stays a small heavy-search core."""
+    if profile == "smoke":
+        return {"phase0_core": min(phase0_core, 500), "phase1_max_dets": 4000,
+                "phase2_max_dets": 16000}
+    ceil = phase2_ceiling(L)
+    return {"phase0_core": phase0_core, "phase1_max_dets": max(4000, ceil // 10),
+            "phase2_max_dets": ceil}
+
+
 def three_phase_growing_run(H_bare, A, has_gaussian, has_lf, has_coo, *,
                             phase0_core=1000, phase0_runs=64, phase0_cycles=10,
+                            phase1_mode="coevolve", phase1_growth=1.1, phase1_max_dets=None,
+                            phase1_max_rounds=200, squeeze_opt="analytic",
+                            refine_span=0.25, refine_points=5,
                             phase1_cores=(2000, 4000, 8000), phase1_runs=8, phase1_cycles=3,
                             phase2_rungs=(), pt2_diag=None, seed=0, verbose=True,
                             on_rung=None, max_rung_seconds=None):
-    """The TrimCI 3-phase run over a GROWING determinant space, with a SINGLE, uniform
-    frame-optimization operation (whatever mix of squeeze/LF/COO the run uses):
+    """The TrimCI 3-phase run over a GROWING determinant space, with our full mixed
+    frame (any mix of Gaussian squeeze / Lang-Firsov / COO):
 
-      Phase 0 — DISCOVERY: `optimize_frame` fits the whole frame at a small core with a
-        heavy stochastic search (phase0_runs, and cycles for the iterative parts). This is
-        where the search budget goes (cheap at small core; a good small-core energy predicts
-        the large-core one).
-      Phase 1 — REFINEMENT: grow the det space (phase1_cores) and RE-FIT the same frame at
-        each larger core, so it CO-EVOLVES with the core (each step changes basis -> solved
-        fresh). Only runs when the frame has a core-DEPENDENT part (LF and/or COO); an
-        analytic squeeze is core-independent so there is nothing to refine.
-      Phase 2 — EXPANSION: freeze the frame, WARM-START-grow to the target (phase2_rungs),
-        PT2 at each. Fast (no frame overhead).
+      Phase 0 — DISCOVERY: fit the whole frame at a small core with a heavy stochastic
+        search (`phase0_runs`, `phase0_cycles`). Where the search budget goes.
+      Phase 1 — CO-EVOLUTION (`phase1_mode='coevolve'`, the faithful default): a SINGLE
+        WARM-STARTED trajectory that grows the det space SLOWLY (γ=`phase1_growth`≈1.1)
+        up to `phase1_max_dets`, re-fitting the core-DEPENDENT frame pieces once per
+        round (numerical squeeze scale / LF amplitude / one COO rotation) — TrimCI's
+        per-round κ re-rotation, generalized. Skipped entirely when the frame has
+        nothing core-dependent to co-evolve (`frame_coevolves`): analytic squeeze,
+        Bogoliubov, or bare go straight to Phase 2. `phase1_mode='doubling-fresh'` is
+        the LEGACY comparison path (doubling `phase1_cores`, fresh ensemble re-fit from
+        H_bare each rung — the pre-2026-08-19 behavior) kept as an A/B switch.
+      Phase 2 — EXPANSION: freeze the frame, WARM-START-grow to `phase2_rungs`, PT2 at
+        each. Fast (no frame overhead), γ=2.0 doubling supplied by the caller's rungs.
 
-    PT2 + `on_rung` checkpoint at EVERY rung; phases are tagged. (The COO piece is the 1-RDM
-    natural-orbital proxy for TrimCI's 2-RDM energy-gradient BFGS orbopt.)"""
+    PT2 + `on_rung` checkpoint per rung; PT2 is Phase-2-only (matching the paper — Phase 1
+    reports E_var so the many gentle rounds stay cheap). The COO piece is the 1-RDM
+    natural-orbital proxy for TrimCI's 2-RDM energy-gradient BFGS orbopt."""
     from .pt2 import pt2_from_result
     from .graph_arrays import ground_state_arrays
-    from .frame_workflow import optimize_frame
+    from .frame_workflow import (optimize_frame, initial_frame_state,
+                                 refine_frame_state, frame_coevolves)
     out = []
     fkw = dict(has_gaussian=has_gaussian, has_lf=has_lf, has_coo=has_coo, seed=seed)
+    if phase1_max_dets is None:
+        phase1_max_dets = 10 * phase0_core
 
-    def _checkpoint(H, res, phase, wall):
-        pr = pt2_from_result(H, res, diag_fn=pt2_diag)
-        rung = {"core": int(res.n_dets), "E_var": float(pr["E_var"]),
-                "dE_pt2": float(pr["dE_pt2"]),
-                "E_pt2": float(pr["E_var"]) + float(pr["dE_pt2"]),
-                "n_ext": pr["n_ext"], "wall_s": wall, "phase": phase}
+    def _checkpoint(H, res, phase, wall, pt2=True, extra=None):
+        if pt2:
+            pr = pt2_from_result(H, res, diag_fn=pt2_diag)
+            E_var, dE, n_ext = float(pr["E_var"]), float(pr["dE_pt2"]), pr["n_ext"]
+        else:
+            E_var, dE, n_ext = float(res.energy), None, None
+        rung = {"core": int(res.n_dets), "E_var": E_var, "dE_pt2": dE,
+                "E_pt2": (E_var + dE) if dE is not None else None,
+                "n_ext": n_ext, "wall_s": wall, "phase": phase}
+        if extra is not None:
+            rung["refine"] = extra
         out.append(rung)
         if verbose:
-            print(f"  [{phase:>11}] core={rung['core']:>7}  E_var={rung['E_var']:12.5f} MeV"
-                  f"  dE_PT2={rung['dE_pt2']:+.4f}  [{wall:.0f}s]")
+            pt2s = f"dE_PT2={dE:+.4f}" if dE is not None else "E_var only"
+            print(f"  [{phase:>11}] core={rung['core']:>7}  E_var={E_var:12.5f} MeV"
+                  f"  {pt2s}  [{wall:.0f}s]")
         if on_rung is not None:
             on_rung(rung, res)
         return rung
 
-    t = time.time()                                          # ---- Phase 0: discovery ----
-    H, res = optimize_frame(H_bare, A, phase0_core, num_runs=phase0_runs,
-                            cycles=phase0_cycles, **fkw)
+    # ---- Phase 0: discovery ----
+    t = time.time()
+    if phase1_mode == "coevolve":
+        state, res, H, _info = initial_frame_state(
+            H_bare, A, has_gaussian=has_gaussian, has_lf=has_lf, has_coo=has_coo,
+            squeeze_opt=squeeze_opt, core=phase0_core, num_runs=phase0_runs,
+            cycles=phase0_cycles, seed=seed, verbose=verbose)
+    else:                                                    # legacy doubling-fresh
+        H, res = optimize_frame(H_bare, A, phase0_core, num_runs=phase0_runs,
+                                cycles=phase0_cycles, **fkw)
+        state = None
     _checkpoint(H, res, "0-discovery", time.time() - t)
     core = (res.ferm_arr, res.bos_arr)
 
-    if has_lf or has_coo:                                    # ---- Phase 1: refine/co-evolve ----
+    # ---- Phase 1: co-evolve (faithful) or refine (legacy) ----
+    if phase1_mode == "coevolve":
+        if frame_coevolves(has_gaussian, has_lf, has_coo, squeeze_opt):
+            c = int(res.n_dets)
+            for _ in range(phase1_max_rounds):
+                if c >= phase1_max_dets:
+                    break
+                c = min(phase1_max_dets, max(c + 1, int(np.ceil(c * phase1_growth))))
+                t = time.time()
+                state, res, H, rlog = refine_frame_state(
+                    H_bare, A, state, core=c, initial_core=core, seed=seed,
+                    has_gaussian=has_gaussian, has_lf=has_lf, has_coo=has_coo,
+                    squeeze_opt=squeeze_opt, refine_span=refine_span,
+                    refine_points=refine_points)
+                _checkpoint(H, res, "1-coevolve", time.time() - t, pt2=False, extra=rlog)
+                core = (res.ferm_arr, res.bos_arr)
+                if max_rung_seconds is not None and (time.time() - t) > max_rung_seconds:
+                    if verbose:
+                        print(f"  (Phase-1 round wall > {max_rung_seconds:.0f}s — freeze early)")
+                    break
+    elif has_lf or has_coo:                                  # legacy: doubling + fresh re-fit
         for c in phase1_cores:
             if c <= core[0].shape[0]:
                 continue
@@ -684,7 +752,8 @@ def three_phase_growing_run(H_bare, A, has_gaussian, has_lf, has_coo, *,
             _checkpoint(H, res, "1-refine", time.time() - t)
             core = (res.ferm_arr, res.bos_arr)
 
-    for r in sorted(phase2_rungs):                           # ---- Phase 2: freeze + grow ----
+    # ---- Phase 2: freeze the frame, warm-start-grow, PT2 ----
+    for r in sorted(phase2_rungs):
         if r <= core[0].shape[0]:
             continue
         t = time.time()

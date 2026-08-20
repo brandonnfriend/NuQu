@@ -30,7 +30,8 @@ from classical.trimci.frame_qpe import warmstart_overlap
 from classical.trimci.observables import occupation_tail, occupation_histogram
 from classical.trimci.lf import compactness
 from classical.trimci.run_cpp import (_adaptive_ladder_solve, _pick_solver,
-                                      three_phase_growing_run, growing_ladder)
+                                      three_phase_growing_run, growing_ladder,
+                                      default_ladder)
 
 
 def _mean_occupation(res, n_bos):
@@ -74,6 +75,26 @@ def main():
     ap.add_argument("--phase0-core", type=int, default=2000, help="frame-opt core")
     ap.add_argument("--frame-runs", type=int, default=16, help="COO orbopt num_runs")
     ap.add_argument("--orbopt-cycles", type=int, default=10)
+    # Phase-1 co-evolution (grow mode). Faithful TrimCI: SLOW γ=1.1 growth as a single
+    # WARM-STARTED trajectory, frame refit each round. 'doubling-fresh' = the legacy
+    # comparison arm (doubling rungs, fresh ensemble re-fit from H_bare per rung).
+    ap.add_argument("--phase1-mode", default="coevolve",
+                    choices=["coevolve", "doubling-fresh"],
+                    help="Phase-1: 'coevolve' (γ=1.1 warm-started, default) | "
+                         "'doubling-fresh' (legacy A/B arm)")
+    ap.add_argument("--phase1-growth", type=float, default=1.1,
+                    help="Phase-1 det-space growth per round (coevolve mode)")
+    ap.add_argument("--squeeze-opt", default="analytic", choices=["analytic", "numerical"],
+                    help="'analytic' closed-form r* | 'numerical' re-optimizes r by "
+                         "energy each Phase-1 round (logs ΔE vs analytic — the r* study)")
+    ap.add_argument("--refine-points", type=int, default=5,
+                    help="local-scan points per Phase-1 frame refinement (coevolve)")
+    ap.add_argument("--profile", default="hpc", choices=["hpc", "smoke"],
+                    help="default ladder sizes: 'hpc' = L-scaled ceiling, 'smoke' = tiny")
+    ap.add_argument("--phase1-max-dets", type=int, default=None,
+                    help="override Phase-1 co-evolution endpoint (default: L-ceiling/10)")
+    ap.add_argument("--phase2-max-dets", type=int, default=None,
+                    help="override Phase-2 frozen-expansion ceiling (default: 2^(22-L))")
     ap.add_argument("--ladder-n-runs", type=int, default=1,
                     help="ensemble runs PER LADDER RUNG (independent mode); >1 gives robust "
                          "convergence, needed when the boson init is unbiased")
@@ -204,14 +225,28 @@ def main():
         save()   # INCREMENTAL: survive an OOM/timeout on the next (deeper) rung
 
     if args.ladder_mode == "grow":
-        # Phase 2 rungs = 16k up to max_core (Phase 0 ~1k + Phase 1 2k/4k/8k are internal).
-        p2, r = [], 16000
-        while r <= args.max_core:
+        # Project-scaled ladder (our ~1M-det wall at L=2, 512k at L=3, then decreasing).
+        lad = default_ladder(args.L, args.profile, phase0_core=args.phase0_core)
+        phase1_max = args.phase1_max_dets or lad["phase1_max_dets"]
+        phase2_max = args.phase2_max_dets or lad["phase2_max_dets"]
+        # Phase-2 = γ=2.0 doubling ladder up to the ceiling; three_phase skips rungs
+        # already covered by the Phase-0/Phase-1 core (so this same list works whether
+        # or not the frame co-evolves — for co-evolving frames the low rungs below the
+        # Phase-1 endpoint are simply skipped).
+        p2, r = [], max(2 * lad["phase0_core"], 2)
+        while r <= phase2_max:
             p2.append(r)
             r *= 2
+        out["ladder"] = {"phase0_core": lad["phase0_core"], "phase1_max_dets": phase1_max,
+                         "phase2_max_dets": phase2_max, "phase1_mode": args.phase1_mode,
+                         "phase1_growth": args.phase1_growth, "squeeze_opt": args.squeeze_opt}
+        save()
         three_phase_growing_run(
-            Hbare, A, has_gaussian, has_lf, has_coo, phase0_core=1000,
+            Hbare, A, has_gaussian, has_lf, has_coo, phase0_core=lad["phase0_core"],
             phase0_runs=args.phase0_runs, phase0_cycles=args.orbopt_cycles,
+            phase1_mode=args.phase1_mode, phase1_growth=args.phase1_growth,
+            phase1_max_dets=phase1_max, squeeze_opt=args.squeeze_opt,
+            refine_points=args.refine_points,
             phase1_cores=(2000, 4000, 8000), phase1_runs=args.frame_runs, phase1_cycles=3,
             phase2_rungs=p2, pt2_diag=pt2_diag, seed=args.seed, verbose=True, on_rung=on_rung,
             max_rung_seconds=args.max_rung_seconds)

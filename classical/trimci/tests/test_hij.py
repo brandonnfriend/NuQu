@@ -790,6 +790,90 @@ def test_frame_workflow():
           f"3-phase Phase2 {len(tp['phase2'])} rungs  OK")
 
 
+def test_frame_coevolution():
+    """Faithful Phase-1 CO-EVOLUTION (frame_workflow + three_phase_growing_run;
+    TrimCI's slow-γ warm-started refinement). Checks the fix for the doubling +
+    fresh-reseed Phase-1 oversight:
+    (a) frame_coevolves gate: analytic squeeze is a Phase-1 no-op; numerical squeeze
+        / COO co-evolve;
+    (b) apply_frame reconstructs initial_frame_state's H exactly (single source of
+        truth) and a COO frame stays ISOSPECTRAL to bare;
+    (c) refine_frame_state warm-starts (core GROWS from the carried core) and is
+        accept-if-better (E ≤ E_grow); numerical squeeze never scores worse than the
+        analytic r* (dE_vs_analytic ≤ tol — verifies the closed form);
+    (d) three_phase_growing_run: coevolve+analytic SKIPS Phase 1 (straight to grow),
+        coevolve+numerical co-evolves at γ (consecutive cores ≤ γ·(1+ε)), and the
+        legacy doubling-fresh arm still produces a 1-refine rung;
+    (e) phase2_ceiling anchors on the measured L=2→1M / L=3→512k wall."""
+    from classical.trimci.backend import cpp_available
+    if not cpp_available():
+        print("[39] frame co-evolution — SKIPPED (needs C++ backend)")
+        return
+    from classical.trimci import frame, frame_workflow as fw, run_cpp as rc
+
+    # (a) co-evolution gate
+    assert fw.frame_coevolves(True, False, False, "analytic") is False
+    assert fw.frame_coevolves(True, False, False, "numerical") is True
+    assert fw.frame_coevolves(False, False, True, "analytic") is True
+
+    # (e) L-scaled ceiling anchors (2^(22-L): L=2→1,048,576≈1M, L=3→524,288=512k)
+    assert rc.phase2_ceiling(2) == (1 << 20) and rc.phase2_ceiling(3) == (1 << 19)
+    assert rc.phase2_ceiling(9) == (1 << 15)   # floored for large L
+
+    # (b) COO frame stays ISOSPECTRAL to bare through apply_frame (R unitary by
+    # construction; the carried rotation is the single source of truth for Phase 2)
+    Hc = build_from_eft(1, 3, 2); Ac = 2                    # enumerable; COO the active piece
+    stc, resc, Hfc, infoc = fw.initial_frame_state(Hc, Ac, has_coo=True, core=120,
+                                                   num_runs=6, cycles=2, seed=0)
+    dE_iso = frame.isospectral_check(Hc, fw.apply_frame(Hc, stc), Ac, k=4, tol=1e-6)
+    assert dE_iso < 1e-6, f"COO frame not isospectral: {dE_iso}"
+
+    # (b/c) numerical squeeze on a system with real pair coupling (L=2 d=1, r*≠0)
+    Hs = build_from_eft(2, 1, 2, N_f=4); As = 2
+    st, res, Hf, info = fw.initial_frame_state(Hs, As, has_gaussian=True,
+                                               squeeze_opt="numerical", core=100,
+                                               num_runs=4, seed=0)
+    assert info["squeeze"]["numerical_refine"] is True and abs(st["sq_scale"] + 1.0) < 1e-9
+    # apply_frame reconstructs initial_frame_state's H exactly for the squeeze layer
+    assert len(fw.apply_frame(Hs, st).terms) == len(Hf.terms), \
+        "apply_frame != initial_frame_state H (squeeze)"
+    warm = (res.ferm_arr, res.bos_arr)
+    st, resr, Hfr, log = fw.refine_frame_state(Hs, As, st, core=200, initial_core=warm,
+                                               seed=0, has_gaussian=True,
+                                               squeeze_opt="numerical", refine_points=3)
+    assert resr.n_dets > res.n_dets, "refine did not grow the core (warm-start)"
+    assert float(resr.energy) <= log["E_grow"] + 1e-6, "refine not accept-if-better"
+    assert log["squeeze"]["dE_vs_analytic"] <= 1e-6, "numerical r* worse than analytic"
+
+    # (d) runner: analytic squeeze SKIPS Phase 1; numerical CO-EVOLVES at γ
+    an = rc.three_phase_growing_run(Hs, As, True, False, False, phase0_core=100,
+            phase0_runs=4, phase1_mode="coevolve", squeeze_opt="analytic",
+            phase1_max_dets=400, phase2_rungs=(200, 400), seed=0, verbose=False)
+    assert not any(r["phase"] == "1-coevolve" for r in an) and \
+        any(r["phase"] == "2-grow" for r in an), "analytic squeeze should skip Phase 1"
+    g = 1.35
+    nu = rc.three_phase_growing_run(Hs, As, True, False, False, phase0_core=100,
+            phase0_runs=1, phase1_mode="coevolve", squeeze_opt="numerical",
+            phase1_growth=g, phase1_max_dets=260, refine_points=3, phase2_rungs=(),
+            seed=0, verbose=False)
+    co = [r for r in nu if r["phase"] == "1-coevolve"]
+    assert co, "numerical squeeze should co-evolve in Phase 1"
+    cores = [r["core"] for r in co]
+    assert all(cores[i + 1] <= np.ceil(cores[i] * g) * 1.05 + 1 for i in range(len(cores) - 1)), \
+        f"Phase-1 growth exceeds γ={g}: {cores}"
+
+    # (d) legacy doubling-fresh arm still runs
+    df = rc.three_phase_growing_run(Hc, Ac, False, False, True, phase0_core=100,
+            phase0_runs=4, phase0_cycles=2, phase1_mode="doubling-fresh",
+            phase1_cores=(200,), phase1_runs=4, phase1_cycles=2, phase2_rungs=(),
+            seed=0, verbose=False)
+    assert any(r["phase"] == "1-refine" for r in df), "doubling-fresh arm broken"
+
+    print(f"[39] frame co-evolution: gate ok; COO apply_frame iso={dE_iso:.0e}; "
+          f"warm refine {res.n_dets}->{resr.n_dets} dets, num r* dE={log['squeeze']['dE_vs_analytic']:+.1e}; "
+          f"analytic skips P1, numerical γ-grows {cores}; doubling-fresh arm ok  OK")
+
+
 def test_cpp_full_path():
     """Full C++ hot path (build_coo + expand + sparse Davidson) reaches ED.
     Skipped if the standalone mixed_ci module or the sparse-Davidson fork is absent."""
@@ -1341,6 +1425,7 @@ def main():
     test_frame_projector_lf_variational()
     test_frame_coo_from_core()
     test_frame_workflow()
+    test_frame_coevolution()
     test_cpp_full_path()
     test_matfree_diagonalize()
     test_ground_state_arrays()
