@@ -62,6 +62,31 @@ def _estimate_one(name, instance):
     return results, encoding.alpha, False
 
 
+def sample_walk_fits(instance, cp_samples=(1e-4, 1e-12)):
+    """Sample the single walk at ≥2 `circuit_precision` values and fit both `walk_T` and
+    `walk_Clifford` as `a + b·log2(1/cp)` (pyLIQTR synthesis is exactly log-linear → 2 pts
+    exact). Returns `{'T': (a,b), 'Clifford': (a,b), 'LogicalQubits': q, 'resid_T':...,
+    'samples': [...]}`. This is all the total-T budget optimizer needs — no default-
+    precision call, so the optimized single-walk path costs exactly `len(cp_samples)`
+    estimates.
+    """
+    from src_PI.estimation.total_t_optimizer import fit_walk_t_vs_precision
+    encoding = getEncoding(VALID_ENCODINGS.PauliLCU)(instance)
+    walk = QubitizedWalkOperator(encoding)
+    rows = []
+    for cp in cp_samples:
+        r = estimate_resources(walk, circuit_precision=cp)
+        rows.append((cp, r.get('T', 0), r.get('Clifford', 0), r.get('LogicalQubits', 0)))
+    aT, bT, resid_T = fit_walk_t_vs_precision([(cp, t) for cp, t, _c, _q in rows])
+    aC, bC, resid_C = fit_walk_t_vs_precision([(cp, c) for cp, _t, c, _q in rows])
+    return {
+        'T': (aT, bT), 'Clifford': (aC, bC),
+        'LogicalQubits': rows[0][3],            # register count is cp-independent
+        'resid_T': resid_T, 'resid_C': resid_C,
+        'samples': rows,
+    }
+
+
 def run_qubitization_analysis(norm_data, n_sites, n_qubits_per_site):
     """
     Estimate resources for every sub-Hamiltonian in the normalized bundle.

@@ -33,10 +33,24 @@ def git_commit():
 
 
 def git_is_dirty():
-    status = _git(['status', '--porcelain'])
+    """True iff TRACKED source files are modified. Untracked files (campaign output,
+    the nested `data/` repo, caches) do NOT count — otherwise every HPC run that writes
+    output beside the checkout falsely reports dirty (codex data-audit provenance point).
+    `--untracked-files=no` restricts the check to tracked modifications = real source drift."""
+    status = _git(['status', '--porcelain', '--untracked-files=no'])
     if status is None:
         return None
     return bool(status.strip())
+
+
+def git_tracked_diff_hash():
+    """Short hash of the tracked-file diff when the source is dirty (None if clean/unavailable).
+    Lets a dirty run stay auditable: the exact source delta is pinned even without a commit."""
+    diff = _git(['diff', 'HEAD'])
+    if not diff:
+        return None
+    import hashlib
+    return hashlib.sha1(diff.encode('utf-8', 'replace')).hexdigest()[:12]
 
 
 def build_manifest(extra=None):
@@ -44,7 +58,8 @@ def build_manifest(extra=None):
     timestamp, and any `extra` (e.g. the Config dict, the shard's run args)."""
     manifest = {
         'git_commit': git_commit(),
-        'git_dirty': git_is_dirty(),
+        'git_dirty': git_is_dirty(),                 # tracked-source modifications only
+        'git_tracked_diff_hash': git_tracked_diff_hash(),
         'git_branch': _git(['rev-parse', '--abbrev-ref', 'HEAD']),
         'hostname': socket.gethostname(),
         'timestamp_utc': datetime.now(timezone.utc).isoformat(),

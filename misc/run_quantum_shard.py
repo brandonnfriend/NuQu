@@ -108,7 +108,8 @@ def _config_from_series(series, walk_composition='combined_lcu'):
 
 def run_shard(L, series, A_values, dim=3, frame_occupation=None,
               delta_E=DEFAULT_DELTA_E_MEV, out=None, extra_manifest=None,
-              epsilon_cut=None, n_b_override=None, walk_composition='combined_lcu'):
+              epsilon_cut=None, n_b_override=None, walk_composition='combined_lcu',
+              optimize_qpe_budget=False):
     s = SERIES[series]
     config = _config_from_series(series, walk_composition=walk_composition)
     cfg_kw = dict(L=L, dim=dim, frame_occupation=frame_occupation, **s)
@@ -130,6 +131,7 @@ def run_shard(L, series, A_values, dim=3, frame_occupation=None,
         'metadata': {
             'kind': 'quantum_shard', 'L': L, 'dim': dim, 'series': series,
             'series_config': s, 'delta_E_MeV': delta_E,
+            'optimize_qpe_budget': optimize_qpe_budget,
             'frame_occupation': frame_occupation, 'epsilon_cut': epsilon_cut,
             'n_b_override': int(n_b_override) if n_b_override is not None else None,
             'params': params,
@@ -154,28 +156,40 @@ def run_shard(L, series, A_values, dim=3, frame_occupation=None,
     for A in A_values:
         n_b, pi_max, Pi_max = _compute_cutoffs(L, dim, A, params, run_cfg, config)
         t_pt = time.time()
-        norm = evaluate_resources(L, dim, n_b, pi_max, params, config)
+        norm = evaluate_resources(L, dim, n_b, pi_max, params, config,
+                                  delta_E=delta_E,
+                                  optimize_qpe_budget=optimize_qpe_budget)
         dt = time.time() - t_pt
         lam = norm['Physical_Lambda']
         t_step = norm['Total_T_Count']
+        # When the budget optimizer ran, it already computed N_walk / QPE-T at the
+        # optimal eps_qpe (not the full delta_E). Otherwise fall back to the naive
+        # full-delta_E-to-QPE convention (labeled default-precision diagnostic).
+        budget = norm.get('QPE_Budget')
+        qpe_nwalk = norm['QPE_Walk_Queries'] if budget else walk_queries(lam, delta_E)
+        qpe_total = norm['QPE_Total_T_Count'] if budget else total_qpe_t_count(t_step, lam, delta_E)
         entry = {
             'A': int(A), 'L': L, 'dim': dim, 'n_b': n_b,
             'pi_max': float(pi_max) if pi_max == pi_max else None,
             'Pi_max': float(Pi_max) if Pi_max == Pi_max else None,
-            'Runtime_Seconds': round(dt, 3),
+            'Estimator_Wall_Seconds': round(dt, 3),   # classical estimator runtime (NOT quantum)
             'Physical_Lambda': lam,
-            'Logical_Qubits': norm['Logical_Qubits'],
+            'Logical_Qubits': norm['Logical_Qubits'],  # one walk/block-encoding register
             'Walk_Clifford_Count': norm['Walk_Clifford_Count'],
             'Walk_T_Count': norm['Walk_T_Count'],
             'QFT_T_Count': norm['QFT_T_Count'],
             'Total_T_Count': t_step,
             'Per_Sub_Walk': norm.get('Per_Sub_Walk', []),
+            # precision/error budget + pruning provenance (audit issues 1+2). None when
+            # optimize_qpe_budget is off (default-precision diagnostic run).
+            'QPE_Budget': budget,
+            'Pruned_One_Norm_MeV': norm.get('pruned_one_norm_MeV'),
             # sparse LCU breakdown (L_eff, select_T, single_mode_walk_T) — feeds the
             # walk-depth / reaction-limited runtime model (task 30/34) downstream.
             'Sparse_Breakdown': norm.get('Sparse_Breakdown'),
-            # fold the QPE totals in per-entry so incremental saves carry them
-            'QPE_Walk_Queries': walk_queries(lam, delta_E),
-            'QPE_Total_T_Count': total_qpe_t_count(t_step, lam, delta_E),
+            # QPE totals: coherent walk-query cost (multiply by repetitions ~1/p0 separately)
+            'QPE_Walk_Queries': qpe_nwalk,
+            'QPE_Total_T_Count': qpe_total,
         }
         # reaction-limited depth band (sparse-family only; None otherwise).
         entry['Reaction_Depth'] = _reaction_depth(
@@ -183,8 +197,13 @@ def run_shard(L, series, A_values, dim=3, frame_occupation=None,
         out_data['results'].append(entry)
         out_data['wall_s'] = time.time() - t0
         save()                        # INCREMENTAL: survive an OOM on the next A
+        bs = ""
+        if budget:
+            bs = (f" f*={budget['qpe_fraction']:.2f} cp*={budget['circuit_precision']:.2e} "
+                  f"pruned={budget['pruned_one_norm_MeV']:.1e}MeV"
+                  f"{'' if budget['prune_within_budget'] else ' PRUNE-OVER-BUDGET'}")
         print(f"[qshard] L={L} series={series} A={A} n_b={n_b} "
-              f"Lambda={lam:.3e} QPE_T={entry['QPE_Total_T_Count']:.3e} ({dt:.1f}s)")
+              f"Lambda={lam:.3e} QPE_T={entry['QPE_Total_T_Count']:.3e} ({dt:.1f}s){bs}")
 
     out_data['done'] = True
     out_data['wall_s'] = time.time() - t0
@@ -227,6 +246,11 @@ def main():
                          "QPE-valid controlled-sum LCU walk) or 'split_sum' (legacy "
                          "invalid two-walk sum, for the A/B methods delta only). No "
                          "effect on the single-walk Fock/sparse series.")
+    ap.add_argument('--optimize-budget', action='store_true', dest='optimize_qpe_budget',
+                    help="single-walk Fock/PauliLCU: split delta_E between QPE resolution "
+                         "and block-encoding synthesis and pick the total-T-minimizing "
+                         "allocation (audit issue 1); record pruned one-norm vs budget "
+                         "(issue 2). The publication-grade accuracy contract.")
     ap.add_argument('--epsilon-cut', type=float, default=None,
                     help="override the amplitude-basis field-cutoff error (Option A: the "
                          "Watson budget-derived value, e.g. 6.275e-6, so amplitude n_b "
@@ -244,6 +268,7 @@ def main():
                      frame_occupation=args.frame_occupation, delta_E=args.delta_E,
                      epsilon_cut=args.epsilon_cut, n_b_override=args.n_b_override,
                      walk_composition=args.walk_composition,
+                     optimize_qpe_budget=args.optimize_qpe_budget,
                      out=args.out, extra_manifest={'run_args': vars(args)})
     n = len(data['results'])
     print(f"[qshard] done: {n} points, wall={data.get('wall_s', 0):.1f}s -> {args.out}")

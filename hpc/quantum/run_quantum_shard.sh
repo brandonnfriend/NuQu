@@ -25,6 +25,11 @@ EPSCUT="${7:-}"
 # $8 = boson register size override n_b (fock_pauli anchor / n_b convergence sweep).
 # "-" / empty = the series' own cutoff. Wins over the series cutoff and --frame-occupation.
 NBOVR="${8:-}"
+# $9 = "opt" -> pass --optimize-budget (total-T-optimal precision split; publication path).
+OPTIMIZE="${9:-}"
+# $10 = repeat/determinism tag (e.g. "rep2") -> suffixes the output so a re-run of the
+# same config lands in a distinct file for the determinism check. "-"/empty = none.
+REP="${10:-}"
 REPO=/nfs_scratch/bfriend3/NuQu/NuQu
 SANDBOX="$(pwd)"
 [ -r "$REPO/misc/run_quantum_shard.py" ] || { echo "ERROR: cannot read repo at $REPO" >&2; exit 1; }
@@ -80,10 +85,20 @@ case "$NBOVR" in
     ""|"-") : ;;
     *) NB_ARG="--n-b $NBOVR"; NB_TAG="_nb${NBOVR}" ;;
 esac
-OUT="$OUTDIR/L${L}_${SERIES}${NB_TAG}${FOCC_TAG}${EPS_TAG}.json"
+OPT_ARG=""
+OPT_TAG=""
+case "$OPTIMIZE" in
+    opt|optimize|1|yes) OPT_ARG="--optimize-budget"; OPT_TAG="_opt" ;;
+esac
+REP_TAG=""
+case "$REP" in
+    ""|"-"|none) : ;;
+    *) REP_TAG="_${REP}" ;;
+esac
+OUT="$OUTDIR/L${L}_${SERIES}${NB_TAG}${FOCC_TAG}${EPS_TAG}${OPT_TAG}${REP_TAG}.json"
 # shellcheck disable=SC2086
 "$PY" -m misc.run_quantum_shard --L "$L" --series "$SERIES" --dim 3 \
-    --A-values "$AVALS" $FOCC_ARG $EPS_ARG $NB_ARG --out "$OUT"
+    --A-values "$AVALS" $FOCC_ARG $EPS_ARG $NB_ARG $OPT_ARG --out "$OUT"
 status=$?
 echo "[qshard] done status=$status -> $OUT"
 exit "$status"

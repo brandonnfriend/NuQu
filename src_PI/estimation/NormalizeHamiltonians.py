@@ -90,8 +90,14 @@ def normalize_for_qpe(bundle, safety_factor=2.5):
 
     raw_thresh = _NOISE_FLOOR_NORM * delta
 
-    # Pass 2: normalize each sub-Hamiltonian with the shared Δ.
+    # Pass 2: normalize each sub-Hamiltonian with the shared Δ. ACCUMULATE the discarded
+    # coefficient one-norm (audit issue 2): pruning is a systematic Hamiltonian
+    # perturbation bounded by the SUM of |removed coefficients| (RAW MeV energy units),
+    # not the per-term threshold. Caller checks it against the allocated pruning budget;
+    # for n_b=2 it is ~0, at high n_b it can exceed 1 MeV (those points get flagged).
     normalized = []
+    discarded_one_norm = 0.0            # Σ|c_raw| over pruned terms, in MeV
+    discarded_count = 0
     for name, H in bundle.sub_hamiltonians:
         new_terms = {}
         for term, coeff in H.terms.items():
@@ -99,6 +105,9 @@ def normalize_for_qpe(bundle, safety_factor=2.5):
                 continue
             if abs(coeff) >= raw_thresh:
                 new_terms[term] = coeff / delta
+            else:
+                discarded_one_norm += abs(coeff)     # raw energy removed
+                discarded_count += 1
         H_norm = QubitOperator()
         H_norm.terms = new_terms
         normalized.append((name, H_norm))
@@ -111,4 +120,9 @@ def normalize_for_qpe(bundle, safety_factor=2.5):
         'identity_shift': total_identity_shift,
         'physical_lambda': total_physical_lambda,
         'walk_mode': bundle.walk_mode,
+        # pruning provenance (audit issue 2): the removed Pauli one-norm as an energy
+        # error bound, its count, and the raw threshold used.
+        'pruned_one_norm_MeV': discarded_one_norm,
+        'pruned_term_count': discarded_count,
+        'prune_threshold_raw': raw_thresh,
     }
