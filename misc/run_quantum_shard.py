@@ -9,10 +9,15 @@ robustness pattern as the classical `run_frame_shard.py`.
 A "series" is one design-axis column of the campaign (basis + encoder + cutoff):
 
     fock_pauli = fock  / (n_b) / pauli_lcu   (THE compiled PauliLCU anchor, task N4)
-    watson  = amplitude / energy_bound / pauli_lcu   (Watson Lemma-5 baseline)
-    ns      = amplitude / ns          / pauli_lcu     (Nyquist-Shannon, tong register)
+    watson  = amplitude / energy_bound / pauli_lcu   (EXPERIMENTAL — not paper-grade)
+    ns      = amplitude / ns          / pauli_lcu     (EXPERIMENTAL — not paper-grade)
     sparse  = fock      / sparse      / tong          (FROZEN feasibility path; not a headline)
     sparse_heuristic = fock / sparse  / heuristic     (comparison against tong)
+
+⚠️ The amplitude series (watson/ns) are EXPERIMENTAL: their split-oracle walk is not a
+validated block encoding (H_WT is mis-represented; codex amplitude_combined_walk_audit_
+2026-08-20). Do NOT report their QPE totals or amplitude-vs-Fock comparisons — the paper's
+quantum anchor is `fock_pauli`. Amplitude is retained only as a component-cost diagnostic.
 
 The paper's quantum anchor (REMEDIATION_PLAN N4) is `fock_pauli`: the Fock-basis
 Hamiltonian materialized as a Pauli sum and block-encoded by pyLIQTR's PauliLCU

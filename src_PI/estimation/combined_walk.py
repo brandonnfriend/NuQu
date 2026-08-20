@@ -1,4 +1,16 @@
-"""Controlled-sum LCU walk — the QPE-VALID composition of split-oracle sub-walks.
+"""Controlled-sum LCU walk — EXPERIMENTAL cost roll-up for the split-oracle (NOT VALIDATED).
+
+⚠️ STATUS (codex audit `02_quantum_resources/amplitude_combined_walk_audit_2026-08-20.md`):
+this is an **experimental cost roll-up, not a validated block encoding or QPE walk**, and
+its amplitude numbers are **not publication-grade**. It picks the right *target*
+architecture (a controlled-sum LCU) but does NOT build it, and it does NOT fix the operator:
+the six Weinberg–Tomozawa ε-terms remain inside one `pos_dyn` PauliLCU that treats π and Π
+as simultaneously diagonal (impossible — each ε-term needs a *different* species in the
+momentum basis). Adding a scalar `wt_basis_change_t` T-charge does not change the operator
+PauliLCU block-encodes, so the amplitude resource number still does not correspond to the
+Watson amplitude Hamiltonian. **Do not use amplitude `combined_lcu` for watson/ns QPE totals,
+amplitude-vs-Fock comparisons, or any paper claim.** The paper's anchor is Fock/PauliLCU; the
+valid controlled species-selective sum encoding is FUTURE WORK (see the audit's 7-step repair).
 
 The amplitude basis splits the Hamiltonian into `H_pos` (position/field basis) and
 `H_mom` (Π², momentum basis). The LEGACY pipeline qubitized each independently, summed
@@ -8,8 +20,10 @@ times realizes (W_pos·W_mom)^N_walk, whose eigenphases are unrelated to the eig
 of the sum, and no QFT-between-independent-walks changes that (codex audit P0-4 /
 release-blocker 3).
 
-This module implements the CORRECT construction — a single block encoding of the sum
-via a controlled-sum LCU, then ONE qubitized walk:
+This module TARGETS the right general construction — a single block encoding of the sum
+via a controlled-sum LCU, then ONE qubitized walk — but implements only its numerical cost
+roll-up (no PREP/SELECT/flag/walk is constructed, no projected block is verified, the WT
+species-selective branches are not extracted, and controlled-branch overhead is omitted):
 
     B_H = PREP · SELECT · PREP†     (one LCU control register over the k sub-oracles)
       PREP   : Σ_i √(λ_i/λ) |i⟩ ⊗ (sub-oracle i's own PREPARE)          λ = Σ_i λ_i
@@ -24,12 +38,15 @@ per-step T-count (one combined walk, not two summed), the logical-qubit count (a
 LCU control register + QFT workspace the real walk needs), and the QFT is now a coherent
 part of the step rather than an external charge.
 
-This is a COMPOSED cost model, not a monolithic compiled circuit: pyLIQTR has no native
-LCU-of-block-encodings/basis-change primitive, so each sub-oracle's SELECT+PREPARE is
-compiler-derived (pyLIQTR `estimate_resources` on the block ENCODING) and the composition
-pieces — the k-way PREPARE rotation, the basis-change QFTs, and the combined reflection —
-are costed analytically. The audit sanctions exactly this ("state and cost the actual
-composition algorithm including precision allocation"). Label reported numbers accordingly.
+This is only a COST ROLL-UP, and an incomplete one. A defensible compositional estimate
+would have to be *derived from a validated small executable composite* (verified to project
+to the target amplitude Hamiltonian, Hermitian, clean ancillae, correct qubitization
+eigenphases) and include every controlled operation — none of which is done here. It also
+sums UNCONTROLLED sub-encoding costs for what must be LCU-controlled SELECTs, undercounts the
+two-sided outer PREP, and uses a QFT/`δ_WT`/reflection cost with no derived precision contract.
+So the amplitude output is an experimental placeholder, not a publication number. The paper
+uses the Fock/PauliLCU anchor; the valid controlled species-selective sum encoding is future
+work (codex `02_quantum_resources/amplitude_combined_walk_audit_2026-08-20.md`).
 """
 
 import math
@@ -124,9 +141,10 @@ def compose_combined_walk(per_sub, momentum_qft_t, L, dim, n_b):
         },
         # Honest labels for downstream tables (N6 claim discipline).
         'composition_label': (
-            'composed: pyLIQTR-compiled sub-oracle SELECT+PREPARE per branch; '
-            'k-way PREPARE, momentum + WT species-selective basis-change QFTs, and '
-            'combined reflection costed analytically (controlled-Trotter δ_WT on the '
-            'WT basis change). Not a monolithic compiled circuit.'
+            'EXPERIMENTAL cost roll-up — NOT a validated block encoding. H_WT is still '
+            'mis-represented in pos_dyn (π and Π both diagonal), no combined circuit is '
+            'built or projected-block-checked, and controlled-branch overhead is omitted. '
+            'Amplitude numbers are not publication-grade; the valid construction is future '
+            'work (codex amplitude_combined_walk_audit_2026-08-20). Fock/PauliLCU is the anchor.'
         ),
     }

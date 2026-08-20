@@ -1,7 +1,10 @@
-"""Unit test for the QPE-valid controlled-sum LCU walk composition (combined_walk.py).
+"""Unit test for the amplitude combined-walk COST BOOKKEEPING (combined_walk.py).
 
-Pure composition math (no pyLIQTR) — verifies the fix for codex audit P0-4: the split
-oracle is combined into ONE walk, not two summed walks. Run from the root:
+Scope note (codex amplitude_combined_walk_audit_2026-08-20): this checks only the numerical
+roll-up (branch sums, ancilla reuse, LCU/QFT overhead) — it does NOT construct any unitary,
+verify the projected block equals the target amplitude Hamiltonian, or validate H_WT's
+species-selective basis. The amplitude path is EXPERIMENTAL and not publication-grade; the
+paper anchor is Fock/PauliLCU. Run from the root:
     python -m tests.test_combined_walk
 """
 import sys
@@ -76,7 +79,8 @@ def main():
         for f in fails:
             print(f"  - {f}")
         return 1
-    print("PASS: split oracle composed into one QPE-valid walk (ancilla reused, LCU+QFT added).")
+    print("PASS: cost bookkeeping consistent (ancilla reused, LCU+QFT added). "
+          "NOTE: bookkeeping only — not a validated block encoding.")
     return 0
 
 

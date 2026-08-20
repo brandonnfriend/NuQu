@@ -77,15 +77,14 @@ class Config:
     # synthesized to Clifford+T at the ΔE-derived precision, scalable primitives,
     # full Hamiltonian incl. mixed atoms (compiled_resources).
     sparse_oracle_mode: str = 'analytical'
-    # How the split-oracle sub-walks (amplitude basis: H_pos + H_mom) are combined
-    # into a single QPE-valid walk. 'combined_lcu' (default) = the CORRECT controlled-
-    # sum block encoding: one PREPARE over {H_pos, H_mom}, one SELECT with the momentum
-    # (and WT species-selective) branches basis-changed by QFT *inside* SELECT, one
-    # reflection, N_walk queries to the ONE walk. 'split_sum' = the LEGACY (invalid)
-    # path that sums two independent qubitized-walk costs + a flat QFT charge — kept
-    # ONLY for the A/B delta; it does NOT implement QPE for H_pos+H_mom (codex audit
-    # P0-4). Only consulted for the amplitude split (≥2 sub-walks); the single-walk
-    # Fock/PauliLCU anchor is byte-identical under either value.
+    # How the split-oracle sub-walks (amplitude basis: H_pos + H_mom) are combined.
+    # ⚠️ BOTH amplitude paths are EXPERIMENTAL / not publication-grade — the paper anchor
+    # is Fock/PauliLCU, and amplitude quantum totals must not be reported (codex
+    # amplitude_combined_walk_audit_2026-08-20). 'combined_lcu' (default) targets the right
+    # controlled-sum LCU architecture but is only an incomplete COST ROLL-UP: it does not
+    # build/validate the block encoding and leaves H_WT mis-represented in pos_dyn.
+    # 'split_sum' is the older invalid two-walk sum. Only consulted for the amplitude split
+    # (≥2 sub-walks); the single-walk Fock/PauliLCU anchor is byte-identical under either.
     walk_composition: str = 'combined_lcu'
 
     # Free-form extras: anything the user wants to remember about the run
