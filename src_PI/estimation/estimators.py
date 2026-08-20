@@ -31,7 +31,14 @@ _RESOURCE_CACHE = {}
 def _estimate_one(name, instance):
     """Estimate resources for a single sub-Hamiltonian.
 
-    Returns (results_dict, alpha, cache_hit).
+    Estimates BOTH the block ENCODING (SELECT+PREPARE) and the full WALK (R·B). The
+    walk is the standalone single-oracle cost; the encoding (SELECT+PREPARE, without the
+    walk reflection) is the piece the QPE-valid controlled-sum composition needs to
+    assemble a single walk from ≥2 split-oracle sub-Hamiltonians (see combined_walk.py).
+
+    Returns (results_dict, alpha, cache_hit); results_dict carries both the walk keys
+    ('T','Clifford','LogicalQubits') and the encoding keys ('T_enc','Clifford_enc',
+    'qubits_enc').
     """
     cache_disabled = os.environ.get("NUQU_DISABLE_PYLIQTR_CACHE", "") == "1"
     key = None if cache_disabled else (name, instance.n_qubits())
@@ -43,8 +50,12 @@ def _estimate_one(name, instance):
 
     encoding_type = VALID_ENCODINGS.PauliLCU
     encoding = getEncoding(encoding_type)(instance)
+    enc_results = estimate_resources(encoding)          # SELECT + PREPARE (no reflection)
     walk = QubitizedWalkOperator(encoding)
-    results = estimate_resources(walk)
+    results = dict(estimate_resources(walk))            # R · B (the standalone walk)
+    results['T_enc'] = enc_results.get('T', 0)
+    results['Clifford_enc'] = enc_results.get('Clifford', 0)
+    results['qubits_enc'] = enc_results.get('LogicalQubits', 0)
 
     if key is not None:
         _RESOURCE_CACHE[key] = {"results": dict(results)}
@@ -92,6 +103,11 @@ def run_qubitization_analysis(norm_data, n_sites, n_qubits_per_site):
             'alpha': alpha,
             'cache_hit': hit,
             'n_qubits': instance.n_qubits(),
+            # block-encoding (SELECT+PREPARE) pieces for the QPE-valid composition
+            'T_enc': results.get('T_enc', 0),
+            'Clifford_enc': results.get('Clifford_enc', 0),
+            'qubits_enc': results.get('qubits_enc', 0),
+            'n_system': instance.n_qubits(),
         })
         total_T += T_count
         total_clifford += clifford_count
@@ -99,8 +115,10 @@ def run_qubitization_analysis(norm_data, n_sites, n_qubits_per_site):
         cache_hits.append(hit)
 
         # Pass through any other keys (e.g. 'Rotations' when profile=True) by summing.
+        # Encoding pieces are carried per-sub (for the composition), not summed here.
         for k, v in results.items():
-            if k in ('T', 'Clifford', 'LogicalQubits'):
+            if k in ('T', 'Clifford', 'LogicalQubits',
+                     'T_enc', 'Clifford_enc', 'qubits_enc'):
                 continue
             other_summed[k] = other_summed.get(k, 0) + v
 

@@ -97,19 +97,20 @@ SERIES = {
 }
 
 
-def _config_from_series(series):
+def _config_from_series(series, walk_composition='combined_lcu'):
     s = SERIES[series]
     return Config(pion_basis=s['pion_basis'], walk_mode='series',
                   cutoff_method=s['cutoff_method'],
                   boson_cutoff_method=s['boson_cutoff_method'],
-                  block_encoder=s['block_encoder'])
+                  block_encoder=s['block_encoder'],
+                  walk_composition=walk_composition)
 
 
 def run_shard(L, series, A_values, dim=3, frame_occupation=None,
               delta_E=DEFAULT_DELTA_E_MEV, out=None, extra_manifest=None,
-              epsilon_cut=None, n_b_override=None):
+              epsilon_cut=None, n_b_override=None, walk_composition='combined_lcu'):
     s = SERIES[series]
-    config = _config_from_series(series)
+    config = _config_from_series(series, walk_composition=walk_composition)
     cfg_kw = dict(L=L, dim=dim, frame_occupation=frame_occupation, **s)
     # epsilon_cut override (Option A: Watson budget-derived ε_cut for the amplitude
     # cutoff, so the amplitude n_b matches the Trotter baseline). Only affects the
@@ -220,6 +221,12 @@ def main():
                          "series cutoff and over --frame-occupation). Used to run the "
                          "compiled PauliLCU anchor A-independently and to sweep the "
                          "resource-vs-cutoff convergence curve.")
+    ap.add_argument('--walk-composition', default='combined_lcu',
+                    choices=['combined_lcu', 'split_sum'],
+                    help="amplitude split-oracle composition: 'combined_lcu' (default, "
+                         "QPE-valid controlled-sum LCU walk) or 'split_sum' (legacy "
+                         "invalid two-walk sum, for the A/B methods delta only). No "
+                         "effect on the single-walk Fock/sparse series.")
     ap.add_argument('--epsilon-cut', type=float, default=None,
                     help="override the amplitude-basis field-cutoff error (Option A: the "
                          "Watson budget-derived value, e.g. 6.275e-6, so amplitude n_b "
@@ -236,6 +243,7 @@ def main():
     data = run_shard(args.L, args.series, A_values, dim=args.dim,
                      frame_occupation=args.frame_occupation, delta_E=args.delta_E,
                      epsilon_cut=args.epsilon_cut, n_b_override=args.n_b_override,
+                     walk_composition=args.walk_composition,
                      out=args.out, extra_manifest={'run_args': vars(args)})
     n = len(data['results'])
     print(f"[qshard] done: {n} points, wall={data.get('wall_s', 0):.1f}s -> {args.out}")

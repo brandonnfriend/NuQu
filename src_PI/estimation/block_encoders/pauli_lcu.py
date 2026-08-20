@@ -67,6 +67,11 @@ class PauliLCUStrategy:
                 'Clifford': e['Clifford'],
                 'LogicalQubits': e['LogicalQubits'],
                 'alpha': e['alpha'],
+                # block-encoding (SELECT+PREPARE) pieces for the QPE-valid composition
+                'T_enc': e.get('T_enc', 0),
+                'Clifford_enc': e.get('Clifford_enc', 0),
+                'qubits_enc': e.get('qubits_enc', 0),
+                'n_system': e.get('n_system', e['LogicalQubits']),
             }
             for e in per_sub
         ]

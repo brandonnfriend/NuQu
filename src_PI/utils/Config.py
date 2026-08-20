@@ -51,6 +51,7 @@ _VALID_CUTOFF_METHODS = ('energy_bound', 'ns')
 _VALID_BOSON_CUTOFF_METHODS = ('heuristic', 'tong', 'tong_rigorous')
 _VALID_BLOCK_ENCODERS = ('pauli_lcu', 'sparse', 'lobe')
 _VALID_SPARSE_ORACLE_MODES = ('analytical', 'hermitian_cost_model', 'compiled')
+_VALID_WALK_COMPOSITIONS = ('combined_lcu', 'split_sum')
 
 
 @dataclass
@@ -76,6 +77,16 @@ class Config:
     # synthesized to Clifford+T at the ΔE-derived precision, scalable primitives,
     # full Hamiltonian incl. mixed atoms (compiled_resources).
     sparse_oracle_mode: str = 'analytical'
+    # How the split-oracle sub-walks (amplitude basis: H_pos + H_mom) are combined
+    # into a single QPE-valid walk. 'combined_lcu' (default) = the CORRECT controlled-
+    # sum block encoding: one PREPARE over {H_pos, H_mom}, one SELECT with the momentum
+    # (and WT species-selective) branches basis-changed by QFT *inside* SELECT, one
+    # reflection, N_walk queries to the ONE walk. 'split_sum' = the LEGACY (invalid)
+    # path that sums two independent qubitized-walk costs + a flat QFT charge — kept
+    # ONLY for the A/B delta; it does NOT implement QPE for H_pos+H_mom (codex audit
+    # P0-4). Only consulted for the amplitude split (≥2 sub-walks); the single-walk
+    # Fock/PauliLCU anchor is byte-identical under either value.
+    walk_composition: str = 'combined_lcu'
 
     # Free-form extras: anything the user wants to remember about the run
     # but that doesn't drive code dispatch. Saved to JSON alongside the
@@ -110,6 +121,11 @@ class Config:
             raise ValueError(
                 f"sparse_oracle_mode must be one of {_VALID_SPARSE_ORACLE_MODES}, "
                 f"got {self.sparse_oracle_mode!r}"
+            )
+        if self.walk_composition not in _VALID_WALK_COMPOSITIONS:
+            raise ValueError(
+                f"walk_composition must be one of {_VALID_WALK_COMPOSITIONS}, "
+                f"got {self.walk_composition!r}"
             )
 
     def to_dict(self):
