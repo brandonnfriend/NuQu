@@ -79,6 +79,14 @@ P0RUNS="${NUQU_PHASE0_RUNS:-64}"       # warm-grow Phase-0 basin-escape ensemble
 DIM="${NUQU_DIM:-3}"                   # lattice dim (Tier-1 exact-anchor uses 1D/2D chains)
 # --exact-ref: guarded Lanczos true E_inf for the Tier-1 cost anchor (small ED systems).
 EXACT_ARG=""; [ -n "${NUQU_EXACT_REF:-}" ] && EXACT_ARG="--exact-ref --exact-max-mem-gb ${NUQU_EXACT_MAX_MEM_GB:-24}"
+# COO-paper co-evolution knobs (grow mode only; 5a2112d wired these into run_frame_shard.py).
+# Depth caps matter because grow-mode Phase-2 is a single warm-grown trajectory (NO deep-solve
+# OpenMP), so an uncapped hpc ceiling (2^(22-L) = 1M at L=2) is intractable single-threaded.
+PROFILE="${NUQU_PROFILE:-hpc}"                 # hpc | smoke ladder sizes
+P1MODE="${NUQU_PHASE1_MODE:-coevolve}"         # coevolve (faithful) | doubling-fresh (legacy A/B)
+SQOPT="${NUQU_SQUEEZE_OPT:-analytic}"          # analytic r* | numerical (the r* study)
+P1MAX_ARG=""; [ -n "${NUQU_PHASE1_MAX_DETS:-}" ] && P1MAX_ARG="--phase1-max-dets ${NUQU_PHASE1_MAX_DETS}"
+P2MAX_ARG=""; [ -n "${NUQU_PHASE2_MAX_DETS:-}" ] && P2MAX_ARG="--phase2-max-dets ${NUQU_PHASE2_MAX_DETS}"
 # grow: Phase-0 ensemble + Phase-1 co-evolution + warm-start growth (deep/convergence runs).
 # independent: fit the frame ONCE (cheap; NO Phase-1 co-evolution, which is the 60+ min
 # cost) then grow a FROZEN frame -- for cheap frame COMPARISONS at equal footing.
@@ -89,9 +97,11 @@ if [ "$LADDER_MODE" = "independent" ]; then
       --orbopt-cycles "$ORBOPTCYCLES" --max-rung-seconds "$MAXRUNGSEC" --phase0-runs "$P0RUNS" \
       --ladder-n-runs "$LNRUNS" $BIM_ARG $PT2CAP_ARG $EXACT_ARG $WARMGROW_ARG --out "$OUT"
 else
+  # shellcheck disable=SC2086
   "$PY" -m misc.run_frame_shard --L "$L" --seed "$SEED" --dim "$DIM" --n_b "$NB" --frame "$FRAME" \
       --A "$A" $FILL_ARG --ladder-mode grow --ladder-start 1000 --max-core "$MAXCORE" \
       --phase0-runs "$RUNS" --orbopt-cycles "$ORBOPTCYCLES" \
+      --profile "$PROFILE" --phase1-mode "$P1MODE" --squeeze-opt "$SQOPT" $P1MAX_ARG $P2MAX_ARG \
       --max-rung-seconds "$MAXRUNGSEC" --out "$OUT"
 fi
 status=$?
