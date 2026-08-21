@@ -53,24 +53,43 @@ def _norm(sd):
     return float(np.sqrt(sum(abs(v) ** 2 for v in sd.values())))
 
 
-def exp_generator_apply(S, lam, state_dict, N_f, max_order=60, tol=1e-13):
-    """`|ψ⟩ = exp(λS)|ψ̃⟩` via sparse Taylor. `S` anti-Hermitian, `λ` real ⇒ exp(λS) unitary
-    (norm-preserving — a convergence check). Returns `(psi_dict, taylor_order)`."""
+def exp_generator_apply(S, lam, state_dict, N_f, max_order=200, tol=1e-12):
+    """`|ψ⟩ = exp(λS)|ψ̃⟩` via sparse Taylor with ENFORCED convergence. `S` anti-Hermitian,
+    `λ` real ⇒ exp(λS) is unitary. Convergence is declared only when the series is in a
+    DECREASING regime and a geometric TAIL BOUND `‖v_k‖·ρ/(1−ρ)` (ρ = ‖v_k‖/‖v_{k−1}‖ < 1)
+    is below `tol` — a small individual term is not by itself sufficient (audit gap 4).
+
+    Returns `(psi_dict, info)` where `info` = {order, converged, tail_bound, max_term_norm,
+    max_support}. `converged=False` means the order cap was hit without a certified tail — the
+    caller must treat that as a failure, not silently trust `psi`.
+    """
     psi = dict(state_dict)
     v = dict(state_dict)
-    order = 0
+    prev_norm = _norm(v)
+    info = {'order': 0, 'converged': False, 'tail_bound': None,
+            'max_term_norm': prev_norm, 'max_support': len(v)}
     for k in range(1, max_order + 1):
         Sv = _apply_terms(S.terms, v, N_f)                 # S · v_{k-1}
         v = {s: (lam / k) * c for s, c in Sv.items()}      # v_k = (λ/k) S v_{k-1} = (λS)^k/k!
-        if not v:
-            order = k
+        info['order'] = k
+        info['max_support'] = max(info['max_support'], len(v))
+        if not v:                                          # exact termination (finite generator)
+            info['converged'] = True
+            info['tail_bound'] = 0.0
             break
         for s, c in v.items():
             psi[s] = psi.get(s, 0.0j) + c
-        order = k
-        if _norm(v) < tol:
-            break
-    return {s: c for s, c in psi.items() if abs(c) > 1e-14}, order
+        vk = _norm(v)
+        info['max_term_norm'] = max(info['max_term_norm'], vk)
+        rho = vk / prev_norm if prev_norm > 0 else float('inf')
+        prev_norm = vk
+        if rho < 1.0:                                      # decreasing regime → geometric tail bound
+            tail = vk * rho / (1.0 - rho)
+            info['tail_bound'] = tail
+            if tail < tol:
+                info['converged'] = True
+                break
+    return {s: c for s, c in psi.items() if abs(c) > 1e-14}, info
 
 
 def rayleigh(H_ref, state_dict):
@@ -87,16 +106,23 @@ def rayleigh(H_ref, state_dict):
     return E, float(np.sqrt(r2 / den))
 
 
-def back_evaluate(H_ref, S, lam, state_dict, max_order=60, tol=1e-13):
-    """Map the frame-solved `|ψ̃⟩` (state dict) to the physical frame and score it against
-    `H_ref`. Returns the variational `E_orig`, the residual, and provenance (support growth,
-    Taylor order, norm ratio — a unitarity check on the map-back)."""
-    psi, order = exp_generator_apply(S, lam, state_dict, H_ref.N_f, max_order, tol)
+def back_evaluate(H_ref, S, lam, state_dict, max_order=200, tol=1e-12, strict=False):
+    """Map the frame-solved `|ψ̃⟩` (state dict) through a SINGLE exp(λS) to the physical frame
+    and score it against `H_ref`. Returns the variational `E_orig`, the residual, and
+    provenance (support growth, Taylor order/convergence, norm ratio). `strict=True` raises if
+    the Taylor map-back did not certify convergence (audit gap 4)."""
+    psi, info = exp_generator_apply(S, lam, state_dict, H_ref.N_f, max_order, tol)
+    if strict and not info['converged']:
+        raise RuntimeError(
+            f"exp(λS) map-back did not converge (order {info['order']}, "
+            f"tail_bound {info['tail_bound']}) — tighten max_order/tol or reduce λ‖S‖")
     E, resid = rayleigh(H_ref, psi)
     return {
         'E_orig': E, 'residual': resid,
         'support_in': len(state_dict), 'support_out': len(psi),
-        'taylor_order': order,
+        'max_support': info['max_support'],
+        'taylor_order': info['order'], 'converged': info['converged'],
+        'tail_bound': info['tail_bound'], 'max_term_norm': info['max_term_norm'],
         'norm_ratio': _norm(psi) / max(_norm(state_dict), 1e-300),
     }
 
@@ -132,6 +158,74 @@ def back_evaluate_result(H_ref, S, lam, result, max_order=60, tol=1e-13):
     out = back_evaluate(H_ref, S, lam, sd, max_order=max_order, tol=tol)
     out['E_frame'] = float(getattr(result, 'energy', float('nan')))
     out['frame_shift_vs_orig'] = out['E_frame'] - out['E_orig']
+    return out
+
+
+def generator_from_disp_gen(disp_gen, n_ferm, n_bos, N_f):
+    """Anti-Hermitian LF state-map generator `S = Σ_m Σ_(λ,P) [λ P b†_m − conj(λ) P† b_m]`
+    from a PRODUCTION projector-conditioned `disp_gen = {m: [(λ, ferm_ops), ...]}`
+    (frame.projector_generator: `P = n̂_p`). This is the exact generator matching the
+    production `frame.displace_terms(gen=disp_gen)` — NOT `lf.displacement_generator(H)`,
+    which reads the physical transition coupling instead (audit gap 2). Because the `n̂_p`
+    projectors commute, this generator's boson substitution is exact/finite."""
+    from .hamiltonian import MixedH, OperatorTerm
+    from .lf import _dagger_ferm
+    terms = []
+    for m, dl in disp_gen.items():
+        for (lam, ferm_ops) in dl:
+            fo = tuple(ferm_ops)
+            terms.append(OperatorTerm(complex(lam), fo, ((int(m), 1),)))          # +λ P b†_m
+            terms.append(OperatorTerm(-np.conj(complex(lam)), _dagger_ferm(fo),
+                                      ((int(m), 0),)))                             # −conj(λ) P† b_m
+    return MixedH(terms, n_ferm, n_bos, N_f)
+
+
+def back_evaluate_frame(H_bare, state, result, strict=False, max_order=200, tol=1e-12):
+    """Back-evaluate a PRODUCTION composed frame against the original H (audit gap 3).
+
+    `state` is the `frame_workflow` frame state (squeeze `r`/`phi`, projector-LF
+    `disp_gen`/`disp_scale`, optional COO `R`). The physical trial state is
+    `|ψ⟩ = U_sq U_lf |ψ̃⟩ = exp(G_sq) · exp(disp_scale·S_lf) · |ψ̃⟩` (apply LF then squeeze,
+    matching `apply_frame`'s squeeze→LF frame build so `U = U_sq U_lf`). Scores
+    `E_orig = ⟨ψ|H_bare|ψ⟩` (variational). COO orbital-rotation map-back is not yet
+    implemented — raises if `R` is set. `result` is a `GroundStateResult` or a state dict.
+    """
+    from . import frame as _frame
+    if state.get("R") is not None:
+        raise NotImplementedError(
+            "COO orbital-rotation map-back not implemented; use bare/gaussian/lf/gaussian+lf")
+    sd = dict(result) if isinstance(result, dict) else state_dict_from_result(result)
+    N_f = H_bare.N_f
+    psi = sd
+    steps, converged, max_supp = [], True, len(sd)
+
+    # inner: LF (projector-conditioned), exp(disp_scale · S_lf)
+    if state.get("disp_gen") is not None and abs(state.get("disp_scale", 0.0)) > 1e-12:
+        S_lf = generator_from_disp_gen(state["disp_gen"], H_bare.n_ferm_modes,
+                                       H_bare.n_bos_modes, N_f)
+        psi, info = exp_generator_apply(S_lf, float(state["disp_scale"]), psi, N_f,
+                                        max_order, tol)
+        converged &= info['converged']; max_supp = max(max_supp, info['max_support'])
+        steps.append(('lf', info['order'], info['converged']))
+
+    # outer: squeeze (Gaussian), exp(G_sq)
+    r = state.get("r")
+    if r is not None and np.any(np.abs(np.asarray(r, dtype=float)) > 1e-12):
+        G_sq = _frame.squeeze_generator_terms(H_bare, r, state.get("phi", 0.0))
+        psi, info = exp_generator_apply(G_sq, 1.0, psi, N_f, max_order, tol)
+        converged &= info['converged']; max_supp = max(max_supp, info['max_support'])
+        steps.append(('sq', info['order'], info['converged']))
+
+    if strict and not converged:
+        raise RuntimeError(f"composed frame map-back did not converge: steps={steps}")
+    E, resid = rayleigh(H_bare, psi)
+    out = {'E_orig': E, 'residual': resid, 'support_in': len(sd), 'support_out': len(psi),
+           'max_support': max_supp, 'map_steps': steps, 'converged': converged,
+           'norm_ratio': _norm(psi) / max(_norm(sd), 1e-300)}
+    ef = None if isinstance(result, dict) else getattr(result, 'energy', None)
+    if ef is not None:
+        out['E_frame'] = float(ef)
+        out['frame_shift_vs_orig'] = float(ef) - E
     return out
 
 
