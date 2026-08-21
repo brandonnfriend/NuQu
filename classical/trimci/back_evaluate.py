@@ -53,21 +53,39 @@ def _norm(sd):
     return float(np.sqrt(sum(abs(v) ** 2 for v in sd.values())))
 
 
-def exp_generator_apply(S, lam, state_dict, N_f, max_order=200, tol=1e-12):
+def _truncate_weight(d, cap):
+    """Keep the top-`cap` entries of `{key: coeff}` by |coeff|²; return (kept, dropped_weight)
+    where dropped_weight = Σ|dropped|² / Σ|all|² (a renormalization-invariant loss measure)."""
+    if len(d) <= cap:
+        return d, 0.0
+    items = sorted(d.items(), key=lambda kv: -abs(kv[1]) ** 2)
+    tot = sum(abs(c) ** 2 for _s, c in items)
+    kept = dict(items[:cap])
+    dropped = sum(abs(c) ** 2 for _s, c in items[cap:]) / tot if tot > 0 else 0.0
+    return kept, dropped
+
+
+def exp_generator_apply(S, lam, state_dict, N_f, max_order=200, tol=1e-12, support_cap=None):
     """`|ψ⟩ = exp(λS)|ψ̃⟩` via sparse Taylor with ENFORCED convergence. `S` anti-Hermitian,
     `λ` real ⇒ exp(λS) is unitary. Convergence is declared only when the series is in a
     DECREASING regime and a geometric TAIL BOUND `‖v_k‖·ρ/(1−ρ)` (ρ = ‖v_k‖/‖v_{k−1}‖ < 1)
     is below `tol` — a small individual term is not by itself sufficient (audit gap 4).
 
-    Returns `(psi_dict, info)` where `info` = {order, converged, tail_bound, max_term_norm,
-    max_support}. `converged=False` means the order cap was hit without a certified tail — the
-    caller must treat that as a failure, not silently trust `psi`.
+    `support_cap` (audit tractability fallback): if set, weight-truncate the running Taylor
+    term (and final state) to the top-`support_cap` determinants after each order, bounding the
+    combinatorial fan-out that makes dense-filling LF map-back intractable. The truncated map
+    yields a DIFFERENT trial state whose Rayleigh quotient is STILL variational; `dropped_weight`
+    is returned so the caller can convergence-test (E_orig should converge as the cap rises).
+
+    Returns `(psi_dict, info)`. `converged=False` means the order cap was hit without a certified
+    tail — treat as a failure, not silently trusted.
     """
     psi = dict(state_dict)
     v = dict(state_dict)
     prev_norm = _norm(v)
+    dropped_total = 0.0
     info = {'order': 0, 'converged': False, 'tail_bound': None,
-            'max_term_norm': prev_norm, 'max_support': len(v)}
+            'max_term_norm': prev_norm, 'max_support': len(v), 'dropped_weight': 0.0}
     for k in range(1, max_order + 1):
         Sv = _apply_terms(S.terms, v, N_f)                 # S · v_{k-1}
         v = {s: (lam / k) * c for s, c in Sv.items()}      # v_k = (λ/k) S v_{k-1} = (λS)^k/k!
@@ -83,12 +101,19 @@ def exp_generator_apply(S, lam, state_dict, N_f, max_order=200, tol=1e-12):
         info['max_term_norm'] = max(info['max_term_norm'], vk)
         rho = vk / prev_norm if prev_norm > 0 else float('inf')
         prev_norm = vk
+        if support_cap:                                    # bound the fan-out (dense fallback)
+            v, drop = _truncate_weight(v, support_cap)
+            dropped_total += drop
         if rho < 1.0:                                      # decreasing regime → geometric tail bound
             tail = vk * rho / (1.0 - rho)
             info['tail_bound'] = tail
             if tail < tol:
                 info['converged'] = True
                 break
+    if support_cap and len(psi) > support_cap:
+        psi, drop = _truncate_weight(psi, support_cap)
+        dropped_total += drop
+    info['dropped_weight'] = dropped_total
     return {s: c for s, c in psi.items() if abs(c) > 1e-14}, info
 
 
@@ -106,12 +131,14 @@ def rayleigh(H_ref, state_dict):
     return E, float(np.sqrt(r2 / den))
 
 
-def back_evaluate(H_ref, S, lam, state_dict, max_order=200, tol=1e-12, strict=False):
+def back_evaluate(H_ref, S, lam, state_dict, max_order=200, tol=1e-12, strict=False,
+                  support_cap=None):
     """Map the frame-solved `|ψ̃⟩` (state dict) through a SINGLE exp(λS) to the physical frame
     and score it against `H_ref`. Returns the variational `E_orig`, the residual, and
-    provenance (support growth, Taylor order/convergence, norm ratio). `strict=True` raises if
-    the Taylor map-back did not certify convergence (audit gap 4)."""
-    psi, info = exp_generator_apply(S, lam, state_dict, H_ref.N_f, max_order, tol)
+    provenance (support growth, Taylor order/convergence, norm ratio, dropped weight).
+    `strict=True` raises if the Taylor map-back did not certify convergence (audit gap 4);
+    `support_cap` bounds the fan-out (dense fallback — still variational, convergence-test the cap)."""
+    psi, info = exp_generator_apply(S, lam, state_dict, H_ref.N_f, max_order, tol, support_cap)
     if strict and not info['converged']:
         raise RuntimeError(
             f"exp(λS) map-back did not converge (order {info['order']}, "
@@ -120,7 +147,7 @@ def back_evaluate(H_ref, S, lam, state_dict, max_order=200, tol=1e-12, strict=Fa
     return {
         'E_orig': E, 'residual': resid,
         'support_in': len(state_dict), 'support_out': len(psi),
-        'max_support': info['max_support'],
+        'max_support': info['max_support'], 'dropped_weight': info['dropped_weight'],
         'taylor_order': info['order'], 'converged': info['converged'],
         'tail_bound': info['tail_bound'], 'max_term_norm': info['max_term_norm'],
         'norm_ratio': _norm(psi) / max(_norm(state_dict), 1e-300),
@@ -180,7 +207,8 @@ def generator_from_disp_gen(disp_gen, n_ferm, n_bos, N_f):
     return MixedH(terms, n_ferm, n_bos, N_f)
 
 
-def back_evaluate_frame(H_bare, state, result, strict=False, max_order=200, tol=1e-12):
+def back_evaluate_frame(H_bare, state, result, strict=False, max_order=200, tol=1e-12,
+                        support_cap=None):
     """Back-evaluate a PRODUCTION composed frame against the original H (audit gap 3).
 
     `state` is the `frame_workflow` frame state (squeeze `r`/`phi`, projector-LF
@@ -189,6 +217,8 @@ def back_evaluate_frame(H_bare, state, result, strict=False, max_order=200, tol=
     matching `apply_frame`'s squeeze→LF frame build so `U = U_sq U_lf`). Scores
     `E_orig = ⟨ψ|H_bare|ψ⟩` (variational). COO orbital-rotation map-back is not yet
     implemented — raises if `R` is set. `result` is a `GroundStateResult` or a state dict.
+    `support_cap` bounds the map-back fan-out for the dense-filling case (audit tractability
+    fallback): still variational; `dropped_weight` is returned to convergence-test the cap.
     """
     from . import frame as _frame
     if state.get("R") is not None:
@@ -197,31 +227,31 @@ def back_evaluate_frame(H_bare, state, result, strict=False, max_order=200, tol=
     sd = dict(result) if isinstance(result, dict) else state_dict_from_result(result)
     N_f = H_bare.N_f
     psi = sd
-    steps, converged, max_supp = [], True, len(sd)
+    steps, converged, max_supp, dropped = [], True, len(sd), 0.0
 
     # inner: LF (projector-conditioned), exp(disp_scale · S_lf)
     if state.get("disp_gen") is not None and abs(state.get("disp_scale", 0.0)) > 1e-12:
         S_lf = generator_from_disp_gen(state["disp_gen"], H_bare.n_ferm_modes,
                                        H_bare.n_bos_modes, N_f)
         psi, info = exp_generator_apply(S_lf, float(state["disp_scale"]), psi, N_f,
-                                        max_order, tol)
+                                        max_order, tol, support_cap)
         converged &= info['converged']; max_supp = max(max_supp, info['max_support'])
-        steps.append(('lf', info['order'], info['converged']))
+        dropped += info['dropped_weight']; steps.append(('lf', info['order'], info['converged']))
 
     # outer: squeeze (Gaussian), exp(G_sq)
     r = state.get("r")
     if r is not None and np.any(np.abs(np.asarray(r, dtype=float)) > 1e-12):
         G_sq = _frame.squeeze_generator_terms(H_bare, r, state.get("phi", 0.0))
-        psi, info = exp_generator_apply(G_sq, 1.0, psi, N_f, max_order, tol)
+        psi, info = exp_generator_apply(G_sq, 1.0, psi, N_f, max_order, tol, support_cap)
         converged &= info['converged']; max_supp = max(max_supp, info['max_support'])
-        steps.append(('sq', info['order'], info['converged']))
+        dropped += info['dropped_weight']; steps.append(('sq', info['order'], info['converged']))
 
     if strict and not converged:
         raise RuntimeError(f"composed frame map-back did not converge: steps={steps}")
     E, resid = rayleigh(H_bare, psi)
     out = {'E_orig': E, 'residual': resid, 'support_in': len(sd), 'support_out': len(psi),
-           'max_support': max_supp, 'map_steps': steps, 'converged': converged,
-           'norm_ratio': _norm(psi) / max(_norm(sd), 1e-300)}
+           'max_support': max_supp, 'dropped_weight': dropped, 'map_steps': steps,
+           'converged': converged, 'norm_ratio': _norm(psi) / max(_norm(sd), 1e-300)}
     ef = None if isinstance(result, dict) else getattr(result, 'energy', None)
     if ef is not None:
         out['E_frame'] = float(ef)

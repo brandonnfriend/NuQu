@@ -48,10 +48,17 @@ mkdir -p "$OUTDIR"
 export PYTHONPATH="$SANDBOX:$REPO"
 FILL_ARG=""; FTAG="_A${A}"
 [ "$FILLING" != "none" ] && { FILL_ARG="--filling $FILLING"; FTAG="_f${FILLING}"; }
-OUT="$OUTDIR/backeval_${FRAME}_L${L}d${DIM}nb${NB}${FTAG}_s${SEED}.json"
+# NUQU_SUPPORT_CAP bounds the map-back fan-out (dense-filling tractability fallback).
+# '-'/'none'/empty = exact (no cap).
+CAP_ARG=""; CAP_TAG=""
+case "${NUQU_SUPPORT_CAP:-}" in
+    ""|"-"|"none") : ;;
+    *) CAP_ARG="--support-cap ${NUQU_SUPPORT_CAP}"; CAP_TAG="_cap${NUQU_SUPPORT_CAP}" ;;
+esac
+OUT="$OUTDIR/backeval_${FRAME}_L${L}d${DIM}nb${NB}${FTAG}${CAP_TAG}_s${SEED}.json"
 # shellcheck disable=SC2086
 "$PY" -m misc.run_backeval_benchmark --L "$L" --dim "$DIM" --n_b "$NB" --frame "$FRAME" \
-    --cores "$CORES" --A "$A" $FILL_ARG --num-runs "$NRUNS" --seed "$SEED" --out "$OUT"
+    --cores "$CORES" --A "$A" $FILL_ARG $CAP_ARG --num-runs "$NRUNS" --seed "$SEED" --out "$OUT"
 status=$?
 echo "[bkshard] done status=$status -> $OUT"
 exit "$status"

@@ -29,7 +29,7 @@ from src_PI.utils.manifest import build_manifest
 
 
 def run_benchmark(L, dim, n_b, frame, cores, A=1, seed=0, num_runs=16,
-                  fit_core=None, out=None):
+                  fit_core=None, support_cap=None, out=None):
     H_bare = build_from_eft(L, dim, n_b)
     has_g, has_lf, has_coo = ('gaussian' in frame), ('lf' in frame), ('coo' in frame)
     solve = _solver(True)
@@ -48,6 +48,7 @@ def run_benchmark(L, dim, n_b, frame, cores, A=1, seed=0, num_runs=16,
         'metadata': {
             'kind': 'backeval_benchmark', 'L': L, 'dim': dim, 'n_b': n_b, 'A': A,
             'frame': frame, 'seed': seed, 'num_runs': num_runs, 'fit_core': fit_core,
+            'support_cap': support_cap,
             'n_ferm_modes': H_bare.n_ferm_modes, 'n_bos_modes': H_bare.n_bos_modes,
             'N_f': H_bare.N_f, 'manifest': build_manifest(),
             'frame_params': {'disp_scale': state.get('disp_scale'),
@@ -82,14 +83,14 @@ def run_benchmark(L, dim, n_b, frame, cores, A=1, seed=0, num_runs=16,
             try:
                 tracemalloc.start()
                 t1 = time.time()
-                be = back_evaluate_frame(H_bare, state, res)
+                be = back_evaluate_frame(H_bare, state, res, support_cap=support_cap)
                 be_s = time.time() - t1
                 peak = tracemalloc.get_traced_memory()[1] / 1e6
                 tracemalloc.stop()
                 row.update({'E_orig': be['E_orig'], 'residual': be['residual'],
                             'support_in': be['support_in'], 'support_out': be['support_out'],
                             'max_support': be['max_support'], 'map_steps': be['map_steps'],
-                            'converged': be['converged'],
+                            'converged': be['converged'], 'dropped_weight': be['dropped_weight'],
                             'backeval_s': round(be_s, 2), 'backeval_peak_mb': round(peak, 1),
                             'E_frame_shift': float(res.energy) - be['E_orig']})
             except Exception as e:                       # noqa: BLE001 — never kill the shard
@@ -122,6 +123,10 @@ def main():
                     help="if set, A = round(filling * sites) (overrides --A)")
     ap.add_argument('--seed', type=int, default=0)
     ap.add_argument('--num-runs', type=int, default=16)
+    ap.add_argument('--support-cap', type=int, default=None,
+                    help="bound the map-back fan-out to this many determinants (audit "
+                         "tractability fallback for dense filling; still variational, "
+                         "records dropped_weight for cap convergence-testing)")
     ap.add_argument('--out', default=None)
     args = ap.parse_args()
 
@@ -129,7 +134,8 @@ def main():
     A = max(1, round(args.filling * sites)) if args.filling is not None else args.A
     cores = [int(c) for c in args.cores.split(',') if c.strip()]
     data = run_benchmark(args.L, args.dim, args.n_b, args.frame, cores, A=A,
-                         seed=args.seed, num_runs=args.num_runs, out=args.out)
+                         seed=args.seed, num_runs=args.num_runs,
+                         support_cap=args.support_cap, out=args.out)
     print(f"[bench] done: {len(data['results'])} cores -> {args.out}")
 
 
