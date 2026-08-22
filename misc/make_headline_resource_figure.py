@@ -35,6 +35,8 @@ def load(data_dir):
         rec = dict(L=r["L"], n_b=r["n_b"], lam=r["Physical_Lambda"], q=r["Logical_Qubits"],
                    nwalk=r["QPE_Walk_Queries"], walkT=r["Walk_T_Count"],
                    qpeT=r["QPE_Total_T_Count"], clean=b.get("prune_within_budget", None),
+                   terms=r.get("Pauli_Term_Count"), rot=r.get("Rotation_Count"),
+                   fit_resid=(b.get("walk_T_fit") or {}).get("resid"),
                    rep="rep2" in os.path.basename(f))
         if rec["n_b"] == 2 and not rec["rep"]:
             anchor.append(rec)
@@ -57,57 +59,65 @@ def _style(ax):
 
 
 def make_figure(anchor, sweep, out_base):
-    clean = [r for r in anchor if r["clean"]]
-    flag = [r for r in anchor if r["clean"] is False]
+    # All r3 points are pruning-clean; assert it so an invalid point can never be plotted
+    # silently as accepted data (codex plot-audit requirement).
+    bad = [(r["L"], r["n_b"]) for r in anchor + sweep if r["clean"] is not True]
+    assert not bad, f"refusing to plot pruning-flagged points: {bad}"
+    # L=1 is a degenerate anchor (no ordinary intersite bonds) — shown but SEPARATED from the
+    # bulk line and excluded from any scaling read (audit item 8).
+    bulk = [r for r in anchor if r["L"] >= 2]
+    deg = [r for r in anchor if r["L"] == 1]
     fig, (axA, axB, axC) = plt.subplots(1, 3, figsize=(13.2, 4.1))
     fig.patch.set_facecolor(SURFACE)
 
-    # (A) logical qubits vs L — hardware/space feasibility (n_b=2, exact (4+3n_b)*S)
-    Ls = [r["L"] for r in anchor]; qs = [r["q"] for r in anchor]
-    axA.plot(Ls, qs, "-", color=BLUE, lw=2.0, zorder=2)
-    axA.plot([r["L"] for r in clean], [r["q"] for r in clean], "o", color=BLUE, ms=7,
+    def _deg(ax, y, log=False):                          # L=1 as a hollow degenerate marker
+        if deg:
+            plot = ax.semilogy if log else ax.plot
+            plot([1], [deg[0][y]], "o", color=SURFACE, ms=7, mec=MUTED, mew=1.5, zorder=3)
+
+    # (A) logical qubits vs L — one walk/block-encoding register (exact (4+3 n_b)·S)
+    axA.plot([r["L"] for r in bulk], [r["q"] for r in bulk], "-o", color=BLUE, lw=2.0, ms=7,
              mec=SURFACE, mew=1.5, zorder=3)
-    if flag:
-        axA.plot([r["L"] for r in flag], [r["q"] for r in flag], "D", color=SURFACE, ms=8,
-                 mec=CRIT, mew=1.8, zorder=4)
-    axA.annotate(f"{qs[-1]:,}\nqubits", (Ls[-1], qs[-1]), textcoords="offset points",
-                 xytext=(-6, -2), ha="right", va="top", fontsize=9, color=INK2)
+    _deg(axA, "q")
+    axA.annotate(f"{bulk[-1]['q']:,}\nqubits", (bulk[-1]["L"], bulk[-1]["q"]),
+                 textcoords="offset points", xytext=(-6, -2), ha="right", va="top",
+                 fontsize=9, color=INK2)
     axA.set_xlabel("lattice size $L$  (dim=3, $L^3$ sites)", color=INK2, fontsize=9.5)
     axA.set_ylabel("logical qubits (one walk register)", color=INK2, fontsize=9.5)
     axA.set_title("a  Compiled register size", color=INK, fontsize=11, loc="left", weight="bold")
     _style(axA)
 
-    # (B) total QPE T-count vs L — time cost (log y), the compiled anchor
-    axB.semilogy(Ls, [r["qpeT"] for r in anchor], "-", color=BLUE, lw=2.0, zorder=2)
-    axB.semilogy([r["L"] for r in clean], [r["qpeT"] for r in clean], "o", color=BLUE, ms=7,
-                 mec=SURFACE, mew=1.5, zorder=3, label="compiled, pruning-clean")
-    if flag:
-        axB.semilogy([r["L"] for r in flag], [r["qpeT"] for r in flag], "D", color=SURFACE,
-                     ms=8, mec=CRIT, mew=1.8, zorder=4, label="pruning-flagged ($L$=10)")
+    # (B) coherent walk-query T-count vs L (log y) — the compiled anchor, all pruning-clean
+    axB.semilogy([r["L"] for r in bulk], [r["qpeT"] for r in bulk], "-o", color=BLUE, lw=2.0,
+                 ms=7, mec=SURFACE, mew=1.5, zorder=3, label="compiled, pruning-clean")
+    _deg(axB, "qpeT", log=True)
+    axB.plot([], [], "o", color=SURFACE, mec=MUTED, mew=1.5, label="$L$=1 (degenerate anchor)")
     axB.set_xlabel("lattice size $L$", color=INK2, fontsize=9.5)
-    axB.set_ylabel("total QPE $T$-count (coherent-query)", color=INK2, fontsize=9.5)
-    axB.set_title("b  Compiled QPE cost vs volume", color=INK, fontsize=11, loc="left", weight="bold")
-    axB.legend(frameon=False, fontsize=8.5, loc="lower right", labelcolor=INK2)
+    axB.set_ylabel("coherent walk-query $T$-count", color=INK2, fontsize=9.5)
+    axB.set_title("b  Compiled query cost vs volume", color=INK, fontsize=11, loc="left", weight="bold")
+    axB.annotate(r"$\Delta E_\mathrm{total}=1$ MeV", (0.04, 0.93), xycoords="axes fraction",
+                 fontsize=8.5, color=MUTED)
+    axB.legend(frameon=False, fontsize=8.0, loc="lower right", labelcolor=INK2)
     _style(axB)
 
-    # (C) QPE T-count vs n_b at fixed L — the classically-informed reduction lever
+    # (C) coherent walk-query T-count vs n_b — resource sensitivity CONDITIONAL on the cutoff
     for Lx, col, mk in ((2, BLUE, "o"), (3, ORANGE, "s")):
         pts = sorted([r for r in sweep if r["L"] == Lx], key=lambda x: x["n_b"])
         nb = [r["n_b"] for r in pts]; qpe = [r["qpeT"] for r in pts]
         axC.semilogy(nb, qpe, "-", color=col, lw=2.0, marker=mk, ms=7, mec=SURFACE, mew=1.5,
-                     label=f"$L$={Lx}", zorder=3)
+                     zorder=3)
         axC.annotate(f"$L$={Lx}", (nb[-1], qpe[-1]), textcoords="offset points", xytext=(6, 0),
                      va="center", fontsize=9, color=col, weight="bold")
     axC.set_xlabel("boson register $n_b$  (bits/mode)", color=INK2, fontsize=9.5)
-    axC.set_ylabel("total QPE $T$-count", color=INK2, fontsize=9.5)
-    axC.set_title("c  Reduction lever: cost vs cutoff", color=INK, fontsize=11, loc="left", weight="bold")
+    axC.set_ylabel("coherent walk-query $T$-count", color=INK2, fontsize=9.5)
+    axC.set_title("c  Cost sensitivity to cutoff $n_b$", color=INK, fontsize=11, loc="left", weight="bold")
     axC.set_xticks([1, 2, 3, 4])
-    axC.annotate("smaller $n_b$\n= the reduction", (1.05, 0.06), xycoords="axes fraction",
-                 fontsize=8.5, color=MUTED, style="italic")
+    axC.annotate("conditional on $n_b$\n(physical adequacy set\nby classical study)",
+                 (1.05, 0.05), xycoords="axes fraction", fontsize=7.8, color=MUTED, style="italic")
     _style(axC)
 
-    fig.suptitle("Compiled PauliLCU quantum resources for QPE GSEE — dynamical-pion χEFT "
-                 "(corrected $H$, budget-optimal precision)", fontsize=12, color=INK, y=1.02, x=0.01, ha="left")
+    fig.suptitle("Compiled PauliLCU resources for QPE ground-state energy estimation",
+                 fontsize=12.5, color=INK, y=1.02, x=0.01, ha="left")
     fig.tight_layout(rect=(0, 0, 1, 0.97))
     for ext in ("pdf", "png"):
         fig.savefig(f"{out_base}.{ext}", dpi=200, bbox_inches="tight", facecolor=SURFACE)
@@ -118,48 +128,75 @@ def _fmt(x, sci=False):
     return f"{x:.3e}" if sci else f"{x:,.0f}"
 
 
+CAPTION = ("Logical fault-tolerant COHERENT WALK-QUERY resources for qubitized phase estimation "
+           "of the corrected dynamical-pion chiral-EFT Hamiltonian (Fock encoding, dim=3, one "
+           "PauliLCU walk). Total algorithmic error DeltaE_total = 1 MeV, split by a total-T "
+           "optimization between phase resolution and block-encoding synthesis; every walk-T is at "
+           "the resulting circuit precision (log-linear in log2(1/cp), verified with a 3rd interior "
+           "sample, residual 0). All points are pruning-clean (discarded coefficient one-norm below "
+           "the allocated budget): the estimate is of the EXACT target Hamiltonian. lambda, "
+           "N_walk, and the logical-qubit count are exact lattice combinatorics. 'logical qubits' "
+           "is ONE walk/block-encoding register and EXCLUDES the QPE phase register, input-state "
+           "preparation, distillation factories, and routing. Costs are CONDITIONAL on n_b=2 "
+           "(boson cutoff; physical adequacy to be set by the classical cutoff study) and on "
+           "input-state preparation / success probability (repetition ~1/p0 reported separately); "
+           "they are NOT a complete ground-state-energy algorithm cost. L varies at fixed lattice "
+           "spacing (finite-volume, not continuum). L=1 has no ordinary intersite bonds (degenerate "
+           "smoke anchor; excluded from bulk scaling).")
+
+
+def prune_tag(r):
+    return "clean" if r["clean"] is True else ("FLAGGED" if r["clean"] is False else "?")
+
+
 def make_tables(anchor, sweep, out_base):
     # --- markdown ---
-    md = ["# Headline quantum-resource anchor (compiled Fock/PauliLCU, corrected H, budget-optimal)\n",
-          "**Anchor — n_b=2, dim=3** (λ, N_walk, qubits are exact combinatorics; walk-T/QPE-T at the total-T-optimal precision):\n",
-          "| L | sites | λ (MeV) | logical qubits | N_walk | walk-T | QPE-T | pruning |",
-          "|--:|--:|--:|--:|--:|--:|--:|:--|"]
+    md = ["# Headline quantum-resource anchor (compiled Fock/PauliLCU, corrected H)\n",
+          "_" + CAPTION + "_\n",
+          "**Anchor — n_b=2, dim=3:**\n",
+          "| L | sites | λ (MeV) | logical qubits | Pauli terms | rotations | N_walk | walk-T | coherent-query T | pruning |",
+          "|--:|--:|--:|--:|--:|--:|--:|--:|--:|:--|"]
     for r in anchor:
-        tag = "clean" if r["clean"] else ("**flagged**" if r["clean"] is False else "—")
-        md.append(f"| {r['L']} | {r['L']**3} | {r['lam']:,.0f} | {r['q']:,} | {r['nwalk']:.2e} "
-                  f"| {r['walkT']:.2e} | {r['qpeT']:.2e} | {tag} |")
-    md.append("\n**Reduction lever — QPE-T vs boson register n_b** (L=2, L=3):\n")
-    md.append("| L | n_b | λ (MeV) | logical qubits | QPE-T |")
-    md.append("|--:|--:|--:|--:|--:|")
+        note = " *(degenerate)*" if r["L"] == 1 else ""
+        md.append(f"| {r['L']}{note} | {r['L']**3} | {r['lam']:,.0f} | {r['q']:,} | {r['terms']:,} "
+                  f"| {r['rot']:,} | {r['nwalk']:.2e} | {r['walkT']:.2e} | {r['qpeT']:.2e} | {prune_tag(r)} |")
+    md.append("\n**Cost sensitivity to the boson cutoff n_b** (conditional; L=2, L=3):\n")
+    md.append("| L | n_b | λ (MeV) | logical qubits | Pauli terms | coherent-query T | pruning |")
+    md.append("|--:|--:|--:|--:|--:|--:|:--|")
     for Lx in (2, 3):
         for r in sorted([x for x in sweep if x["L"] == Lx], key=lambda x: x["n_b"]):
-            md.append(f"| {r['L']} | {r['n_b']} | {r['lam']:,.0f} | {r['q']:,} | {r['qpeT']:.2e} |")
+            md.append(f"| {r['L']} | {r['n_b']} | {r['lam']:,.0f} | {r['q']:,} | {r['terms']:,} "
+                      f"| {r['qpeT']:.2e} | {prune_tag(r)} |")
     open(f"{out_base}.md", "w").write("\n".join(md) + "\n")
 
     # --- LaTeX (booktabs) ---
-    tex = [r"% Compiled PauliLCU anchor (corrected H, budget-optimal precision). Requires booktabs, siunitx.",
+    cap_tex = CAPTION.replace("~1/p0", r"$\sim 1/p_0$").replace("DeltaE_total", r"$\Delta E_\mathrm{total}$") \
+                     .replace("lambda,", r"$\lambda$,").replace("n_b=2", r"$n_b{=}2$") \
+                     .replace("N_walk", r"$N_\mathrm{walk}$").replace("log2(1/cp)", r"$\log_2(1/\mathrm{cp})$")
+    tex = [r"% Compiled PauliLCU anchor (corrected H). Requires booktabs, siunitx.",
            r"\begin{table}[t]\centering\small",
-           r"\caption{Compiled Fock/PauliLCU quantum resources for QPE ground-state energy estimation "
-           r"of the dynamical-pion $\chi$EFT (corrected Hamiltonian, $n_b{=}2$, total-$T$-optimal "
-           r"precision). $\lambda$, $N_\mathrm{walk}$ and the logical-qubit count are exact lattice "
-           r"combinatorics; $L{=}10$ is flagged for coefficient-pruning above budget.}",
+           r"\caption{" + cap_tex + r"}",
            r"\label{tab:pauli_lcu_anchor}",
            r"\begin{tabular}{r r r r r r r l}\toprule",
-           r"$L$ & sites & $\lambda$ (MeV) & qubits & $N_\mathrm{walk}$ & walk-$T$ & QPE-$T$ & pruning\\\midrule"]
+           r"$L$ & sites & $\lambda$ (MeV) & qubits & Pauli terms & $N_\mathrm{walk}$ & "
+           r"coh.\ query $T$ & pruning\\\midrule"]
     for r in anchor:
-        tag = "clean" if r["clean"] else ("flagged" if r["clean"] is False else "--")
-        tex.append(f"{r['L']} & {r['L']**3} & {r['lam']:,.0f} & {r['q']:,} & "
-                   f"\\num{{{r['nwalk']:.2e}}} & \\num{{{r['walkT']:.2e}}} & "
-                   f"\\num{{{r['qpeT']:.2e}}} & {tag}\\\\")
-    tex += [r"\bottomrule\end{tabular}\end{table}"]
+        note = r"\,$^{\dagger}$" if r["L"] == 1 else ""
+        tex.append(f"{r['L']}{note} & {r['L']**3} & {r['lam']:,.0f} & {r['q']:,} & "
+                   f"{r['terms']:,} & \\num{{{r['nwalk']:.2e}}} & \\num{{{r['qpeT']:.2e}}} & "
+                   f"{prune_tag(r)}\\\\")
+    tex += [r"\bottomrule\end{tabular}",
+            r"\par\footnotesize$^{\dagger}$ $L{=}1$ degenerate anchor (no intersite bonds); "
+            r"excluded from bulk scaling.",
+            r"\end{table}"]
     open(f"{out_base}.tex", "w").write("\n".join(tex) + "\n")
     print(f"[tbl] wrote {out_base}.md / .tex")
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--data", default="data/quantum/2026-08-20/vertexfix_r2_290818")
-    ap.add_argument("--out-dir", default="data/quantum/2026-08-20/headline")
+    ap.add_argument("--data", default="data/quantum/2026-08-21/vertexfix_r3_290826")
+    ap.add_argument("--out-dir", default="data/quantum/2026-08-21/headline")
     args = ap.parse_args()
     os.makedirs(args.out_dir, exist_ok=True)
     anchor, sweep = load(args.data)
