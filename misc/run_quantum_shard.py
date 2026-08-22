@@ -189,6 +189,8 @@ def run_shard(L, series, A_values, dim=3, frame_occupation=None,
             # optimize_qpe_budget is off (default-precision diagnostic run).
             'QPE_Budget': budget,
             'Pruned_One_Norm_MeV': norm.get('pruned_one_norm_MeV'),
+            'Pauli_Term_Count': norm.get('Pauli_Term_Count'),   # audit item 5
+            'Rotation_Count': norm.get('Rotation_Count'),        # audit item 5
             # sparse LCU breakdown (L_eff, select_T, single_mode_walk_T) — feeds the
             # walk-depth / reaction-limited runtime model (task 30/34) downstream.
             'Sparse_Breakdown': norm.get('Sparse_Breakdown'),

@@ -18,17 +18,20 @@ def get_hamiltonian_stats(H):
     return id_coeff, lcu_lambda
 
 
-# Λ-coupled noise floor for the normalized Hamiltonian. Empirically, the raw
-# amplitude-basis H_pos has float-cancellation terms whose normalized magnitudes
-# wall at ~1.45e-8 (verified by structural diff across A at fixed n_b: the
-# "extra" terms in higher-Λ runs all land in [1.10e-8, 1.45e-8] regardless of
-# n_b). Smallest real-physics terms sit above 1e-7. Pruning at 2e-8 in
-# normalized units cleanly separates them. The equivalent raw cutoff is
-#     |c_raw| < 2e-8 * Δ = 5e-8 * Λ
-# i.e. it scales with Λ, so the same *physical* noise content is removed
-# regardless of which A is being normalized → structurally A-invariant H_norm
-# at fixed n_b, which is what makes the pyLIQTR structural cache hit reliably.
-_NOISE_FLOOR_NORM = 2e-8
+# MACHINE-NOISE prune floor (RELATIVE to the largest coefficient). RATIONALE
+# (2026-08-21, codex quantum_round2 audit): the OLD floor was Λ-coupled
+# (`|c_raw| < 2e-8·Δ = 5e-8·Λ`), designed for amplitude-basis float-cancellation
+# terms (which cluster ~1.45e-8 normalized). But the FOCK Hamiltonian (the paper
+# anchor) has NO such noise cluster — its raw coefficients form a clean continuum
+# from ~6e-3 MeV up to ~850 MeV with nothing below 1e-4 MeV. A Λ-coupled floor
+# therefore grows with the system and, at large Λ (L=10, high n_b), cuts REAL
+# small-coefficient physics — an UNCONTROLLED Hamiltonian truncation (e.g. L=10
+# n_b=2 discarded 3465 MeV of one-norm). Fix: prune only genuine floating-point
+# zeros — terms below `_PRUNE_REL_FLOOR × max|c|` (machine-eps relative to the
+# largest term). For the clean Fock construction this removes NOTHING, so the
+# resource estimate is of the EXACT target Hamiltonian at every L/n_b. (Amplitude,
+# now retired/experimental, would need its own noise handling if ever revived.)
+_PRUNE_REL_FLOOR = 1e-12
 
 
 def normalize_for_qpe(bundle, safety_factor=2.5):
@@ -88,13 +91,20 @@ def normalize_for_qpe(bundle, safety_factor=2.5):
             'walk_mode': bundle.walk_mode,
         }
 
-    raw_thresh = _NOISE_FLOOR_NORM * delta
+    # Machine-noise prune floor RELATIVE to the largest raw coefficient (removes only
+    # genuine floating-point zeros; the clean Fock construction has none, so nothing is
+    # removed and the estimate is of the exact target Hamiltonian). Not Λ-coupled.
+    max_abs = 0.0
+    for _name, H in bundle.sub_hamiltonians:
+        for term, coeff in H.terms.items():
+            if term != () and abs(coeff) > max_abs:
+                max_abs = abs(coeff)
+    raw_thresh = _PRUNE_REL_FLOOR * max_abs
 
     # Pass 2: normalize each sub-Hamiltonian with the shared Δ. ACCUMULATE the discarded
     # coefficient one-norm (audit issue 2): pruning is a systematic Hamiltonian
-    # perturbation bounded by the SUM of |removed coefficients| (RAW MeV energy units),
-    # not the per-term threshold. Caller checks it against the allocated pruning budget;
-    # for n_b=2 it is ~0, at high n_b it can exceed 1 MeV (those points get flagged).
+    # perturbation bounded by the SUM of |removed coefficients| (RAW MeV energy units).
+    # With the machine-noise floor this is ~0 for the Fock anchor at every L/n_b.
     normalized = []
     discarded_one_norm = 0.0            # Σ|c_raw| over pruned terms, in MeV
     discarded_count = 0

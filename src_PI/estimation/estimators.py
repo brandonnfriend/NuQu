@@ -62,27 +62,31 @@ def _estimate_one(name, instance):
     return results, encoding.alpha, False
 
 
-def sample_walk_fits(instance, cp_samples=(1e-4, 1e-12)):
-    """Sample the single walk at ≥2 `circuit_precision` values and fit both `walk_T` and
-    `walk_Clifford` as `a + b·log2(1/cp)` (pyLIQTR synthesis is exactly log-linear → 2 pts
-    exact). Returns `{'T': (a,b), 'Clifford': (a,b), 'LogicalQubits': q, 'resid_T':...,
-    'samples': [...]}`. This is all the total-T budget optimizer needs — no default-
-    precision call, so the optimized single-walk path costs exactly `len(cp_samples)`
-    estimates.
+def sample_walk_fits(instance, cp_samples=(1e-4, 1e-8, 1e-12)):
+    """Sample the single walk at ≥3 `circuit_precision` values and fit both `walk_T` and
+    `walk_Clifford` as `a + b·log2(1/cp)`. THREE points (including an INTERIOR one) so the
+    fit residual is a genuine log-linearity check, not zero-by-construction from a 2-point
+    line (codex audit item 6). Also captures the synthesized rotation count (profile=True on
+    one sample). Returns `{'T':(a,b),'Clifford':(a,b),'LogicalQubits':q,'resid_T','resid_C',
+    'rotations','samples'}`.
     """
     from src_PI.estimation.total_t_optimizer import fit_walk_t_vs_precision
     encoding = getEncoding(VALID_ENCODINGS.PauliLCU)(instance)
     walk = QubitizedWalkOperator(encoding)
-    rows = []
-    for cp in cp_samples:
-        r = estimate_resources(walk, circuit_precision=cp)
-        rows.append((cp, r.get('T', 0), r.get('Clifford', 0), r.get('LogicalQubits', 0)))
+    # ALL fit samples use profile=False (consistent total T = base + synthesized rotations).
+    # profile=True returns a DIFFERENT T (base only, rotations separated), so it must NOT be
+    # mixed into the fit; get the (cp-independent) rotation count from one separate call.
+    rows = [(cp, (r := estimate_resources(walk, circuit_precision=cp)).get('T', 0),
+             r.get('Clifford', 0), r.get('LogicalQubits', 0))
+            for cp in sorted(cp_samples)]
+    rotations = estimate_resources(walk, circuit_precision=sorted(cp_samples)[0],
+                                   profile=True).get('Rotations')
     aT, bT, resid_T = fit_walk_t_vs_precision([(cp, t) for cp, t, _c, _q in rows])
     aC, bC, resid_C = fit_walk_t_vs_precision([(cp, c) for cp, _t, c, _q in rows])
     return {
         'T': (aT, bT), 'Clifford': (aC, bC),
         'LogicalQubits': rows[0][3],            # register count is cp-independent
-        'resid_T': resid_T, 'resid_C': resid_C,
+        'resid_T': resid_T, 'resid_C': resid_C, 'rotations': rotations,
         'samples': rows,
     }
 

@@ -43,6 +43,7 @@ def _optimized_single_walk(bundle, n_b, delta_E):
         return None                                # multi-walk/empty → default path
     dE = delta_E if delta_E else DEFAULT_DELTA_E_MEV
     name, H = nd['sub_hamiltonians'][0]
+    pauli_terms = len(H.terms)                      # Pauli term count (audit item 5)
     fits = sample_walk_fits(_ham_to_pyliqtr_instance(H))
     opt = optimize_qpe_fraction(fits['T'][0], fits['T'][1], lam, dE)
     cp = opt['circuit_precision']
@@ -55,6 +56,8 @@ def _optimized_single_walk(bundle, n_b, delta_E):
         'QFT_T_Count': 0, 'Total_T_Count': opt['walk_T'],
         'QPE_Walk_Queries': opt['walk_queries'], 'QPE_Total_T_Count': opt['total_T'],
         'walk_composition': 'single_walk',
+        'Pauli_Term_Count': pauli_terms,           # audit item 5
+        'Rotation_Count': fits.get('rotations'),   # audit item 5
         'Per_Sub_Walk': [{'name': name, 'T': opt['walk_T'], 'Clifford': walk_C,
                           'LogicalQubits': fits['LogicalQubits'], 'alpha': 1.0 / 2.5}],
         'QPE_Budget': {
@@ -62,8 +65,9 @@ def _optimized_single_walk(bundle, n_b, delta_E):
             'eps_be': opt['eps_be'], 'circuit_precision': cp, 'delta_E': dE,
             'walk_queries': opt['walk_queries'], 'walk_T': opt['walk_T'],
             'total_T': opt['total_T'],
+            # 3-point (interior) log-linearity check — resid is now meaningful (audit item 6)
             'walk_T_fit': {'a': fits['T'][0], 'b': fits['T'][1],
-                           'resid': fits['resid_T']},
+                           'resid': fits['resid_T'], 'n_samples': len(fits['samples'])},
             'pruned_one_norm_MeV': pruned, 'prune_budget_MeV': prune_budget,
             'prune_within_budget': bool(pruned <= prune_budget),
             'curve': opt['curve'],
