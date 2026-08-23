@@ -79,6 +79,13 @@ P0RUNS="${NUQU_PHASE0_RUNS:-64}"       # warm-grow Phase-0 basin-escape ensemble
 DIM="${NUQU_DIM:-3}"                   # lattice dim (Tier-1 exact-anchor uses 1D/2D chains)
 # --exact-ref: guarded Lanczos true E_inf for the Tier-1 cost anchor (small ED systems).
 EXACT_ARG=""; [ -n "${NUQU_EXACT_REF:-}" ] && EXACT_ARG="--exact-ref --exact-max-mem-gb ${NUQU_EXACT_MAX_MEM_GB:-24}"
+# --back-eval (GAUSSIAN-ONLY): map each rung's framed |psi~> back through exp(G_sq) onto the
+# ORIGINAL bare H -> VARIATIONAL E_orig (>= E_bare) alongside the frame-internal E_var. Makes
+# the classical baseline a genuine upper bound. Squeeze's map-back is grow~1 (tractable at all
+# L); guarded off for LF/COO frames inside the python. SUPPORT_CAP bounds the deep-rung map-back
+# memory (weight-truncate the input state; dropped_weight logged to convergence-test the cap).
+BACKEVAL_ARG=""; [ -n "${NUQU_BACK_EVAL:-}" ] && BACKEVAL_ARG="--back-eval"
+BACKCAP_ARG=""; [ -n "${NUQU_BACK_SUPPORT_CAP:-}" ] && BACKCAP_ARG="--back-support-cap ${NUQU_BACK_SUPPORT_CAP}"
 # COO-paper co-evolution knobs (grow mode only; 5a2112d wired these into run_frame_shard.py).
 # Depth caps matter because grow-mode Phase-2 is a single warm-grown trajectory (NO deep-solve
 # OpenMP), so an uncapped hpc ceiling (2^(22-L) = 1M at L=2) is intractable single-threaded.
@@ -95,14 +102,15 @@ if [ "$LADDER_MODE" = "independent" ]; then
       --A "$A" $FILL_ARG --ladder-mode independent --ladder-start 1000 --n-rungs "$NRUNGS" \
       --max-core "$MAXCORE" --frame-runs "$RUNS" --phase0-core "$PHASE0CORE" \
       --orbopt-cycles "$ORBOPTCYCLES" --max-rung-seconds "$MAXRUNGSEC" --phase0-runs "$P0RUNS" \
-      --ladder-n-runs "$LNRUNS" $BIM_ARG $PT2CAP_ARG $EXACT_ARG $WARMGROW_ARG --out "$OUT"
+      --ladder-n-runs "$LNRUNS" $BIM_ARG $PT2CAP_ARG $EXACT_ARG $WARMGROW_ARG \
+      $BACKEVAL_ARG $BACKCAP_ARG --out "$OUT"
 else
   # shellcheck disable=SC2086
   "$PY" -m misc.run_frame_shard --L "$L" --seed "$SEED" --dim "$DIM" --n_b "$NB" --frame "$FRAME" \
       --A "$A" $FILL_ARG --ladder-mode grow --ladder-start 1000 --max-core "$MAXCORE" \
       --phase0-runs "$RUNS" --orbopt-cycles "$ORBOPTCYCLES" \
       --profile "$PROFILE" --phase1-mode "$P1MODE" --squeeze-opt "$SQOPT" $P1MAX_ARG $P2MAX_ARG \
-      --max-rung-seconds "$MAXRUNGSEC" --out "$OUT"
+      $BACKEVAL_ARG $BACKCAP_ARG --max-rung-seconds "$MAXRUNGSEC" --out "$OUT"
 fi
 status=$?
 echo "[shard] done status=$status -> $OUT"

@@ -26,6 +26,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from classical.trimci import build_from_eft, frame_workflow, frame
+from classical.trimci.back_evaluate import back_evaluate_frame
 from classical.trimci.frame_qpe import warmstart_overlap
 from classical.trimci.observables import occupation_tail, occupation_histogram
 from classical.trimci.lf import compactness
@@ -117,6 +118,17 @@ def main():
                          "true E_inf for the Tier-1 cost-to-fixed-accuracy anchor. Only "
                          "feasible on small ED systems; records E_exact=None if the guard "
                          "refuses (sector too large).")
+    ap.add_argument("--back-eval", action="store_true",
+                    help="gaussian-only: back-evaluate each rung's framed |psi~> through the "
+                         "squeeze map exp(G_sq) onto the ORIGINAL bare H, recording the "
+                         "VARIATIONAL energy E_orig (>= E_exact) alongside the frame-internal "
+                         "E_var. This makes the classical baseline a genuine upper bound. "
+                         "Guarded to gaussian frames: the squeeze map-back is grow~1 tractable "
+                         "at every L, whereas the LF/COO map-backs are intractable/unimplemented.")
+    ap.add_argument("--back-support-cap", type=int, default=None,
+                    help="tractability fallback for --back-eval: weight-truncate the input "
+                         "state to the top-K dets before the map-back (dropped_weight is logged "
+                         "to convergence-test the cap). None = full state (exact, heavier).")
     ap.add_argument("--exact-max-mem-gb", type=float, default=24.0,
                     help="memory ceiling for the exact-ref Lanczos (refuses cleanly above)")
     ap.add_argument("--out", required=True)
@@ -140,6 +152,24 @@ def main():
              "method": "bare" if fr == "bare" else " + ".join(
                  x for x in ("squeeze" if has_gaussian else "",
                              "projector-LF" if has_lf else "", "COO" if has_coo else "") if x)}
+
+    # VARIATIONAL back-evaluation (gaussian-only). The framed solve minimizes E over the
+    # SQUEEZED H, so its E_var is the frame-internal energy -- variational only if the frame
+    # is isospectral. Squeeze is near-isospectral (small finite-cutoff leak), so mapping the
+    # framed |psi~> back through exp(G_sq) and scoring against the ORIGINAL bare H yields
+    # E_orig >= E_exact -- a genuine variational upper bound (the honest classical-baseline
+    # number). Squeeze's map-back is grow~1 (support doesn't fan out), so it stays tractable
+    # at every L -- unlike LF (superlinear) or COO (unimplemented), which we therefore refuse.
+    # The state is just the closed-form analytic (r, phi) -- core-independent, so computed once.
+    back_state = None
+    if args.back_eval:
+        if not has_gaussian or has_lf or has_coo:
+            print("[frameshard] --back-eval is gaussian-only (squeeze map-back); LF/COO "
+                  "map-backs are intractable/unimplemented -> back-eval DISABLED here.")
+        else:
+            r_bk, phi_bk = frame.analytic_squeeze(Hbare)
+            back_state = {"r": r_bk, "phi": phi_bk, "disp_gen": None,
+                          "disp_scale": 0.0, "R": None}
 
     # EXACT reference (Tier-1): the true E_inf via guarded Lanczos on the bare H (the
     # spectrum is frame-invariant, so this is the target EVERY frame's E_var must reach).
@@ -171,6 +201,10 @@ def main():
         "boson_init_mean": ("none" if bim is None else bim),
         "frame_info": {k: v for k, v in finfo.items()
                        if isinstance(v, (str, int, float, bool))},
+        "back_eval": ({"enabled": True, "frame": "gaussian(squeeze)",
+                       "support_cap": args.back_support_cap,
+                       "r_norm": float(np.linalg.norm(np.asarray(back_state["r"], dtype=float)))}
+                      if back_state is not None else {"enabled": False}),
         "rungs": [], "done": False,
     }
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
@@ -220,6 +254,27 @@ def main():
             r["support"] = {k: c[k] for k in c}
         except Exception:
             r["support"] = None
+        # VARIATIONAL energy E_orig via the squeeze map-back (gaussian-only, see back_state).
+        # E_orig >= E_exact is the honest classical-baseline upper bound; E_var is the (only
+        # near-variational) frame-internal number. gap_orig = E_orig - E_exact is the residual
+        # variational penalty; back_dropped_weight (if a support_cap is set) convergence-tests
+        # the fallback. Best-effort: a map-back failure never kills the rung's solve data.
+        if back_state is not None:
+            try:
+                tb = time.time()
+                be = back_evaluate_frame(Hbare, back_state, res,
+                                         support_cap=args.back_support_cap)
+                r["E_orig"] = be["E_orig"]
+                r["back_resid"] = be["residual"]
+                r["back_dropped_weight"] = be["dropped_weight"]
+                r["back_converged"] = be["converged"]
+                r["back_support_out"] = be["support_out"]
+                r["back_wall_s"] = time.time() - tb
+                if E_exact is not None:
+                    r["gap_orig"] = be["E_orig"] - E_exact
+            except Exception as e:
+                r["E_orig"] = None
+                r["back_error"] = str(e)[:200]
         out["rungs"].append(r)
         out["wall_s"] = time.time() - t0
         save()   # INCREMENTAL: survive an OOM/timeout on the next (deeper) rung
