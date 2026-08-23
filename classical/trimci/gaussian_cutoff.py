@@ -1,37 +1,42 @@
 """
-Rigorous per-site Fock cutoff via the exact Bogoliubov ground state of the
+Per-site Fock-cutoff ESTIMATE via the exact Bogoliubov ground state of the
 free+gradient pion sector (Workstream B / task 25).
 
-This is the *rigorous* replacement for the first-draft `tong_bound.py` estimate.
-The derivation is in `claude/research/bosonic-encodings/05_rigorous_cutoff_persite_number.md`.
+This is a Gaussian-reference ESTIMATE, NOT a rigorous/certified replacement for
+the first-draft `tong_bound.py` estimate, and NOT an application of Tong
+Theorem-6. The derivation is in
+`claude/research/bosonic-encodings/05_rigorous_cutoff_persite_number.md`.
 Headline: choosing the per-site-total pion occupation `n_x = Σ_a n^a_x` as the
-Tong local quantum number puts H_WT into H_R (number-preserving; verified
-`[H_WT, n̂_x] = 0`), which dissolves the Watson-2026 obstruction. The only
-number-changing degree-2 term left is the gradient squeezing, which is
-nucleon-independent and *exactly* Bogoliubov-solvable — so its occupation tail
-is exact (no factorized-SCS approximation), cross-site correlations included.
+local quantum number puts H_WT into H_R (number-preserving; verified
+`[H_WT, n̂_x] = 0`). The only number-changing degree-2 term left is the gradient
+squeezing, which is nucleon-independent and exactly Bogoliubov-solvable — so its
+occupation tail is exact FOR THE FREE+GRADIENT GAUSSIAN REFERENCE STATE (no
+factorized-SCS approximation), cross-site correlations included.
 
-The certificate combines:
+The estimate combines:
   * the exact Gaussian per-mode occupation tail  δ_Gauss(N_f)      (§4 of the note)
-  * the exact variational eigenvalue bound
+  * the exact variational eigenvalue identity
         0 ≤ E0(H̃) − E0(H) ≤ ⟨Qψ|(H−E0)|Qψ⟩/(1−δ)                  (§5)
-    bounded conservatively by  [m_π N_f + ‖V‖_eff]·(3L^d)·δ_Gauss(N_f).
+    evaluated (non-rigorously) on the Gaussian reference, as
+    [m_π N_f + ‖V‖_eff]·(3L^d)·δ_Gauss(N_f).
 
 CONVENTION: everything is in Fock LEVELS N_f (a mode keeps occupations
 0..N_f−1). The register uses n_q = ceil(log2(N_f)) qubits. `dim`-general by
 construction: the gradient Laplacian is built for any lattice dimension.
 
-STATUS (post adversarial audit — see note §0/§8): this is a rigorous-*modulo*-
-approximation ESTIMATE, not yet a certified upper bound. Two gaps:
-  (i)  `‖V‖_eff` uses the conservative gradient-inclusive triangle-inequality
-       norm from note §3.2 (overcounts → pushes N_f up, the safe direction);
-  (ii) `δ` is evaluated on the free+grad *Gaussian* GS, not the true dressed GS
-       — `|δ_true − δ_Gauss|` is physically small (H_AV displacement tiny, H_WT
-       number-conserving) but not yet bounded, so `δ_Gauss` could *under*count
-       (the unsafe direction). Net: a well-motivated estimate comparable to the
-       first-draft 'tong', sharpened by the exact Gaussian tail + exact `(★)`.
-Kept as the `'tong_rigorous'` switch; `'heuristic'` stays the default until the
-gaps are discharged and an ED cross-check confirms it.
+STATUS (post adversarial audit — see
+codex_audit/03_cutoff/rigorous_cutoff_followup_2026-08-18.md): this is a
+Gaussian-reference ESTIMATE, NOT a certified upper bound. Known gaps:
+  (i)  `‖V‖_eff` uses the gradient-only triangle-inequality norm (note §3.2); it
+       does not bound H_AV/H_WT and ignores A, so it is not a conservative norm
+       of the full interaction (audit §3.3);
+  (ii) `δ` and the energy-weighted numerator are evaluated on the free+grad
+       *Gaussian* GS, not the true interacting GS — no inequality orders
+       δ_true vs δ_Gauss, so δ_Gauss can *under*count (audit §3.1, §3.4). The
+       true-GS occupation tail is an open theorem (audit §4).
+Exposed as the `'gaussian_reference_estimate'` switch (the name `'tong_rigorous'`
+is retained only as a deprecated alias); `'heuristic'` stays the default until a
+genuine theorem + ED cross-check land.
 """
 
 from __future__ import annotations
@@ -160,7 +165,7 @@ def gaussian_energy_weighted_tail(L: int, dim: int, N_f: int, params) -> float:
 
 
 # --------------------------------------------------------------------------- #
-# The rigorous cutoff                                                          #
+# The Gaussian-reference cutoff estimate                                       #
 # --------------------------------------------------------------------------- #
 
 def _z_eff(L: int, dim: int) -> float:
@@ -168,11 +173,13 @@ def _z_eff(L: int, dim: int) -> float:
     return 2.0 * dim * (1.0 - 1.0 / L)
 
 
-def tong_rigorous_predictions(L, dim, A, params, eps=1e-3, dE_QPE=None,
-                              n_f_max=64):
-    """Rigorous Fock cutoff from the exact Bogoliubov tail + variational bound.
+def gaussian_reference_predictions(L, dim, A, params, eps=1e-3, dE_QPE=None,
+                                   n_f_max=64):
+    """Gaussian-reference Fock-cutoff ESTIMATE from the exact Bogoliubov tail +
+    variational identity (NOT rigorous/certified; open theorem, see
+    codex_audit/03_cutoff).
 
-    Returns a dict with the certified N_f (levels), n_q (qubits), and diagnostics.
+    Returns a dict with the estimated N_f (levels), n_q (qubits), and diagnostics.
 
     Parameters
     ----------
@@ -218,6 +225,13 @@ def tong_rigorous_predictions(L, dim, A, params, eps=1e-3, dE_QPE=None,
     }
 
 
-def tong_rigorous_cutoff(L, dim, A, params, eps=1e-3, dE_QPE=None):
-    """n_q (qubits) for the rigorous exact-Bogoliubov Fock cutoff."""
-    return tong_rigorous_predictions(L, dim, A, params, eps=eps, dE_QPE=dE_QPE)['n_q']
+def gaussian_reference_cutoff(L, dim, A, params, eps=1e-3, dE_QPE=None):
+    """n_q (qubits) for the exact-Bogoliubov Gaussian-reference Fock-cutoff
+    ESTIMATE (not rigorous/certified)."""
+    return gaussian_reference_predictions(
+        L, dim, A, params, eps=eps, dE_QPE=dE_QPE)['n_q']
+
+
+# Deprecated aliases — kept so old imports (EFTParameters, tests) keep working.
+tong_rigorous_predictions = gaussian_reference_predictions
+tong_rigorous_cutoff = gaussian_reference_cutoff

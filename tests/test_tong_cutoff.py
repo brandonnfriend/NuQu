@@ -1,9 +1,9 @@
 """
-Verifies the Tong-2022 rigorous per-site boson cutoff wired into
-estimate_boson_cutoff via boson_cutoff_method='tong':
+Verifies the first-draft Tong-2022 per-site boson-cutoff ESTIMATE (NOT a certificate;
+codex_audit/03_cutoff) wired into estimate_boson_cutoff via boson_cutoff_method='tong':
 
   - 'tong' returns max(n_b_eng, n_b_spec1) from tong_bound.cutoff_predictions
-    (the doc's "certified rigorous choice"),
+    (the doc's first-draft estimate choice),
   - that value lands at n_q = 4-5 and is essentially A-independent (Tong's
     polylog scaling), in contrast to the heuristic's log2(1+A) growth,
   - 'heuristic' is unchanged (the default) and still grows with A,
@@ -41,7 +41,7 @@ def main():
     print("        TONG-2022 BOSON CUTOFF VERIFICATION")
     print("=" * 62)
 
-    # --- 'tong' == doc's certified choice max(n_b_eng, n_b_spec1) ----------
+    # --- 'tong' == doc's first-draft estimate choice max(n_b_eng, n_b_spec1) ------
     print("\n  method='tong' matches tong_bound.cutoff_predictions:")
     for (L, A) in [(2, 1), (2, 10), (2, 100), (3, 2)]:
         pred = cutoff_predictions(L, dim, A, params=params)
@@ -128,7 +128,7 @@ def main():
 # --------------------------------------------------------------------------- #
 
 def test_tong_rigorous_lands_in_single_digit_nq():
-    """Rigorous cutoff certifies n_q = 4-5 across the physical L range."""
+    """Gaussian-reference ESTIMATE brackets n_q = 4-5 across the physical L range (not a certificate)."""
     p = get_physical_parameters()
     for L in (2, 4, 6, 10):
         n_q, _, _ = estimate_boson_cutoff(
@@ -148,12 +148,26 @@ def test_tong_rigorous_monotone_in_precision():
 
 
 def test_tong_rigorous_is_dim_general():
-    """Unlike the Watson-3D baseline, the rigorous path runs for dim != 3."""
+    """Unlike the Watson-3D baseline, the Gaussian-reference-estimate path runs for dim != 3."""
     p = get_physical_parameters()
     for dim in (1, 2, 3):
         n_q, _, _ = estimate_boson_cutoff(
             2, dim, 2, p, epsilon_cut=1e-3, boson_cutoff_method='tong_rigorous')
         assert n_q >= 2
+
+
+def test_gaussian_reference_estimate_is_canonical_alias():
+    """The canonical 'gaussian_reference_estimate' name works and == the deprecated
+    'tong_rigorous' alias (audit 03_cutoff rename)."""
+    p = get_physical_parameters()
+    for (L, dim) in ((2, 3), (2, 1)):
+        canon = estimate_boson_cutoff(L, dim, 4, p, epsilon_cut=1e-3,
+                                      boson_cutoff_method='gaussian_reference_estimate')[0]
+        alias = estimate_boson_cutoff(L, dim, 4, p, epsilon_cut=1e-3,
+                                      boson_cutoff_method='tong_rigorous')[0]
+        assert canon == alias
+    assert Config(boson_cutoff_method='gaussian_reference_estimate').boson_cutoff_method \
+        == 'gaussian_reference_estimate'
 
 
 def test_tong_rigorous_gaussian_tail_decreasing():

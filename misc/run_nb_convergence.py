@@ -9,11 +9,13 @@ Two deliverables (see `claude/research/bosonic-encodings/02_tong_fock_cutoff.md`
   (a) barely slow down and (b) barely lower the energy past small n_b. We measure
   runtime(n_b) and E(n_b) to show low n_b captures the important Fock states.
 
-  GOAL 2 — certify the quantum-side n_b bound. The doc derives an engineering cutoff
-  (n_b ~ 1-2) and a rigorous spectral bound (n_b ~ 4-5) for eps=1e-3. ED can only
-  check this at L=1 (trivial: no gradient -> pion vacuum). TrimCI does the ED-cross-
-  check at L>=2 (the real system), where we read off the empirical n_b needed for a
-  target accuracy and confirm the rigorous bound safely over-estimates it. We also
+  GOAL 2 — EMPIRICALLY determine the quantum-side n_b (codex 03_cutoff: report
+  convergence empirically; the estimates below are NOT certificates). The estimate
+  docs give an engineering cutoff (n_b ~ 1-2) and a first-draft spectral-bracket
+  estimate (n_b ~ 4-5) for eps=1e-3. ED can only check this at L=1 (trivial: no
+  gradient -> pion vacuum). TrimCI does the ED-cross-check at L>=2 (the real system),
+  where we read off the empirical n_b needed for a target accuracy and check the
+  (first-draft) estimate safely brackets it. We also
   measure <N>/mode (should match the SCS ~0.045 at L=2 d=3) and the leaked-weight
   tail (the physical reason the cutoff is small).
 

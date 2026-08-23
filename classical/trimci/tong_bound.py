@@ -4,8 +4,9 @@ theoretical curve the classical n_b/N_f convergence study is compared against.
 
 This implements the derivation in
 `claude/research/bosonic-encodings/02_tong_fock_cutoff.md` (§2 SCS prediction,
-§3 spectral bound, §7.2 pseudocode). It is the first-draft rigorous replacement
-for the heuristic `estimate_boson_cutoff` (CLAUDE.md open homework); here it
+§3 spectral bracket, §7.2 pseudocode). It is a first-draft ESTIMATE (SCS
+occupation + Cauchy-Schwarz spectral bracket), NOT a certificate, intended to
+replace the heuristic `estimate_boson_cutoff` (CLAUDE.md open homework); here it
 serves to bracket the empirically-measured cutoff.
 
 CONVENTION. Everything is in NUMBER OF FOCK LEVELS `N_f` (our solver's
@@ -96,8 +97,8 @@ def cutoff_predictions(L, dim, A, params=None, eps=1e-3, dE_QPE=None,
       N_spec2  : 2nd-order (Rayleigh-Schrodinger) spectral bound
       n_b_*    : ceil(log2(N_f_*)) for each
       r_star, N_per_mode, ...
-    Criteria use ||V|| ~ C_V L^dim (N_f+1) and delta(N_f)=P(n>=N_f); the certified
-    rigorous choice in the doc is max(N_eng, N_spec1)."""
+    Criteria use ||V|| ~ C_V L^dim (N_f+1) and delta(N_f)=P(n>=N_f); the doc's
+    first-draft ESTIMATE (not a certificate) takes max(N_eng, N_spec1)."""
     p = _params(params)
     a_L, m_pi = p["a_L"], p["m_pi"]
     if dE_QPE is None:

@@ -13,13 +13,15 @@ Currently supported axes:
                  (Nyquist-Shannon optimal). Only consulted for the
                  amplitude basis; the Fock basis derives its own cutoff.
 - boson_cutoff_method: 'heuristic' (default log2(1+A) starter formula),
-                 'tong' (first-draft Tong-2022 polylog bound, n_q=4-5), or
-                 'tong_rigorous' (exact-Bogoliubov tail + exact variational
-                 bound, task 25; rigorous-modulo-approx, dim-general). Chooses
-                 how the per-site boson register size n_q is set. Drives the
-                 Fock basis directly and the NS amplitude register indirectly;
-                 ignored by the amplitude 'energy_bound' path (Lemma 5 sets
-                 its own n_b).
+                 'tong' (first-draft Tong-SCS + Cauchy-Schwarz ESTIMATE, not a
+                 certificate; n_q=4-5), or 'gaussian_reference_estimate' (aka
+                 the deprecated alias 'tong_rigorous'): an exact-Bogoliubov
+                 Gaussian-reference ESTIMATE (not rigorous/certified — the true
+                 interacting-GS tail is an open theorem, see
+                 codex_audit/03_cutoff), dim-general. Chooses how the per-site
+                 boson register size n_q is set. Drives the Fock basis directly
+                 and the NS amplitude register indirectly; ignored by the
+                 amplitude 'energy_bound' path (Lemma 5 sets its own n_b).
 - block_encoder: 'pauli_lcu' (default — current pyLIQTR path),
                  'sparse' (BCK sparse-oracle, task 26),
                  or 'lobe' (Ladder-Operator Block-Encoding, task 28).
@@ -48,7 +50,8 @@ from dataclasses import dataclass, asdict, field
 _VALID_PION_BASES = ('amplitude', 'fock', 'fock_squeezed')
 _VALID_WALK_MODES = ('series', 'parallel')
 _VALID_CUTOFF_METHODS = ('energy_bound', 'ns')
-_VALID_BOSON_CUTOFF_METHODS = ('heuristic', 'tong', 'tong_rigorous')
+_VALID_BOSON_CUTOFF_METHODS = ('heuristic', 'tong', 'gaussian_reference_estimate',
+                               'tong_rigorous')  # 'tong_rigorous' = deprecated alias
 _VALID_BLOCK_ENCODERS = ('pauli_lcu', 'sparse', 'lobe')
 _VALID_SPARSE_ORACLE_MODES = ('analytical', 'hermitian_cost_model', 'compiled')
 _VALID_WALK_COMPOSITIONS = ('combined_lcu', 'split_sum')
@@ -63,9 +66,12 @@ class Config:
     # Ignored by the Fock basis, which derives its own cutoff.
     cutoff_method: str = 'energy_bound'
     # Per-site boson register-size method. 'heuristic' = starter log2(1+A)
-    # formula (current default); 'tong' = rigorous Tong-2022 polylog bound
-    # (n_q=4-5, A-flat). Drives the Fock basis directly and the NS amplitude
-    # register indirectly; ignored by the amplitude 'energy_bound' path.
+    # formula (current default); 'tong' = first-draft Tong-SCS + Cauchy-Schwarz
+    # ESTIMATE (not a certificate; n_q=4-5, A-flat); 'gaussian_reference_estimate'
+    # (aka deprecated 'tong_rigorous') = exact-Bogoliubov Gaussian-reference
+    # ESTIMATE (not rigorous/certified; open theorem, see codex_audit/03_cutoff).
+    # Drives the Fock basis directly and the NS amplitude register indirectly;
+    # ignored by the amplitude 'energy_bound' path.
     boson_cutoff_method: str = 'heuristic'
     # Block-encoder strategy. Default 'pauli_lcu' preserves the current
     # behavior; 'sparse' / 'lobe' will be wired in by tasks 26 / 28.

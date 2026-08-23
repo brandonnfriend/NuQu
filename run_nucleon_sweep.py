@@ -47,8 +47,10 @@ def get_sweep_config(**overrides):
         # or 'ns' (Nyquist-Shannon optimal, Path B). Ignored by the Fock basis.
         'cutoff_method': 'energy_bound',
         # Per-site boson register-size method: 'heuristic' (default log2(1+A)
-        # starter formula) or 'tong' (rigorous Tong-2022 polylog bound,
-        # n_q=4-5). Drives the Fock basis + the NS amplitude register.
+        # starter formula), 'tong' (first-draft Tong-SCS ESTIMATE, n_q=4-5, NOT a
+        # certificate), or 'gaussian_reference_estimate'. Drives the Fock basis + the
+        # NS amplitude register. Physical adequacy is set by the empirical convergence
+        # study (misc/run_nb_convergence.py), not by these estimates.
         'boson_cutoff_method': 'heuristic',
         # Block-encoder strategy: 'pauli_lcu' (default), 'sparse' (task 26),
         # or 'lobe' (task 28). See src_PI/estimation/block_encoders/.

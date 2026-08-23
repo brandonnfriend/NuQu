@@ -65,14 +65,17 @@ def calculate_dynamic_cutoffs(L, dim, A_nucleons, params, epsilon_cut=0.1, E_bou
     # NOTE: Watson's Lemma 5 (Eqs. 75-78) is DERIVED FOR 3D. The a_L powers below
     # (a_L**3 volume factors AND the a_L**4 in the mass term) are 3D-specific and
     # are NOT uniformly cell-volume, so they cannot be mechanically generalized to
-    # a_L**dim. The dim-general rigorous cutoff is the exact-Bogoliubov
-    # 'tong_rigorous' path (classical/trimci/gaussian_cutoff.py). Warn here.
+    # a_L**dim. The dim-general alternative is the exact-Bogoliubov
+    # Gaussian-reference ESTIMATE ('gaussian_reference_estimate', aka the
+    # deprecated 'tong_rigorous' alias; classical/trimci/gaussian_cutoff.py) —
+    # an estimate, not a certified d-dimensional bound. Warn here.
     if dim != 3:
         import warnings
         warnings.warn(
             f"calculate_dynamic_cutoffs implements Watson Lemma 5, derived for dim=3; "
             f"its a_L powers are 3D-specific. Result for dim={dim} is not the correct "
-            f"d-dimensional bound. Use boson_cutoff_method='tong_rigorous' for dim!=3.",
+            f"d-dimensional bound. Use boson_cutoff_method='gaussian_reference_estimate' "
+            f"(exact-Bogoliubov Gaussian-reference estimate) for dim!=3.",
             RuntimeWarning,
         )
 
@@ -127,24 +130,30 @@ def calculate_dynamic_cutoffs(L, dim, A_nucleons, params, epsilon_cut=0.1, E_bou
 # -----------------------------------------------------------------------
 # Per-site boson-number cutoff (shared by the Fock and NS amplitude paths)
 # -----------------------------------------------------------------------
-# TWO methods, selected by `boson_cutoff_method` on estimate_boson_cutoff:
+# THREE methods, selected by `boson_cutoff_method` on estimate_boson_cutoff:
 #
 #   'heuristic' (default) — the starter formula below. NOT a rigorous
 #     derivation; intentionally conservative for small-A test runs and grows
 #     slowly with A (which broadens P(n) via the H_AV/H_WT sources).
 #
-#   'tong' — the rigorous Tong-2022 bound. Tong et al. (arXiv:2110.06942)
-#     proves that for bosonic Hamiltonians with bounded-degree polynomial
-#     coupling — which includes our chiral EFT (H_AV degree 1, H_WT degree 2
-#     in â, â†) — a Fock cutoff N_f = O(polylog(1/ε)) is rigorously
-#     sufficient. `classical/trimci/tong_bound.py::cutoff_predictions`
-#     instantiates that bound (SCS occupation + first/second-order spectral
-#     tails) for our specific H + lattice geometry, and `_tong_boson_cutoff`
-#     returns the certified choice max(n_b_eng, n_b_spec1) = 4-5, essentially
-#     A-independent. The classical nb/N_f convergence study confirms n_b=4-5
-#     are safe here. (The full Theorem-6 prefactor derivation remains the
-#     paper-grade open homework in CLAUDE.md; `tong_bound` is the first-draft
-#     rigorous replacement that this switch makes usable now.)
+#   'tong' — a first-draft ESTIMATE, NOT a certificate. Tong et al.
+#     (arXiv:2110.06942) prove that for bosonic Hamiltonians with
+#     bounded-degree polynomial coupling — which includes our chiral EFT
+#     (H_AV degree 1, H_WT degree 2 in â, â†) — a Fock cutoff
+#     N_f = O(polylog(1/ε)) is sufficient in principle.
+#     `classical/trimci/tong_bound.py::cutoff_predictions` builds a first-draft
+#     instantiation (SCS occupation + first/second-order Cauchy-Schwarz spectral
+#     brackets) for our specific H + lattice geometry, and `_tong_boson_cutoff`
+#     returns max(n_b_eng, n_b_spec1) = 4-5, essentially A-independent. The
+#     classical nb/N_f convergence study finds n_b=4-5 safe here empirically,
+#     but this is an ESTIMATE: the full Theorem-6 prefactor derivation remains
+#     paper-grade open homework in CLAUDE.md (see codex_audit/03_cutoff).
+#
+#   'gaussian_reference_estimate' (aka the deprecated alias 'tong_rigorous') —
+#     the exact-Bogoliubov Gaussian-reference ESTIMATE (task 25). NOT
+#     rigorous/certified: it uses the free+gradient Gaussian ground state as a
+#     reference, but the true interacting-GS occupation tail is an open theorem
+#     (codex_audit/03_cutoff). dim-general.
 #
 # The same per-site boson cutoff drives two encodings:
 #   - Fock basis (Reading A): N_f = 2^n_q states, n_b = n_q qubits.
@@ -169,24 +178,26 @@ def calculate_dynamic_cutoffs(L, dim, A_nucleons, params, epsilon_cut=0.1, E_bou
 #
 # These numbers are bigger than Tong's polylog would justify, but small
 # enough that the test pipeline stays tractable. Switch to
-# boson_cutoff_method='tong' for the rigorous (much smaller, A-flat) cutoff.
+# boson_cutoff_method='tong' for the first-draft Tong-SCS ESTIMATE (much
+# smaller, A-flat cutoff — not a certificate).
 N_Q_MIN = 4
 N_Q_BASE = 4
 N_Q_PER_LOG_A = 1.0
 
 
 def _tong_boson_cutoff(L, dim, A_nucleons, params):
-    """Rigorous per-mode boson cutoff n_q from Tong et al. 2022, via the SCS +
-    spectral-bound instantiation in ``classical/trimci/tong_bound.py``.
+    """First-draft Tong-SCS ESTIMATE of the per-mode boson cutoff n_q (SCS
+    occupation + Cauchy-Schwarz spectral bracket), NOT a certificate, via the
+    instantiation in ``classical/trimci/tong_bound.py``.
 
-    Returns the *certified* choice ``max(n_b_eng, n_b_spec1)`` (tong_bound doc
-    §2-3: the engineering safety cutoff OR-ed with the first-order
-    Cauchy-Schwarz spectral bound — the "certified rigorous choice" the doc
-    calls out). For this EFT that lands at **n_q = 4-5 across the whole physical
-    A range** — near-A-independent, reflecting Tong's polylog(1/eps) scaling —
-    versus the heuristic's ``log2(1+A)`` growth to ~11. The classical nb/N_f
-    convergence study (``misc/run_nb_convergence.py``) confirms n_b = 4-5 are
-    safe here, so this is now a measured bound, not just a bracket.
+    Returns ``max(n_b_eng, n_b_spec1)`` (tong_bound doc §2-3: the engineering
+    safety cutoff OR-ed with the first-order Cauchy-Schwarz spectral bracket).
+    For this EFT that lands at **n_q = 4-5 across the whole physical A range** —
+    near-A-independent, echoing Tong's polylog(1/eps) scaling — versus the
+    heuristic's ``log2(1+A)`` growth to ~11. The classical nb/N_f convergence
+    study (``misc/run_nb_convergence.py``) finds n_b = 4-5 safe here
+    empirically; this remains an ESTIMATE, not a certified bound (see
+    codex_audit/03_cutoff).
 
     The import is deferred (the classical solver package is heavier than this
     module needs at import time, and only the 'tong' path pulls it in).
@@ -196,25 +207,32 @@ def _tong_boson_cutoff(L, dim, A_nucleons, params):
     return max(pred["n_b_eng"], pred["n_b_spec1"])
 
 
-def _tong_rigorous_boson_cutoff(L, dim, A_nucleons, params, epsilon_cut):
-    """Rigorous per-mode boson cutoff from the exact Bogoliubov ground state of
-    the free+gradient pion sector (task 25; derivation in
+def _gaussian_reference_boson_cutoff(L, dim, A_nucleons, params, epsilon_cut):
+    """Gaussian-reference ESTIMATE of the per-mode boson cutoff from the exact
+    Bogoliubov ground state of the free+gradient pion sector (task 25;
+    derivation in
     ``claude/research/bosonic-encodings/05_rigorous_cutoff_persite_number.md``).
 
-    Unlike the first-draft ``'tong'`` (SCS + Cauchy-Schwarz estimate), this uses
-    the *exact* cross-site-correlated Gaussian occupation tail and the exact
-    variational eigenvalue bound. The Weinberg-Tomozawa obstruction that blocks
-    Watson-2026's use of Tong is dissolved by taking the per-site-total pion
-    number as the Tong local quantum number (H_WT then conserves it → H_R).
+    NOT rigorous/certified: the free+gradient Gaussian ground state is used as a
+    reference, but the true interacting-GS occupation tail is an open theorem
+    (see codex_audit/03_cutoff). Relative to the first-draft ``'tong'`` (SCS +
+    Cauchy-Schwarz estimate) it uses the cross-site-correlated Gaussian
+    occupation tail and the variational eigenvalue identity. The
+    Weinberg-Tomozawa structure motivating this takes the per-site-total pion
+    number as the local quantum number (H_WT then conserves it → H_R).
 
     ``epsilon_cut`` is the target relative eigenvalue error (dimensionless);
     ``dE_QPE`` is read from ``params['dE_QPE']`` (default 0.1·m_π). Deferred
     import (scipy/classical solver heavier than this module needs at import).
     """
-    from classical.trimci.gaussian_cutoff import tong_rigorous_cutoff
+    from classical.trimci.gaussian_cutoff import gaussian_reference_cutoff
     dE_QPE = params.get('dE_QPE', 0.1 * params['m_pi'])
-    return tong_rigorous_cutoff(L, dim, A_nucleons, params,
-                                eps=epsilon_cut, dE_QPE=dE_QPE)
+    return gaussian_reference_cutoff(L, dim, A_nucleons, params,
+                                     eps=epsilon_cut, dE_QPE=dE_QPE)
+
+
+# Deprecated alias — kept so old call sites keep working.
+_tong_rigorous_boson_cutoff = _gaussian_reference_boson_cutoff
 
 
 def estimate_boson_cutoff(L, dim, A_nucleons, params, epsilon_cut=0.1,
@@ -233,11 +251,14 @@ def estimate_boson_cutoff(L, dim, A_nucleons, params, epsilon_cut=0.1,
       - 'heuristic' (default): the starter formula
         ``n_q = max(N_Q_MIN, ceil(N_Q_BASE + N_Q_PER_LOG_A·log2(1+A)))`` —
         conservative, grows with A. See the module-level note for the caveat.
-      - 'tong': the first-draft Tong-2022 bound (``_tong_boson_cutoff``),
-        n_q = 4-5, essentially A-independent (SCS + Cauchy-Schwarz estimate).
-      - 'tong_rigorous': the exact-Bogoliubov tail + exact variational bound
-        (``_tong_rigorous_boson_cutoff``, task 25). dim-general;
-        rigorous-modulo-approx (see gaussian_cutoff.py). Here ``epsilon_cut``
+      - 'tong': the first-draft Tong-SCS ESTIMATE (``_tong_boson_cutoff``),
+        n_q = 4-5, essentially A-independent (SCS occupation + Cauchy-Schwarz
+        spectral bracket; not a certificate).
+      - 'gaussian_reference_estimate' (aka deprecated alias 'tong_rigorous'):
+        the exact-Bogoliubov Gaussian-reference ESTIMATE
+        (``_gaussian_reference_boson_cutoff``, task 25). dim-general; NOT
+        rigorous/certified — the true interacting-GS tail is an open theorem
+        (see gaussian_cutoff.py / codex_audit/03_cutoff). Here ``epsilon_cut``
         is the target relative eigenvalue error (not the amplitude weight).
 
     pi_max and Pi_max are computed via the amplitude-basis (energy-bound)
@@ -250,10 +271,12 @@ def estimate_boson_cutoff(L, dim, A_nucleons, params, epsilon_cut=0.1,
     """
     if boson_cutoff_method == 'tong':
         n_q = _tong_boson_cutoff(L, dim, A_nucleons, params)
-    elif boson_cutoff_method == 'tong_rigorous':
-        # Exact-Bogoliubov rigorous-modulo-approx cutoff (task 25). For this
-        # method, `epsilon_cut` is the target relative eigenvalue error.
-        n_q = _tong_rigorous_boson_cutoff(
+    elif boson_cutoff_method in ('gaussian_reference_estimate', 'tong_rigorous'):
+        # Exact-Bogoliubov Gaussian-reference ESTIMATE (task 25); 'tong_rigorous'
+        # is a deprecated alias. NOT rigorous/certified (open theorem, see
+        # codex_audit/03_cutoff). For this method, `epsilon_cut` is the target
+        # relative eigenvalue error.
+        n_q = _gaussian_reference_boson_cutoff(
             L, dim, A_nucleons, params, epsilon_cut)
     elif boson_cutoff_method == 'heuristic':
         # See module-level note for the rigor caveat on this heuristic.
@@ -263,7 +286,8 @@ def estimate_boson_cutoff(L, dim, A_nucleons, params, epsilon_cut=0.1,
         )
     else:
         raise ValueError(
-            f"boson_cutoff_method must be 'heuristic', 'tong', or 'tong_rigorous', "
+            f"boson_cutoff_method must be 'heuristic', 'tong', "
+            f"'gaussian_reference_estimate', or 'tong_rigorous' (deprecated alias), "
             f"got {boson_cutoff_method!r}"
         )
 
