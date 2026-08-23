@@ -33,7 +33,9 @@ import numpy as np
 from classical.trimci.run_cpp import (nb_convergence_sweep, occupation_vs_A_sweep,
                                        exact_occupation_vs_A)
 
-OUT_DIR = os.path.join("data", "classical", "nb_convergence")
+# Output dir: env-overridable so HPC shards write under $REPO/hpc/... for rsync (the default
+# is the local analysis location).
+OUT_DIR = os.environ.get("NUQU_NB_OUT_DIR", os.path.join("data", "classical", "nb_convergence"))
 os.makedirs(OUT_DIR, exist_ok=True)
 
 
@@ -331,7 +333,10 @@ def main():
     if which == "plot":
         plot_all()
         return
-    plot_all()
+    # Cluster shards (NUQU_NB_OUT_DIR set) skip the local-only combined plot: each shard holds
+    # only its own study, and matplotlib may be absent in the HPC venv. Plot after rsync.
+    if not os.environ.get("NUQU_NB_OUT_DIR"):
+        plot_all()
 
 
 if __name__ == "__main__":
