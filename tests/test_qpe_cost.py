@@ -157,6 +157,37 @@ def test_walk_query_constant_is_babbush_upper_bound():
     assert abs(WALK_QUERY_CONSTANT - 4.4428829) < 1e-6
 
 
+from src_PI.estimation.qpe_cost import overlap_repetition_factor, OVERLAP_CROSSOVER_P0
+
+
+def test_repetition_sampling_is_log_over_p0():
+    r = overlap_repetition_factor(0.25, confidence=0.99, branch="sampling")
+    assert r["R"] == math.ceil(math.log(1.0 / 0.01) / 0.25)      # ⌈ln(1/δ)/p0⌉
+    assert r["ae_register_qubits"] == 0                          # sampling needs no AE register
+
+
+def test_repetition_branches_cross_at_0003():
+    """Auto picks sampling for p0 ≳ 0.003, binary below; the two meet at the crossover."""
+    assert overlap_repetition_factor(0.05, branch="auto")["branch"] == "sampling"   # high overlap
+    assert overlap_repetition_factor(1e-4, branch="auto")["branch"] == "binary"     # poor overlap
+    at = overlap_repetition_factor(OVERLAP_CROSSOVER_P0, branch="auto")
+    assert at["R_sampling"] == at["R_binary"]                    # equal by calibration at crossover
+
+
+def test_binary_beats_sampling_only_below_crossover():
+    lo = overlap_repetition_factor(1e-4)                         # p0 < crossover
+    assert lo["R_binary"] < lo["R_sampling"]
+    hi = overlap_repetition_factor(0.1)                          # p0 > crossover
+    assert hi["R_sampling"] < hi["R_binary"]
+    assert overlap_repetition_factor(1e-4, branch="binary")["ae_register_qubits"] >= 1
+
+
+def test_higher_overlap_fewer_repetitions():
+    """The warm-start payoff: raising p0 monotonically lowers R (sampling branch)."""
+    assert (overlap_repetition_factor(0.5, branch="sampling")["R"]
+            < overlap_repetition_factor(0.05, branch="sampling")["R"])
+
+
 if __name__ == '__main__':
     for name, fn in list(globals().items()):
         if name.startswith('test_') and callable(fn):

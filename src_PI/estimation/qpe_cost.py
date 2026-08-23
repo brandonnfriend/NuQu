@@ -87,6 +87,56 @@ def total_qpe_t_count(total_t_count, physical_lambda, delta_E=DEFAULT_DELTA_E_ME
     return total_t_count * walk_queries(physical_lambda, delta_E, constant)
 
 
+# GSEE overlap/success crossover: amplitude-amplified binary search (∝1/√p0) beats naive
+# min-of-samples (∝1/p0) only for p0 ≲ this; above it, sampling's smaller prefactor wins
+# (Berry et al. 2024, arXiv:2409.11748, p.4). A warm start's value is keeping p0 large — few
+# repetitions AND on the cheap sampling side — not the 1/√p0 amplification.
+OVERLAP_CROSSOVER_P0 = 0.003
+
+
+def overlap_repetition_factor(p0, confidence=0.99, branch="auto",
+                              crossover=OVERLAP_CROSSOVER_P0):
+    """GSEE repetition factor `R` = how many (state-prep + one QPE window) shots are needed, as a
+    multiplier on the per-window coherent-query T-count. `p0 = |⟨g|ψ_init⟩|²` is the warm-start
+    success probability (from `frame_qpe.warmstart_fidelity`).
+
+    Two branches (Berry 2024; the current code's bare `1/p0` was only the first):
+      * **sampling** (min-of-samples) — `R = ⌈ln(1/δ)/p0⌉`, `δ=1−confidence`. Rigorous: the ground
+        phase is hit in a window w.p. p0, so `(1−p0)^R ≤ δ`. Scales `1/p0`. This is the honest
+        replacement for the old `1/p0`.
+      * **binary** (amplitude-estimation / Lin–Tong) — scales `1/√p0`, calibrated here to meet the
+        sampling branch exactly at `p0=crossover` (`R = ⌈ln(1/δ)/√(crossover·p0)⌉`). It carries the
+        Berry 1/√p0 SCALING and the empirical p0≈0.003 CROSSOVER (the load-bearing facts); the exact
+        Berry nested-log prefactor (7.77·…) is a refinement not transcribed here — noted so it is not
+        mistaken for the primary source. The binary branch also needs an extra amplitude-estimation
+        register (`~log₂(1/√p0)` qubits); sampling needs none.
+
+    `branch='auto'` picks the cheaper (min), i.e. sampling for `p0 ≳ crossover`, binary below.
+    Returns `{R, branch, R_sampling, R_binary, ae_register_qubits, p0, confidence}`.
+    """
+    if not (0.0 < p0 <= 1.0):
+        raise ValueError(f"p0 must be in (0, 1], got {p0}")
+    delta = 1.0 - confidence
+    ln_inv_delta = math.log(1.0 / delta)
+    r_sampling = math.ceil(ln_inv_delta / p0)
+    r_binary = math.ceil(ln_inv_delta / math.sqrt(crossover * p0))   # = r_sampling at p0=crossover
+    ae_qubits = max(1, math.ceil(math.log2(1.0 / math.sqrt(p0))))
+    if branch == "sampling":
+        chosen, R, ae = "sampling", r_sampling, 0
+    elif branch == "binary":
+        chosen, R, ae = "binary", r_binary, ae_qubits
+    elif branch == "auto":
+        if r_binary < r_sampling:
+            chosen, R, ae = "binary", r_binary, ae_qubits
+        else:
+            chosen, R, ae = "sampling", r_sampling, 0
+    else:
+        raise ValueError(f"branch must be sampling|binary|auto, got {branch}")
+    return {"R": int(R), "branch": chosen, "R_sampling": int(r_sampling),
+            "R_binary": int(r_binary), "ae_register_qubits": int(ae),
+            "p0": p0, "confidence": confidence}
+
+
 def qpe_phase_register_qubits(physical_lambda, eps_qpe=DEFAULT_DELTA_E_MEV,
                               constant=WALK_QUERY_CONSTANT):
     """`m` = number of QPE PHASE-REGISTER ancilla qubits (Babbush 2018).
