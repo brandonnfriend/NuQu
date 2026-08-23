@@ -150,6 +150,34 @@ def study_C():
     return out3, out4
 
 
+def study_Bdense(core=4000, n_runs=3):
+    """L=2 d=3 DENSE (filling 1.0, A=8) — the physical nuclear-matter regime, max pion source.
+    The dilute study_B has A=1; this asks whether n_b stays small when EVERY site hosts a nucleon
+    (the audit's 'target nucleon regimes'). Heavier fermion sector -> larger core / cluster."""
+    out = nb_convergence_sweep(L=2, dim=3, A=8, N_f_list=(2, 3, 4, 6, 8, 16),
+                               core=core, n_runs=n_runs, seed=0)
+    _save(out, "studyBdense_L2d3A8")
+    return out
+
+
+def study_Cdense(core=2000, n_runs=2):
+    """L=3 d=3 DENSE (filling 1.0, A=27) — dense at the larger volume. Cluster-scale (big fermion
+    sector); the E_var plateau + weighted-boundary-population are the robust cutoff signals even
+    if the absolute core is not fully converged."""
+    out = nb_convergence_sweep(L=3, dim=3, A=27, N_f_list=(2, 4, 8, 16),
+                               core=core, n_runs=n_runs, seed=0)
+    _save(out, "studyCdense_L3d3A27")
+    return out
+
+
+def study_Cdilute(core=2000, n_runs=2):
+    """L=3 d=3 DILUTE (A=1) at the finer N_f grid — pairs with study_C for the L=3 dilute curve."""
+    out = nb_convergence_sweep(L=3, dim=3, A=1, N_f_list=(2, 3, 4, 6, 8, 16),
+                               core=core, n_runs=n_runs, seed=0)
+    _save(out, "studyCdilute_L3d3A1")
+    return out
+
+
 def plot_all():
     """Read whatever studies have been saved and produce the summary plots."""
     import matplotlib
@@ -294,6 +322,12 @@ def main():
         study_F()
     if which in ("G", "all"):
         study_G()
+    if which in ("Bdense", "dense", "all"):
+        study_Bdense()
+    if which in ("Cdilute", "dense", "all"):
+        study_Cdilute()
+    if which in ("Cdense", "dense", "all"):
+        study_Cdense()
     if which == "plot":
         plot_all()
         return

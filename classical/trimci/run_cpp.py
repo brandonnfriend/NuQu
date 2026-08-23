@@ -1363,12 +1363,13 @@ def nb_convergence_sweep(L=2, dim=3, A=1, N_f_list=(2, 4, 8, 16, 32),
               f"  N_spec1={pred['N_spec1']}(n_b={pred['n_b_spec1']})")
         print("=" * 84)
         hdr = (f"  {'n_b':>3} {'N_f':>4} {'sector':>9} {'E_var':>13} "
-               f"{'E_var+PT2':>13} {'dE_PT2':>9} {'<N>/mode':>9} {'tailN_f':>9} {'t(s)':>7}")
+               f"{'E_var+PT2':>13} {'dE_PT2':>9} {'<N>/mode':>9} {'tail_top':>9} {'t(s)':>7}")
         if verbose:
             print(hdr + f" {'exact':>13}")
             print("  " + "-" * 96)
 
     rows = []
+    res_deepest, Nf_deepest = None, -1
     for N_f in N_f_list:
         n_b = max(1, ceil(log2(N_f)))
         H = build_from_eft(L, dim, n_b, N_f=N_f)
@@ -1390,39 +1391,66 @@ def nb_convergence_sweep(L=2, dim=3, A=1, N_f_list=(2, 4, 8, 16, 32),
             E_var = float(pr["E_var"])            # self-consistent (re-diagonalized)
             dE_pt2 = float(pr["dE_pt2"])
         mo = mean_occupation(res)
-        # leaked weight the NEXT-smaller box would drop, measured on this solve
-        tail = occupation_tail(res, N_f)
+        # BOUNDARY population of THIS solve: |c|²-weight at/above the top retained level
+        # (N_f-1). High => this cutoff is too small. (occupation_tail(res, N_f) is ~0 by
+        # construction: nothing populates >= N_f in an N_f-truncated space.)
+        tail_top = occupation_tail(res, max(1, N_f - 1))
         row = {"n_b": n_b, "N_f": N_f, "sector": sector, "core": int(res.n_dets),
                "E_var": E_var, "dE_pt2": dE_pt2,
                "E_pt2": (E_var + dE_pt2) if dE_pt2 is not None else E_var,
                "N_per_mode": mo["N_per_mode"], "N_max_mode": mo["N_max_mode"],
-               "tail_Nf": tail, "runtime_s": dt, "exact": E_ref}
+               "tail_top": tail_top, "runtime_s": dt, "exact": E_ref}
         rows.append(row)
+        if N_f > Nf_deepest:
+            res_deepest, Nf_deepest = res, N_f
         if verbose:
             es = f"{E_ref:13.5f}" if E_ref is not None else f"{'—':>13}"
             dps = f"{dE_pt2:+9.3f}" if dE_pt2 is not None else f"{'—':>9}"
             print(f"  {n_b:>3} {N_f:>4} {sector:>9.1e} {E_var:>13.5f} "
                   f"{row['E_pt2']:>13.5f} {dps} {mo['N_per_mode']:>9.4f} "
-                  f"{tail:>9.1e} {dt:>7.1f} {es}")
+                  f"{tail_top:>9.1e} {dt:>7.1f} {es}")
 
-    # truncation error vs the largest-cutoff energy (best-converged reference)
-    ref_E = rows[-1]["E_pt2"]
+    # ENERGY CONVERGENCE: truncation error vs the largest-cutoff energy (best reference).
+    # Use E_pt2 at the deepest N_f (which need not be the last list entry) as the reference.
+    ref_row = max(rows, key=lambda r: r["N_f"])
+    ref_E = ref_row["E_pt2"]
     for r in rows:
         r["trunc_err"] = r["E_pt2"] - ref_E
+    # smallest n_b meeting each accuracy target (the "n_b for X-MeV accuracy" determination)
+    n_b_for_accuracy = {}
+    for eps_mev in (13.5, 1.0, 0.1):
+        n_b_for_accuracy[eps_mev] = next(
+            (r["n_b"] for r in rows if abs(r["trunc_err"]) < eps_mev), None)
+
+    # WEIGHTED BOUNDARY POPULATION vs cutoff (the audit's publication-relevant quantity,
+    # codex publication-readiness: |c|²-weighted leaked probability, NOT mean occupation):
+    # measured ONCE on the converged deepest solve — leaked_weight[N] = P(∃ mode ≥ N) = the
+    # weight a cutoff of N levels would drop. This is well-defined only on a solve with
+    # headroom above N (the deepest), unlike the same-N_f tail which is ~0 by construction.
+    boundaries = sorted({r["N_f"] for r in rows if r["N_f"] < Nf_deepest})
+    leaked = occupation_tail(res_deepest, boundaries) if boundaries else {}
+    leaked_weight_vs_cutoff = {int(k): float(v) for k, v in
+                               (leaked.items() if isinstance(leaked, dict) else [])}
+
     if verbose:
         print("  " + "-" * 96)
-        print(f"  truncation error |E_var+PT2(N_f) - E(N_f={rows[-1]['N_f']})| vs n_b:")
+        print(f"  ENERGY CONVERGENCE |E_var+PT2(N_f) - E(N_f={ref_row['N_f']})| vs n_b:")
         for r in rows:
-            print(f"    n_b={r['n_b']} (N_f={r['N_f']:>2}): "
-                  f"{abs(r['trunc_err']):>10.4f} MeV")
-        # smallest n_b meeting a few accuracy targets
-        for eps_mev in (13.5, 1.0, 0.1):
-            hit = next((r["n_b"] for r in rows if abs(r["trunc_err"]) < eps_mev), None)
+            print(f"    n_b={r['n_b']} (N_f={r['N_f']:>2}): {abs(r['trunc_err']):>10.4f} MeV")
+        for eps_mev, hit in n_b_for_accuracy.items():
             print(f"    |trunc err| < {eps_mev:>5} MeV first at n_b={hit}")
+        if leaked_weight_vs_cutoff:
+            print(f"  WEIGHTED BOUNDARY POPULATION (leaked |c|² a cutoff would drop, on the "
+                  f"N_f={Nf_deepest} solve):")
+            for N in boundaries:
+                print(f"    cutoff N_f={N:>2} (n_b={max(1, ceil(log2(N)))}): "
+                      f"{leaked_weight_vs_cutoff[N]:>10.3e}")
         print("=" * 84)
 
     return {"rows": rows, "predictions": pred, "L": L, "dim": dim, "A": A,
-            "core": core, "n_runs": n_runs}
+            "core": core, "n_runs": n_runs, "Nf_ref": Nf_deepest,
+            "n_b_for_accuracy_MeV": n_b_for_accuracy,
+            "leaked_weight_vs_cutoff": leaked_weight_vs_cutoff}
 
 
 def occupation_vs_A_sweep(L=2, dim=3, A_list=(1, 2, 3, 4), n_b=4, N_f=None,

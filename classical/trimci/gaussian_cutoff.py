@@ -134,18 +134,28 @@ def _gaussian_pn(L: int, dim: int, m_pi: float, a_L: float, n_max: int = 96):
 
 
 def gaussian_tail(L: int, dim: int, N_f: int, params) -> float:
-    """Exact per-mode occupation tail P(n ≥ N_f) at the worst-case site."""
+    """Per-mode occupation tail P(n ≥ N_f) at the worst-case site, from the exact
+    free+gradient Gaussian marginal.
+
+    Audit fix (03_cutoff §3.5): the ladder truncation is EXTENDED to always cover
+    `N_f` (+ margin) so this never silently returns 0 for large `N_f`; if `N_f` still
+    lands past the extended ladder, we return the last computed level weight as a
+    CONSERVATIVE (never-zero) upper bound rather than 0.
+    """
     m_pi, a_L = float(params['m_pi']), float(params['a_L'])
-    pn = _gaussian_pn(L, dim, m_pi, a_L)
+    pn = _gaussian_pn(L, dim, m_pi, a_L, n_max=max(96, int(N_f) + 32))
     if N_f >= len(pn):
-        return float(sum(pn[len(pn):]))  # ~0
+        return float(pn[-1])                       # conservative upper bound (NOT 0)
     return float(sum(pn[N_f:]))
 
 
 def gaussian_energy_weighted_tail(L: int, dim: int, N_f: int, params) -> float:
-    """Σ_{n≥N_f} m_π·n·p(n) per mode — the diagonal part of ⟨Qψ|(H−E0)|Qψ⟩."""
-    m_pi = float(params['m_pi'])
-    pn = _gaussian_pn(L, dim, params['m_pi'], params['a_L'])
+    """Σ_{n≥N_f} m_π·n·p(n) per mode — the diagonal part of ⟨Qψ|(H−E0)|Qψ⟩. Ladder
+    extended to cover `N_f` (audit fix; conservative last-level bound past it)."""
+    m_pi, a_L = float(params['m_pi']), float(params['a_L'])
+    pn = _gaussian_pn(L, dim, m_pi, a_L, n_max=max(96, int(N_f) + 32))
+    if N_f >= len(pn):
+        return float(m_pi * (len(pn) - 1) * pn[-1])   # conservative (NOT 0)
     return float(m_pi * sum(n * pn[n] for n in range(N_f, len(pn))))
 
 
