@@ -44,6 +44,74 @@ def warmstart_overlap(coeffs):
     return (max(p) / s) if s > 0 else 0.0
 
 
+def _single_mode_squeeze_matrix(r_m, phi_m, N_f):
+    """`N_f×N_f` single-mode squeeze `u = exp(½(ζ b†² − ζ* b²))` in the truncated Fock basis,
+    `ζ = r_m·e^{iφ_m}` — matches `frame.squeeze_generator_terms` exactly (so the full multi-mode
+    `U = ⊗_m u_m = exp(G)`, since the per-mode generators commute)."""
+    import numpy as np
+    from scipy.linalg import expm
+    zeta = r_m * np.exp(1j * phi_m)
+    G = np.zeros((N_f, N_f), dtype=complex)
+    for n in range(N_f):
+        if n + 2 < N_f:                                   # ½ζ b†²: |n> -> |n+2>
+            G[n + 2, n] += 0.5 * zeta * math.sqrt((n + 1) * (n + 2))
+        if n - 2 >= 0:                                    # −½ζ* b²: |n> -> |n-2>
+            G[n - 2, n] += -0.5 * np.conj(zeta) * math.sqrt(n * (n - 1))
+    return expm(G)
+
+
+def warmstart_fidelity(g, psi_tilde, r, phi, N_f, n_bos_modes):
+    """TRUE QPE warm-start success probability of preparing the FULL compact frame core:
+
+        p0 = |⟨g | U | ψ̃⟩|² / (‖g‖² ‖ψ̃‖²),   U = exp(G) the per-mode squeeze.
+
+    This replaces the crude `warmstart_overlap` (= max|c_i|², which silently assumes a
+    SINGLE-determinant warm start): loading the whole core `|ψ̃⟩` and applying the Gaussian
+    circuit U gives a state that approaches the true ground state, so p0 → 1 as ψ̃ converges
+    (limited by the finite-cutoff non-isospectrality of U). It is the honest QPE success
+    probability, not a proxy.
+
+    Crucially it is CLASSICALLY TRACTABLE where the energy back-eval is not: with a sparse
+    reference `g` on the left it is a sparse–sparse bilinear `Σ_{a,b} g*_a U_ab ψ̃_b`, with
+    `U_ab = δ(a.ferm, b.ferm)·Π_m u_m[a.bos[m], b.bos[m]]` evaluated ONLY between the two
+    sparse supports — no dense fan-out (g bounds the left side).
+
+    `g`, `psi_tilde` are `{MixedState: coeff}` dicts. `r`, `phi` are the squeeze (per-mode
+    array or scalar). Returns `{p0, overlap, norm_g2, norm_psi2, unitarity_defect}` where
+    `unitarity_defect = |‖Uψ̃‖² − ‖ψ̃‖²|/‖ψ̃‖²` flags finite-cutoff non-unitarity of the
+    truncated U (0 in the untruncated limit)."""
+    import numpy as np
+    from .frame import _per_mode
+    rv, pv = _per_mode(r, n_bos_modes), _per_mode(phi, n_bos_modes)
+    umats = [_single_mode_squeeze_matrix(rv[m], pv[m], N_f) for m in range(n_bos_modes)]
+
+    # group ψ̃ by fermion sector: U is boson-only, so only equal-fermion pairs contribute.
+    psi_by_ferm = {}
+    for b, cb in psi_tilde.items():
+        psi_by_ferm.setdefault(b.ferm, []).append((b.bos, complex(cb)))
+
+    overlap = 0j
+    for a, ca in g.items():
+        bucket = psi_by_ferm.get(a.ferm)
+        if not bucket:
+            continue
+        ca_c = np.conj(complex(ca))
+        abos = a.bos
+        for bbos, cb in bucket:
+            uab = 1.0 + 0j
+            for m in range(n_bos_modes):
+                uab *= umats[m][abos[m], bbos[m]]
+                if uab == 0:
+                    break
+            overlap += ca_c * uab * cb
+
+    ng2 = float(sum(abs(complex(c)) ** 2 for c in g.values()))
+    np2 = float(sum(abs(complex(c)) ** 2 for c in psi_tilde.values()))
+    p0 = (abs(overlap) ** 2 / (ng2 * np2)) if ng2 > 0 and np2 > 0 else 0.0
+    return {"p0": float(p0), "overlap": complex(overlap),
+            "norm_g2": ng2, "norm_psi2": np2}
+
+
 def mean_boson_number(coeffs, bos_arr):
     """⟨n⟩ = Σ_i |c_i|² Σ_m n_{i,m} — mean total boson occupation of a core (drives the
     Fock-cutoff N_f the block encoder needs)."""
