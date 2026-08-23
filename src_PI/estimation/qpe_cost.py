@@ -45,15 +45,106 @@ import math
 
 DEFAULT_DELTA_E_MEV = 1.0
 
+# The qubitized-walk query prefactor `C` in `N_walk = C·λ/ΔE`.
+#
+#   √2·π ≈ 4.443  — Babbush 2018 Eq. 26 UPPER bound. The extra √2 over the
+#                   Heisenberg constant is an EQUAL-ERROR-BUDGET split: Babbush
+#                   sets phase-estimation variance = gate-synthesis variance and
+#                   gives each ΔE/√2 (his Eqs. 23–25). This is the historical
+#                   default; it is what the committed r3 raw shards used, so it
+#                   stays the module default for shard reproducibility.
+#   π ≈ 3.142     — SOTA/Heisenberg-optimal single-window constant. Our cost
+#                   model budgets synthesis error SEPARATELY (`eps_be`, via
+#                   `circuit_precision`), so keeping Babbush's √2 double-counts
+#                   the synthesis budget. Dropping it (synthesis ≪ PE error)
+#                   gives π — a 1.41× reduction that keeps the upper-bound
+#                   confidence factor. This is the ADOPTED HEADLINE constant
+#                   (applied at the reporting layer: `make_headline_resource_figure`).
+#   π/2 ≈ 1.571   — 1σ information floor (drops the confidence factor too); not used.
+#
+# See `claude/research/total_costs/00_literature_review.md` for the full provenance.
+WALK_QUERY_CONSTANT_BABBUSH_UB = math.sqrt(2.0) * math.pi   # 4.443 — Eq. 26 upper bound
+WALK_QUERY_CONSTANT_HEISENBERG = math.pi                    # 3.142 — adopted headline
+WALK_QUERY_CONSTANT = WALK_QUERY_CONSTANT_BABBUSH_UB        # module default (raw shards)
 
-def walk_queries(physical_lambda, delta_E=DEFAULT_DELTA_E_MEV):
-    """N_walk = √2 · π · Λ / ΔE — the qubitized-walk query count for QPE."""
-    return (math.sqrt(2.0) * math.pi * physical_lambda) / delta_E
+
+def walk_queries(physical_lambda, delta_E=DEFAULT_DELTA_E_MEV,
+                 constant=WALK_QUERY_CONSTANT):
+    """N_walk = C · Λ / ΔE — the qubitized-walk query count for QPE.
+
+    `C` defaults to `√2·π` (`WALK_QUERY_CONSTANT_BABBUSH_UB`, Babbush 2018
+    Eq. 26 upper bound — the constant the committed shards were generated with).
+    Pass `constant=WALK_QUERY_CONSTANT_HEISENBERG` (= π) for the adopted-headline
+    value: a 1.41× tightening justified because our model budgets synthesis error
+    separately, so Babbush's equal-split √2 would double-count it.
+    """
+    return (constant * physical_lambda) / delta_E
 
 
-def total_qpe_t_count(total_t_count, physical_lambda, delta_E=DEFAULT_DELTA_E_MEV):
+def total_qpe_t_count(total_t_count, physical_lambda, delta_E=DEFAULT_DELTA_E_MEV,
+                      constant=WALK_QUERY_CONSTANT):
     """Total QPE T-cost = per-step T-count · N_walk."""
-    return total_t_count * walk_queries(physical_lambda, delta_E)
+    return total_t_count * walk_queries(physical_lambda, delta_E, constant)
+
+
+def qpe_phase_register_qubits(physical_lambda, eps_qpe=DEFAULT_DELTA_E_MEV,
+                              constant=WALK_QUERY_CONSTANT):
+    """`m` = number of QPE PHASE-REGISTER ancilla qubits (Babbush 2018).
+
+        m = ⌈log₂( C·Λ / (2·ε_qpe) )⌉ = ⌈log₂( N_walk / 2 )⌉        (log base 2)
+
+    Babbush et al. 2018 (PRX 8 041015, arXiv:1805.03662): standard qubitized
+    QPE uses `m` phase-register ancilla whose largest controlled walk power is
+    `W^(2^(m-1))`, so the total number of walk applications is `N_walk ≈ 2^m`,
+    i.e. `2^m ≈ √2·π·Λ/ε_qpe` (their Eq. 26 upper bound). Since our
+    `walk_queries` already returns that `N_walk`, `m = ⌈log₂(N_walk/2)⌉` ties
+    the ancilla count to the SAME N_walk we report — there is no independent
+    constant to get out of sync. This is the **QPE phase register**, which the
+    walk/block-encoding logical-qubit count EXCLUDES; add it to the total.
+
+    `ε_qpe` is the phase-estimation resolution share of the total ΔE budget (in
+    our optimizer, `eps_qpe ≈ 0.96 MeV`, not the full 1 MeV); passing it keeps
+    `m` consistent with the reported `N_walk`. `Λ` is the block-encoding
+    subnormalization (Pauli 1-norm for PauliLCU). `constant` follows the same
+    N_walk prefactor switch as `walk_queries`.
+    """
+    n_walk = walk_queries(physical_lambda, eps_qpe, constant)
+    return qpe_phase_register_qubits_from_nwalk(n_walk)
+
+
+def qpe_phase_register_qubits_from_nwalk(n_walk):
+    """`m = ⌈log₂(N_walk/2)⌉` from an already-computed `N_walk`.
+
+    Use this when a record already stores `QPE_Walk_Queries` so `m` is tied to
+    the exact walk count reported (independent of which prefactor produced it).
+    """
+    if n_walk <= 0:
+        raise ValueError("n_walk must be positive")
+    return max(1, math.ceil(math.log2(n_walk / 2.0)))
+
+
+def total_logical_qubits(walk_register_qubits, qpe_phase_qubits,
+                         state_prep_ancilla=0):
+    """Peak logical width of the full GSEE run (one walk register + coexisting ancilla).
+
+        total = walk_register + max(m_QPE, a_stateprep)
+
+    The `max` (not the sum) is the ancilla-REUSE argument: initial-state
+    preparation runs to completion and its workspace is reset BEFORE the QPE
+    phase register is ever populated, so the two never coexist. Whichever needs
+    more qubits sets the peak; the smaller one is a subset of the larger's
+    lifetime. (This is conservative: state prep can additionally borrow the
+    idle block-encoding ancilla already inside the walk register, so the true
+    peak may be lower.) The walk-register count itself already includes the
+    system register + block-encoding ancilla.
+
+    `state_prep_ancilla=0` (default) recovers the walk-register + QPE-phase-only
+    total until the state-prep cost is modeled (see the `total_costs` plan).
+    Magic-state factories and routing are PHYSICAL-layer overheads and are NOT
+    part of this logical width — they belong to the runtime module.
+    """
+    return int(walk_register_qubits) + max(int(qpe_phase_qubits),
+                                            int(state_prep_ancilla))
 
 
 def recommended_n_b_from_occupation(mean_n_per_mode, margin_sigmas=5.0):

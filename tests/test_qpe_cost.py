@@ -15,7 +15,11 @@ if _ROOT not in sys.path:
 
 from src_PI.estimation.qpe_cost import (
     DEFAULT_DELTA_E_MEV,
+    WALK_QUERY_CONSTANT,
     compute_total_qpe_cost,
+    qpe_phase_register_qubits,
+    qpe_phase_register_qubits_from_nwalk,
+    total_logical_qubits,
     total_qpe_t_count,
     walk_queries,
 )
@@ -103,6 +107,54 @@ def test_skips_entries_missing_fields():
 
 def test_default_delta_e_is_one_mev():
     assert DEFAULT_DELTA_E_MEV == 1.0
+
+
+# --- QPE phase-register ancilla (Babbush 2018 Eq. 24) -------------------------- #
+
+def test_phase_register_equals_babbush_eq24():
+    """m = ⌈log₂(√2·π·λ / (2·ε_qpe))⌉ — Babbush Eq. 24, verbatim."""
+    lam, eps_qpe = 46521.0, 0.96
+    expected = math.ceil(math.log2(math.sqrt(2.0) * math.pi * lam / (2.0 * eps_qpe)))
+    assert qpe_phase_register_qubits(lam, eps_qpe) == expected
+
+
+def test_phase_register_ties_to_reported_nwalk():
+    """m from λ,ε_qpe must equal m from the reported N_walk (m = ⌈log₂(N_walk/2)⌉)."""
+    lam, eps_qpe = 46521.0, 0.96
+    n_walk = walk_queries(lam, eps_qpe)
+    assert qpe_phase_register_qubits(lam, eps_qpe) == \
+        qpe_phase_register_qubits_from_nwalk(n_walk)
+
+
+def test_phase_register_anchor_magnitudes():
+    """Sanity: the committed anchor N_walk values give m = 13..25 across L=1..10."""
+    # (N_walk, expected m) from results/quantum_pauli_lcu_resources.md
+    cases = [(9.76e3, 13), (2.15e5, 17), (8.77e5, 19), (4.01e7, 25)]
+    for n_walk, m in cases:
+        assert qpe_phase_register_qubits_from_nwalk(n_walk) == m
+
+
+def test_phase_register_constant_switch():
+    """Tightening the N_walk prefactor to π gives m one bit smaller when N_walk halves."""
+    lam, eps_qpe = 46521.0, 0.96
+    m_upper = qpe_phase_register_qubits(lam, eps_qpe)                       # √2·π
+    m_pi = qpe_phase_register_qubits(lam, eps_qpe, constant=math.pi)        # π (0.707×)
+    assert m_pi <= m_upper  # fewer walks → never more phase bits
+
+
+def test_total_logical_qubits_reuse_is_max_not_sum():
+    """Peak width = walk + max(m_QPE, a_prep): state prep and phase register don't coexist."""
+    walk, m, a_prep = 10021, 25, 12
+    assert total_logical_qubits(walk, m, a_prep) == walk + m       # m dominates
+    assert total_logical_qubits(walk, m, 40) == walk + 40          # prep dominates
+    assert total_logical_qubits(walk, m) == walk + m               # no prep modeled yet
+    # never the sum
+    assert total_logical_qubits(walk, m, a_prep) < walk + m + a_prep
+
+
+def test_walk_query_constant_is_babbush_upper_bound():
+    assert abs(WALK_QUERY_CONSTANT - math.sqrt(2.0) * math.pi) < 1e-12
+    assert abs(WALK_QUERY_CONSTANT - 4.4428829) < 1e-6
 
 
 if __name__ == '__main__':

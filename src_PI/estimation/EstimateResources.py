@@ -2,7 +2,11 @@ import math
 
 from src_PI.estimation.block_encoders import get_block_encoder
 from src_PI.estimation.combined_walk import compose_combined_walk, wt_basis_change_t
-from src_PI.estimation.qpe_cost import DEFAULT_DELTA_E_MEV
+from src_PI.estimation.qpe_cost import (
+    DEFAULT_DELTA_E_MEV,
+    qpe_phase_register_qubits_from_nwalk,
+    total_logical_qubits,
+)
 from src_PI.hamiltonians.ConstructEFT import build_eft_hamiltonian
 
 
@@ -50,11 +54,19 @@ def _optimized_single_walk(bundle, n_b, delta_E):
     walk_C = fits['Clifford'][0] + fits['Clifford'][1] * math.log2(1.0 / cp)
     pruned = nd.get('pruned_one_norm_MeV', 0.0)
     prune_budget = opt['eps_be'] / 2.0             # coefficient half of eps_be
+    # QPE phase register (Babbush 2018 Eq. 24): m = ⌈log₂(N_walk/2)⌉, tied to the
+    # SAME N_walk reported here. The walk/block-encoding Logical_Qubits EXCLUDES it,
+    # so the honest total logical width adds it (state prep, when modeled, enters as
+    # max(m, a_prep) — it never coexists with the phase register).
+    m_qpe = qpe_phase_register_qubits_from_nwalk(opt['walk_queries'])
+    q_total = total_logical_qubits(fits['LogicalQubits'], m_qpe)
     nd.update({
         'Walk_T_Count': opt['walk_T'], 'Walk_Clifford_Count': walk_C,
         'Logical_Qubits': fits['LogicalQubits'], 'Physical_Lambda': lam,
         'QFT_T_Count': 0, 'Total_T_Count': opt['walk_T'],
         'QPE_Walk_Queries': opt['walk_queries'], 'QPE_Total_T_Count': opt['total_T'],
+        'QPE_Phase_Qubits': m_qpe,                  # QPE phase-register ancilla (m)
+        'Total_Logical_Qubits': q_total,            # walk register + max(m, a_prep=0)
         'walk_composition': 'single_walk',
         'Pauli_Term_Count': pauli_terms,           # audit item 5
         'Rotation_Count': fits.get('rotations'),   # audit item 5
@@ -73,9 +85,12 @@ def _optimized_single_walk(bundle, n_b, delta_E):
             'curve': opt['curve'],
             'label': ('total-T-optimal QPE/block-encoding budget split; ||δH||≤eps_be '
                       'systematic (not N_walk-accumulated). Logical_Qubits = one '
-                      'walk/block-encoding register (excludes QPE phase register, state '
-                      'prep, distillation, routing). QPE_Total_T = coherent walk-query '
-                      'cost; multiply by repetitions ~1/p0 separately.'),
+                      'walk/block-encoding register; Total_Logical_Qubits adds the QPE '
+                      'phase register (m=⌈log2(N_walk/2)⌉) and equals walk+max(m,a_prep) '
+                      '(state-prep a_prep=0 until modeled; magic-state factories + routing '
+                      'are physical-layer, excluded). QPE_Total_T = coherent walk-query '
+                      'cost; multiply by GSEE repetitions (~1/p0 sampling, ~1/sqrt(p0) '
+                      'with amplitude-amplified filtering) separately.'),
         },
     })
     print(f"\n[budget-opt] f*={opt['qpe_fraction']:.3f} eps_qpe={opt['eps_qpe']:.3f} "
