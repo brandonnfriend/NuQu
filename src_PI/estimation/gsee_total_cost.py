@@ -27,17 +27,25 @@ from src_PI.estimation.state_prep_cost import state_prep_cost
 
 def total_gsee_cost(*, physical_lambda, walk_T, walk_register_qubits, eps_qpe,
                     p0_warm, p0_cold, D_warm, n_bos_modes, N_f, b=17, D_cold=1,
-                    confidence=0.99, branch="auto", lambda_qr=None, displace=False,
-                    n_walk_constant=WALK_QUERY_CONSTANT_HEISENBERG):
-    """Realistic total GSEE cost, cold vs warm. Returns per-start `{p0,R,branch,total_T,
-    total_qubits,T_prep,a_prep,ae_register_qubits}` plus `warmstart_saving_x = total_T_cold/
-    total_T_warm` and the shared per-window quantities.
+                    confidence=0.99, branch="sampling", lambda_qr=None, displace=False,
+                    n_walk_constant=WALK_QUERY_CONSTANT_HEISENBERG, n_walk_override=None):
+    """Realistic total GSEE cost, cold vs warm. Returns per-start `{p0,R,expected_shots,branch,
+    total_T,total_qubits,T_prep,a_prep,ae_register_qubits}` plus `warmstart_saving_x` (fixed-
+    confidence R ratio) and `warmstart_saving_expected_x` (mean-shots p0 ratio) and the shared
+    per-window quantities.
 
     Cold start = a single bare determinant (`D_cold=1`): trivial prep, but low p0 → many reps.
     Warm start = the frame core (`D_warm` determinants through the Gaussian U): modest prep, high
     p0 → few reps. The frame does NOT change the walk (same λ, same walk_T) — only p0 and prep.
+    `branch='sampling'` (exact Bernoulli) is the default; 'binary' is experimental (warmstart audit).
+
+    `n_walk_override` (warmstart audit §8): pass the shard's ALREADY-STORED `QPE_Walk_Queries` to
+    consume the accepted query count as-is (its √2·π convention), rather than silently re-deriving
+    N_walk with a different constant — so the one-window cost matches the published anchor.
+    `total_gsee_cost_from_record` does this by default.
     """
-    N_walk = walk_queries(physical_lambda, eps_qpe, constant=n_walk_constant)
+    N_walk = (float(n_walk_override) if n_walk_override is not None
+              else walk_queries(physical_lambda, eps_qpe, constant=n_walk_constant))
     coherent_query_T = N_walk * walk_T                       # one QPE window
     m = qpe_phase_register_qubits_from_nwalk(N_walk)
 
@@ -51,8 +59,9 @@ def total_gsee_cost(*, physical_lambda, walk_T, walk_register_qubits, eps_qpe,
         # QPE; state prep (a_prep) runs before. Peak width = walk + max(m+ae, a_prep).
         width = total_logical_qubits(walk_register_qubits, m + rep["ae_register_qubits"], prep["a_prep"])
         total_T = rep["R"] * (coherent_query_T + prep["T_prep"])
-        return {"p0": p0, "R": rep["R"], "branch": rep["branch"], "total_T": total_T,
-                "total_qubits": width, "T_prep": prep["T_prep"], "a_prep": prep["a_prep"],
+        return {"p0": p0, "R": rep["R"], "expected_shots": rep["expected_shots"],
+                "branch": rep["branch"], "total_T": total_T, "total_qubits": width,
+                "T_prep": prep["T_prep"], "a_prep": prep["a_prep"],
                 "ae_register_qubits": rep["ae_register_qubits"]}
 
     warm = _one(p0_warm, D_warm)
@@ -60,14 +69,21 @@ def total_gsee_cost(*, physical_lambda, walk_T, walk_register_qubits, eps_qpe,
     saving = (cold["total_T"] / warm["total_T"]) if warm["total_T"] > 0 else None
     return {
         "N_walk": N_walk, "coherent_query_T": coherent_query_T, "m_qpe": m,
+        "n_walk_from_record": n_walk_override is not None,
         "prep_frac_of_window": (warm["T_prep"] / coherent_query_T) if coherent_query_T else None,
-        "warm": warm, "cold": cold, "warmstart_saving_x": saving,
+        "warm": warm, "cold": cold,
+        "warmstart_saving_x": saving,                        # fixed-confidence integer R ratio
+        "warmstart_saving_expected_x": p0_warm / p0_cold if p0_cold > 0 else None,  # mean-shots ratio
     }
 
 
 def total_gsee_cost_from_record(record, *, p0_warm, p0_cold, D_warm, n_bos_modes, N_f, **kw):
-    """Adapter: pull λ / walk_T / walk-register / ε_qpe from a quantum-shard result dict."""
+    """Adapter: pull λ / walk_T / walk-register / ε_qpe from a quantum-shard result dict, and by
+    default CONSUME the record's stored `QPE_Walk_Queries` (√2·π convention) so the one-window cost
+    equals the accepted anchor (warmstart audit §8). Pass `n_walk_override=None` in kw to instead
+    re-derive N_walk under a chosen constant (a deliberate versioned scenario)."""
     b = record.get("QPE_Budget") or {}
+    kw.setdefault("n_walk_override", record.get("QPE_Walk_Queries"))
     return total_gsee_cost(
         physical_lambda=record["Physical_Lambda"], walk_T=record["Walk_T_Count"],
         walk_register_qubits=record["Logical_Qubits"], eps_qpe=b.get("eps_qpe"),

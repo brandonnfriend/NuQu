@@ -157,35 +157,44 @@ def test_walk_query_constant_is_babbush_upper_bound():
     assert abs(WALK_QUERY_CONSTANT - 4.4428829) < 1e-6
 
 
-from src_PI.estimation.qpe_cost import overlap_repetition_factor, OVERLAP_CROSSOVER_P0
+import pytest
+
+from src_PI.estimation.qpe_cost import overlap_repetition_factor
 
 
-def test_repetition_sampling_is_log_over_p0():
-    r = overlap_repetition_factor(0.25, confidence=0.99, branch="sampling")
-    assert r["R"] == math.ceil(math.log(1.0 / 0.01) / 0.25)      # ⌈ln(1/δ)/p0⌉
-    assert r["ae_register_qubits"] == 0                          # sampling needs no AE register
+def test_repetition_exact_bernoulli():
+    """R = ⌈ln δ / ln(1−p0)⌉ — the EXACT 'at least one ground hit in R shots' count (warmstart
+    audit §1: cold p0=0.4819 -> 8, warm p0=0.9051 -> 2, at 99% confidence)."""
+    for p0, expect in [(0.4819, 8), (0.9051, 2)]:
+        r = overlap_repetition_factor(p0, confidence=0.99)
+        assert r["branch"] == "sampling" and r["ae_register_qubits"] == 0
+        assert r["R"] == expect, (p0, r["R"])
+        assert (1 - p0) ** r["R"] <= 0.01 + 1e-12          # meets the confidence...
+        assert (1 - p0) ** (r["R"] - 1) > 0.01             # ...and R is minimal
+        assert abs(r["expected_shots"] - 1.0 / p0) < 1e-12  # the distinct mean-shots metric
 
 
-def test_repetition_branches_cross_at_0003():
-    """Auto picks sampling for p0 ≳ 0.003, binary below; the two meet at the crossover."""
-    assert overlap_repetition_factor(0.05, branch="auto")["branch"] == "sampling"   # high overlap
-    assert overlap_repetition_factor(1e-4, branch="auto")["branch"] == "binary"     # poor overlap
-    at = overlap_repetition_factor(OVERLAP_CROSSOVER_P0, branch="auto")
-    assert at["R_sampling"] == at["R_binary"]                    # equal by calibration at crossover
+def test_old_log_over_p0_was_an_overcount():
+    """The retired ⌈ln(1/δ)/p0⌉ approximation over-counts at high p0 vs the exact Bernoulli."""
+    p0, delta = 0.9051, 0.01
+    old_approx = math.ceil(math.log(1.0 / delta) / p0)     # 6
+    exact = overlap_repetition_factor(p0)["R"]             # 2
+    assert exact < old_approx
 
 
-def test_binary_beats_sampling_only_below_crossover():
-    lo = overlap_repetition_factor(1e-4)                         # p0 < crossover
-    assert lo["R_binary"] < lo["R_sampling"]
-    hi = overlap_repetition_factor(0.1)                          # p0 > crossover
-    assert hi["R_sampling"] < hi["R_binary"]
-    assert overlap_repetition_factor(1e-4, branch="binary")["ae_register_qubits"] >= 1
+def test_binary_is_experimental_opt_in_only():
+    """Binary is NEVER default/auto (audit §2): default is sampling even at low p0; binary must be
+    explicitly requested and carries its own AE register; 'auto' is gone."""
+    assert overlap_repetition_factor(1e-4)["branch"] == "sampling"
+    rb = overlap_repetition_factor(1e-4, branch="binary")
+    assert rb["branch"] == "binary" and rb["ae_register_qubits"] >= 1
+    with pytest.raises(ValueError):
+        overlap_repetition_factor(0.5, branch="auto")
 
 
 def test_higher_overlap_fewer_repetitions():
-    """The warm-start payoff: raising p0 monotonically lowers R (sampling branch)."""
-    assert (overlap_repetition_factor(0.5, branch="sampling")["R"]
-            < overlap_repetition_factor(0.05, branch="sampling")["R"])
+    """The warm-start payoff: raising p0 never increases R (exact sampling)."""
+    assert overlap_repetition_factor(0.9)["R"] <= overlap_repetition_factor(0.1)["R"]
 
 
 if __name__ == '__main__':

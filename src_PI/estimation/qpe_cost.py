@@ -94,47 +94,49 @@ def total_qpe_t_count(total_t_count, physical_lambda, delta_E=DEFAULT_DELTA_E_ME
 OVERLAP_CROSSOVER_P0 = 0.003
 
 
-def overlap_repetition_factor(p0, confidence=0.99, branch="auto",
+def overlap_repetition_factor(p0, confidence=0.99, branch="sampling",
                               crossover=OVERLAP_CROSSOVER_P0):
     """GSEE repetition factor `R` = how many (state-prep + one QPE window) shots are needed, as a
     multiplier on the per-window coherent-query T-count. `p0 = |⟨g|ψ_init⟩|²` is the warm-start
     success probability (from `frame_qpe.warmstart_fidelity`).
 
-    Two branches (Berry 2024; the current code's bare `1/p0` was only the first):
-      * **sampling** (min-of-samples) — `R = ⌈ln(1/δ)/p0⌉`, `δ=1−confidence`. Rigorous: the ground
-        phase is hit in a window w.p. p0, so `(1−p0)^R ≤ δ`. Scales `1/p0`. This is the honest
-        replacement for the old `1/p0`.
-      * **binary** (amplitude-estimation / Lin–Tong) — scales `1/√p0`, calibrated here to meet the
-        sampling branch exactly at `p0=crossover` (`R = ⌈ln(1/δ)/√(crossover·p0)⌉`). It carries the
-        Berry 1/√p0 SCALING and the empirical p0≈0.003 CROSSOVER (the load-bearing facts); the exact
-        Berry nested-log prefactor (7.77·…) is a refinement not transcribed here — noted so it is not
-        mistaken for the primary source. The binary branch also needs an extra amplitude-estimation
-        register (`~log₂(1/√p0)` qubits); sampling needs none.
+    Reports TWO explicitly-named operational metrics (warmstart audit §1 — the paper must pick and
+    name one, not mix them):
+      * **`R` (fixed-confidence, EXACT Bernoulli)** — the smallest `R` with `(1−p0)^R ≤ δ`
+        (`δ=1−confidence`), i.e. `R = ⌈ln δ / ln(1−p0)⌉`. This is the exact "≥1 ground projection
+        in R shots" count. (The old `⌈ln(1/δ)/p0⌉` was the `1−p ≤ e^{−p}` APPROXIMATION — only tight
+        for small p0; it over-counted at high p0.)
+      * **`expected_shots = 1/p0`** — the mean shots to first success. A DIFFERENT metric; the
+        warm/cold ratio here is the continuous `p0_warm/p0_cold`.
 
-    `branch='auto'` picks the cheaper (min), i.e. sampling for `p0 ≳ crossover`, binary below.
-    Returns `{R, branch, R_sampling, R_binary, ae_register_qubits, p0, confidence}`.
+    `branch='binary'` is an EXPERIMENTAL sensitivity cartoon (`⌈ln(1/δ)/√(crossover·p0)⌉`, calibrated
+    to touch sampling at `p0=crossover`) — it is NOT the transcribed Berry amplitude-estimation
+    formula and is NEVER auto-selected. For the high overlaps we measure, only exact sampling is
+    relevant; use `branch='sampling'` (default). Implement the real Berry/Lin–Tong algorithm + its
+    oracle/register costs before quoting a filtering speedup.
+
+    Returns `{R, branch, R_sampling, expected_shots, R_binary_experimental, ae_register_qubits,
+    p0, confidence}`.
     """
     if not (0.0 < p0 <= 1.0):
         raise ValueError(f"p0 must be in (0, 1], got {p0}")
     delta = 1.0 - confidence
-    ln_inv_delta = math.log(1.0 / delta)
-    r_sampling = math.ceil(ln_inv_delta / p0)
-    r_binary = math.ceil(ln_inv_delta / math.sqrt(crossover * p0))   # = r_sampling at p0=crossover
+    if p0 >= 1.0:
+        r_sampling = 1                                   # certain success in one shot
+    else:
+        r_sampling = max(1, math.ceil(math.log(delta) / math.log1p(-p0)))   # EXACT Bernoulli
+    expected_shots = 1.0 / p0
+    r_binary = math.ceil(math.log(1.0 / delta) / math.sqrt(crossover * p0))  # experimental cartoon
     ae_qubits = max(1, math.ceil(math.log2(1.0 / math.sqrt(p0))))
     if branch == "sampling":
         chosen, R, ae = "sampling", r_sampling, 0
-    elif branch == "binary":
+    elif branch == "binary":                             # opt-in, experimental only
         chosen, R, ae = "binary", r_binary, ae_qubits
-    elif branch == "auto":
-        if r_binary < r_sampling:
-            chosen, R, ae = "binary", r_binary, ae_qubits
-        else:
-            chosen, R, ae = "sampling", r_sampling, 0
     else:
-        raise ValueError(f"branch must be sampling|binary|auto, got {branch}")
+        raise ValueError(f"branch must be 'sampling' (default) or 'binary' (experimental), got {branch}")
     return {"R": int(R), "branch": chosen, "R_sampling": int(r_sampling),
-            "R_binary": int(r_binary), "ae_register_qubits": int(ae),
-            "p0": p0, "confidence": confidence}
+            "expected_shots": float(expected_shots), "R_binary_experimental": int(r_binary),
+            "ae_register_qubits": int(ae), "p0": p0, "confidence": confidence}
 
 
 def qpe_phase_register_qubits(physical_lambda, eps_qpe=DEFAULT_DELTA_E_MEV,
