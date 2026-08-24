@@ -1,19 +1,26 @@
 """
-Plot total QPE T-cost vs L from the fock/sparse L-scaling data, overlaid
-against the Watson Trotter resource estimate at the same fixed A.
+RETIRED (2026-08-24). DO NOT USE — this script is superseded and refuses to run.
 
-Reads `data/quantum/2026-06-03/L_scaling_fock_sparse_A10.json` (consolidated driver
-output). Writes the plot + a JSON of the curve data into
-`data/<today>/L_scaling_fock_sparse_A10_with_trotter.{png,json}`.
+Why: it (a) imports the LEGACY fitted-`Cp` Trotter model (`src_PI.trotter_theory.TrotterCost`,
+itself marked LEGACY/likely-incorrect), and (b) reads pre-vertex-fix data
+(`data/quantum/2026-06-03/...`), which is inadmissible per the data-retirement policy.
 
-Run from project root:
-    source .venv/bin/activate
-    python misc/plot_L_scaling_fock_sparse.py
+The honest, current Old-vs-New (Watson analytic Trotter upper bound vs compiled PauliLCU) comparison
+is `misc/make_trotter_comparison_figure.py` (uses `src_PI.trotter_theory.trotter_exact`, the exact
+Theorem-64 model with NO free coefficient) against the r3 anchor. See
+codex_audit/02_quantum_resources/trotter_comparison_status_2026-08-24.md and
+docs/trotter_xi_sourcemap.md.
 """
 
-import json
-import os
 import sys
+
+raise SystemExit(
+    "plot_L_scaling_fock_sparse.py is RETIRED (legacy Cp Trotter model + pre-vertex-fix data). "
+    "Use: python -m misc.make_trotter_comparison_figure"
+)
+
+import json  # noqa: E402  (unreachable; kept so the historical body still parses)
+import os
 from datetime import datetime
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
