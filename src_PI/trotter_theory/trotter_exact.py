@@ -79,9 +79,10 @@ _G_COEFFS = {'statement': (45.0, 114.0, 76.0),   # Lemma-23 statement (conservat
 
 
 def rz_count_g(L, n_b, coeff='statement'):
-    """g(L,n_b) = (a·n_b² + b·n_b + c)·L³ — the Rz-rotation count per Trotter step."""
+    """g(L,n_b) = ⌈(a·n_b² + b·n_b + c)·L³⌉ — the Rz-rotation count per Trotter step (an integer
+    count; audit #3 integer-rigor)."""
     a, b, c = _G_COEFFS[coeff]
-    return (a * n_b ** 2 + b * n_b + c) * L ** 3
+    return int(np.ceil((a * n_b ** 2 + b * n_b + c) * L ** 3))
 
 
 def per_step_tcost(L, n_b, delta, coeff='statement'):
@@ -129,12 +130,14 @@ def _assemble(L, A, params, eps_cut, eps_prod, t, coeff, dim, E_bound, n_b_overr
         n_b = int(n_b_override)
         pi_max, Pi_max = cutoffs_for_nb(n_b, params, ratio=Pi_L / pi_L)
     Xi = dynamical_pion_xi(L, A, pi_max, Pi_max, params)
-    r = t ** 2 * Xi / (2.0 * eps_prod)
-    delta = eps_prod / r                       # per-step synthesis budget (total ε_syn / r)
+    r_exact = t ** 2 * Xi / (2.0 * eps_prod)
+    r = int(np.ceil(r_exact))                  # INTEGER Trotter step count (audit #3)
+    delta = eps_prod / r                       # per-step synthesis budget, from the INTEGER r
     t_step, g = per_step_tcost(L, n_b, delta, coeff)
     total_T = r * t_step
     return dict(n_b=n_b, n_b_lemma=int(n_b_lemma), pi_max=float(pi_max), Pi_max=float(Pi_max),
-                Xi=float(Xi), t=float(t), r=float(r), per_step_T=float(t_step), g=float(g),
+                Xi=float(Xi), t=float(t), r=int(r), r_exact=float(r_exact),
+                per_step_T=float(t_step), g=int(g),
                 total_T=float(total_T), eps_cut=float(eps_cut), eps_prod=float(eps_prod))
 
 
@@ -156,6 +159,20 @@ def crossing_time_cost(L, A, params=None, eps_total=0.1, E_kin=10.0,
     out = _assemble(L, A, params, eps_cut, budget, t, coeff, dim, E_bound, n_b_override)
     out['task'] = 'crossing_time'
     return out
+
+
+def watson_qubits(L, n_b, dim=3, include_fermions=True):
+    """Watson logical-qubit accounting (audit #3): a `n_b`-bit register for each of the 3 pion
+    isospin components at each of the `L^dim` sites (the boson register), plus 4 spin-isospin
+    fermion modes per site.
+
+    Watson's Table-IX dynamical-pion entry reports 99,000 qubits at L=10; that is exactly the
+    BOSON register at `n_b=33`: `3·10^3·33 = 99,000` (the fermion register `4·L^dim` is
+    sub-dominant and evidently not included in that round figure). Returns the boson register by
+    default plus fermions; `include_fermions=False` gives the boson-only count Watson tabulates.
+    """
+    sites = L ** dim
+    return 3 * sites * n_b + (4 * sites if include_fermions else 0)
 
 
 def qpe_bits(dE, E_max=DEFAULT_E_MAX_MEV):
