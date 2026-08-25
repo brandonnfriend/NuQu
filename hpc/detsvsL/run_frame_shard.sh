@@ -76,6 +76,10 @@ PT2CAP_ARG=""; [ -n "${NUQU_PT2_MAX_CORE:-}" ] && PT2CAP_ARG="--pt2-max-core ${N
 # the previous rung (monotone -> smooth convergence curve), not a fresh solve per rung.
 WARMGROW_ARG=""; [ -n "${NUQU_WARM_GROW:-}" ] && WARMGROW_ARG="--warm-grow"
 P0RUNS="${NUQU_PHASE0_RUNS:-64}"       # warm-grow Phase-0 basin-escape ensemble size
+# LADDER_START = the phase-0 ENSEMBLE core (rungs[0]) in warm-grow mode. Bigger = the compact
+# ground-state basin is more distinguishable at phase-0, so heavy restarts there can escape the
+# delocalized basin at a SMALL core (the "basin collapse" search fix). Default 1000 (legacy).
+LADDERSTART="${NUQU_LADDER_START:-1000}"
 DIM="${NUQU_DIM:-3}"                   # lattice dim (Tier-1 exact-anchor uses 1D/2D chains)
 # --exact-ref: guarded Lanczos true E_inf for the Tier-1 cost anchor (small ED systems).
 EXACT_ARG=""; [ -n "${NUQU_EXACT_REF:-}" ] && EXACT_ARG="--exact-ref --exact-max-mem-gb ${NUQU_EXACT_MAX_MEM_GB:-24}"
@@ -99,7 +103,7 @@ P2MAX_ARG=""; [ -n "${NUQU_PHASE2_MAX_DETS:-}" ] && P2MAX_ARG="--phase2-max-dets
 # cost) then grow a FROZEN frame -- for cheap frame COMPARISONS at equal footing.
 if [ "$LADDER_MODE" = "independent" ]; then
   "$PY" -m misc.run_frame_shard --L "$L" --seed "$SEED" --dim "$DIM" --n_b "$NB" --frame "$FRAME" \
-      --A "$A" $FILL_ARG --ladder-mode independent --ladder-start 1000 --n-rungs "$NRUNGS" \
+      --A "$A" $FILL_ARG --ladder-mode independent --ladder-start "$LADDERSTART" --n-rungs "$NRUNGS" \
       --max-core "$MAXCORE" --frame-runs "$RUNS" --phase0-core "$PHASE0CORE" \
       --orbopt-cycles "$ORBOPTCYCLES" --max-rung-seconds "$MAXRUNGSEC" --phase0-runs "$P0RUNS" \
       --ladder-n-runs "$LNRUNS" $BIM_ARG $PT2CAP_ARG $EXACT_ARG $WARMGROW_ARG \
