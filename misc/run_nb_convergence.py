@@ -182,6 +182,42 @@ def study_Cdilute(core=2000, n_runs=2):
     return out
 
 
+# ---- CHEAP, schedulable post-vertex-fix revalidation --------------------------------------------
+# The dense studies above OOM at 160-224G because N_f=16 (n_b=4) blows the boson dimension, and they
+# never scheduled on the qis nodes. To EARN the claim ("n_b=2 or n_b=3 is enough; rule out n_b=1")
+# we only need the N_f=(2,4,8) window (n_b=1,2,3) at a FIXED moderate core: the n_b comparison is
+# fixed-core, so it sidesteps the extensivity trap (an incomplete core biases every N_f the same
+# way). PT2 OFF on the heavy shards — E_var(N_f) convergence + the |c|²-weighted occupation tail
+# carry the claim; PT2 is only a sharper energy estimate — keeps every shard ≤64G so it schedules.
+
+def study_Bdense_cheap(core=3000, n_runs=3):
+    """L=2 d=3 DENSE (filling 1.0, A=8) — the PHYSICAL nuclear-matter regime the quantum anchor uses.
+    N_f=(2,4,8) at fixed core, PT2 off. The load-bearing shard: shows n_b=1 (N_f=2) is too small and
+    n_b=2 (N_f=4) already converges (E_var plateau + tiny boundary population)."""
+    out = nb_convergence_sweep(L=2, dim=3, A=8, N_f_list=(2, 4, 8),
+                               core=core, n_runs=n_runs, seed=0, pt2=False)
+    _save(out, "studyBdenseCheap_L2d3A8")
+    return out
+
+
+def study_Bdilute_cheap(core=4000, n_runs=3):
+    """L=2 d=3 DILUTE (A=1) — the clean single-nucleon curve. N_f=(2,4,8,16) with PT2 (cheap fermion
+    sector), pairs with the exact ED anchor (study_A) for the energy-convergence validation."""
+    out = nb_convergence_sweep(L=2, dim=3, A=1, N_f_list=(2, 4, 8, 16),
+                               core=core, n_runs=n_runs, seed=0, pt2=True)
+    _save(out, "studyBdiluteCheap_L2d3A1")
+    return out
+
+
+def study_Cdilute_cheap(core=1500, n_runs=2):
+    """L=3 d=3 DILUTE (A=1) — the larger-volume confirmation that n_b=2 holds. N_f=(2,4,8), fixed
+    core, PT2 off (brackets the un-schedulable L=3-dense-A=27 study together with Bdense_cheap)."""
+    out = nb_convergence_sweep(L=3, dim=3, A=1, N_f_list=(2, 4, 8),
+                               core=core, n_runs=n_runs, seed=0, pt2=False)
+    _save(out, "studyCdiluteCheap_L3d3A1")
+    return out
+
+
 def plot_all():
     """Read whatever studies have been saved and produce the summary plots."""
     import matplotlib
@@ -332,6 +368,12 @@ def main():
         study_Cdilute()
     if which in ("Cdense", "dense", "all"):
         study_Cdense()
+    if which in ("Bdense_cheap", "cheap"):
+        study_Bdense_cheap()
+    if which in ("Bdilute_cheap", "cheap"):
+        study_Bdilute_cheap()
+    if which in ("Cdilute_cheap", "cheap"):
+        study_Cdilute_cheap()
     if which == "plot":
         plot_all()
         return
