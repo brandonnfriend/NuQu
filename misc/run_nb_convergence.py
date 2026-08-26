@@ -221,6 +221,27 @@ def study_Cdilute_cheap(core=1500, n_runs=2):
     return out
 
 
+def study_Cdense_cheap(core=1500, n_runs=2):
+    """L=3 d=3 DENSE (filling 1.0, A=27) — the larger-volume DENSE confirmation. This was the 224G
+    monster in the old study, but that cost was PT2 (external space), NOT A=27: the H is A-independent
+    (A only sets the fermion sector). With PT2 off + N_f≤8 it costs the same as the L=3 dilute shard,
+    so we can fill the volume×density gap directly. N_f=(2,4,8), fixed core."""
+    out = nb_convergence_sweep(L=3, dim=3, A=27, N_f_list=(2, 4, 8),
+                               core=core, n_runs=n_runs, seed=0, pt2=False)
+    _save(out, "studyCdenseCheap_L3d3A27")
+    return out
+
+
+def study_Ddilute_cheap(core=1000, n_runs=2):
+    """L=4 d=3 DILUTE (A=1) — the volume-trend extension (64 sites). H-build cost grows with n_terms
+    ∝ L³, so this is the risk shard; small core + PT2 off keep it in reach. Confirms the n_b=2 tail
+    trend holds at the largest volume we can afford."""
+    out = nb_convergence_sweep(L=4, dim=3, A=1, N_f_list=(2, 4, 8),
+                               core=core, n_runs=n_runs, seed=0, pt2=False)
+    _save(out, "studyDdiluteCheap_L4d3A1")
+    return out
+
+
 def plot_all():
     """Read whatever studies have been saved and produce the summary plots."""
     import matplotlib
@@ -379,6 +400,10 @@ def main():
         study_Bdilute_cheap()
     if which in ("Cdilute_cheap", "cheap"):
         study_Cdilute_cheap()
+    if which in ("Cdense_cheap", "cheap"):
+        study_Cdense_cheap()
+    if which in ("Ddilute_cheap", "cheap"):
+        study_Ddilute_cheap()
     if which == "plot":
         plot_all()
         return
