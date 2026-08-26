@@ -190,13 +190,16 @@ def study_Cdilute(core=2000, n_runs=2):
 # way). PT2 OFF on the heavy shards — E_var(N_f) convergence + the |c|²-weighted occupation tail
 # carry the claim; PT2 is only a sharper energy estimate — keeps every shard ≤64G so it schedules.
 
-def study_Bdense_cheap(core=3000, n_runs=3):
-    """L=2 d=3 DENSE (filling 1.0, A=8) — the PHYSICAL nuclear-matter regime the quantum anchor uses.
-    N_f=(2,4,8) at fixed core, PT2 off. The load-bearing shard: shows n_b=1 (N_f=2) is too small and
-    n_b=2 (N_f=4) already converges (E_var plateau + tiny boundary population)."""
-    out = nb_convergence_sweep(L=2, dim=3, A=8, N_f_list=(2, 4, 8),
+def study_Bdense_cheap(A=8, core=3000, n_runs=3):
+    """L=2 d=3 DENSE at nucleon number A (filling A/8) — the PHYSICAL regime the quantum anchor uses.
+    A=8 is filling 1.0; HIGHER A (up to A=32 = fully-filled 8 sites × 4 spin-isospin states) maximizes
+    the PION SOURCE — the strongest boson-cutoff stress test — while the fermion sector stays cheap
+    (A=32 is a single determinant; A=16 is the biggest sector but the fixed-core cost is A-flat).
+    N_f=(2,4,8) at fixed core, PT2 off. Shows n_b=1 (N_f=2) is too small and n_b=2 (N_f=4) converges
+    (E_var plateau + tiny boundary population) — and whether that survives to max density."""
+    out = nb_convergence_sweep(L=2, dim=3, A=A, N_f_list=(2, 4, 8),
                                core=core, n_runs=n_runs, seed=0, pt2=False)
-    _save(out, "studyBdenseCheap_L2d3A8")
+    _save(out, f"studyBdenseCheap_L2d3A{A}")
     return out
 
 
@@ -368,8 +371,10 @@ def main():
         study_Cdilute()
     if which in ("Cdense", "dense", "all"):
         study_Cdense()
-    if which in ("Bdense_cheap", "cheap"):
-        study_Bdense_cheap()
+    if which == "cheap" or which.startswith("Bdense_cheap"):
+        # "Bdense_cheap" -> A=8; "Bdense_cheap_A16" / "_A24" / "_A32" -> that filling (max A=32)
+        A = int(which.split("_A")[1]) if "_A" in which else 8
+        study_Bdense_cheap(A=A)
     if which in ("Bdilute_cheap", "cheap"):
         study_Bdilute_cheap()
     if which in ("Cdilute_cheap", "cheap"):
