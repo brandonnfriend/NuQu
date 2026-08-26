@@ -33,7 +33,7 @@ when_to_transfer_output = ON_EXIT
 transfer_input_files    = run_nb_shard.sh
 transfer_output_files   = ""
 ${QIS}
-request_cpus            = 16
+request_cpus            = 8
 request_memory          = 48G
 request_disk            = 10G
 Output                  = ${DIR}/logs/smoketest.out
@@ -47,9 +47,10 @@ EOF
   exit 0
 fi
 
-# grid cols: STUDY MEM  (all ≤64G → schedulable)
+# grid cols: STUDY MEM  (right-sized after the smoke: Bdense used <1G / 57s with PT2 off, so these
+# are generous headroom — Bdilute/Cdilute get more for PT2 / the larger L=3 H).
 SH="$DIR/shards.txt"; : > "$SH"
-printf 'A 16G\nBdilute_cheap 48G\nBdense_cheap 48G\nCdilute_cheap 64G\n' > "$SH"
+printf 'A 8G\nBdilute_cheap 24G\nBdense_cheap 8G\nCdilute_cheap 16G\n' > "$SH"
 NJOBS=$(wc -l < "$SH")
 
 cat > "$DIR/campaign.sub" <<EOF
@@ -60,7 +61,7 @@ when_to_transfer_output = ON_EXIT
 transfer_input_files    = run_nb_shard.sh
 transfer_output_files   = ""
 ${QIS}
-request_cpus            = 16
+request_cpus            = 8
 request_memory          = \$(MEM)
 request_disk            = 10G
 JobPrio                 = 20
