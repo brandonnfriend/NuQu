@@ -25,7 +25,7 @@ them through the doc-faithful total-T so the A-vs-bare verdict is a real number.
 **Doc-faithful total-T** (`docs/frame_on_quantum_side.md` §4):
 
     total_T = (T_prep + N_walk · T_step) · QPE_reps,   QPE_reps = 1/p0,
-    N_walk  = √2·π·Λ/ΔE   (the qubitized-walk query count; `src_PI.qpe_cost`).
+    N_walk  = π·Λ/ΔE   (the qubitized-walk query count; `src_PI.qpe_cost`).
 
 The repo's saved `QPE_Total_T_Count` is only the inner `N_walk·T_step` (QPE_reps=1,
 T_prep=0) — Architecture A is exactly what folds in the `1/p0` and `T_prep` factors.

@@ -12,7 +12,7 @@ bond terms (∝ bonds `N_b`), so its PauliLCU cost drivers are
 
 **What is exact.** The block-encoding subnormalisation `λ` (the Pauli 1-norm,
 which is additive over terms) fits this form to < 0.02% at L=1,2,3 (dim=3), so
-`λ(L=10)` and hence the walk-query count `N_walk = √2·π·λ/ΔE` are pinned by exact
+`λ(L=10)` and hence the walk-query count `N_walk = π·λ/ΔE` are pinned by exact
 lattice combinatorics. The logical-qubit count is `≈ (4 + dim·n_b)·S + O(log)`,
 also exact. These are the dominant scaling drivers.
 

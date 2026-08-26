@@ -17,8 +17,8 @@ Two independent error sources add to the total energy error:
 
 * **ε_QPE** — the phase-estimation *resolution*. Qubitization maps eigenvalue
   `E` to eigenphase `arccos(E/λ)`, resolved to `ε_QPE` with
-  `N_walk = √2·π·λ / ε_QPE` walk queries (Babbush 2018 Eq. 9; the same constant
-  `qpe_cost.walk_queries` uses).
+  `N_walk = π·λ / ε_QPE` walk queries (the adopted π constant — the same
+  `qpe_cost.walk_queries` default).
 
 * **ε_BE** — the *block-encoding* error. The compiled walk qubitizes `H + δH`,
   not `H`, where `δH` collects the approximations in PREP (finite-precision LCU

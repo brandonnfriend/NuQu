@@ -8,8 +8,9 @@ ARCHITECTURES at a matched physical scenario (n_b=2, 1 MeV, A) —
   * Qubit.   = the DIRECT compiled Fock/PauliLCU coherent-query T (r3 shards), JW map, n_b=2.
 Both at ΔE=1 MeV, A matched. Trotter is a LOOSE worst-case bound (tightening it moves the curve DOWN
 → crossover LEFT), so "Trotter wins at large L" is robust and "qubitization wins at small L" is the
-fragile edge. The qubitization number uses the shard's stored √2·π QPE_Total_T_Count (accepted
-convention); the π tightening would lower it ×0.707 (crossover slightly later).
+fragile edge. The qubitization number uses the ADOPTED π constant (N_walk = π·λ/ε_qpe), recomputed
+from each shard's own λ and ε_qpe — consistent with the headline (the raw shards carry √2·π; the
+ε-split is C-independent, so this is a clean ×1/√2 tightening).
 
     python -m misc.make_trotter_comparison_figure
 """
@@ -29,6 +30,19 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 from src_PI.trotter_theory.trotter_exact import qpe_cost                     # noqa: E402
 from src_PI.hamiltonians.core.EFTParameters import get_physical_parameters   # noqa: E402
+from src_PI.estimation.qpe_cost import (                                     # noqa: E402
+    walk_queries, WALK_QUERY_CONSTANT_HEISENBERG, WALK_QUERY_CONSTANT_BABBUSH_UB)
+
+
+def qubit_total_T_pi(r):
+    """Compiled qubitization coherent-query T with the ADOPTED π constant: recompute
+    N_walk = π·λ/ε_qpe from the shard's own λ and ε_qpe, × per-step walk_T (not the raw √2·π
+    QPE_Total_T_Count). Falls back to rescaling the raw aggregate ×π/√2π if ε_qpe is absent."""
+    lam, walkT = r["Physical_Lambda"], r["Walk_T_Count"]
+    eps = (r.get("QPE_Budget") or {}).get("eps_qpe")
+    if eps:
+        return walk_queries(lam, eps, constant=WALK_QUERY_CONSTANT_HEISENBERG) * walkT
+    return float(r["QPE_Total_T_Count"]) * (WALK_QUERY_CONSTANT_HEISENBERG / WALK_QUERY_CONSTANT_BABBUSH_UB)
 
 BLUE, ORANGE, CRIT, GREEN = "#2a78d6", "#eb6834", "#d03b3b", "#3a9b6a"
 INK, INK2, MUTED, GRID, AXIS = "#0b0b0b", "#52514e", "#898781", "#e1e0d9", "#c3c2b7"
@@ -36,7 +50,7 @@ SURFACE = "#fcfcfb"
 
 
 def load_qubitization(data_dir):
-    """r3 compiled PauliLCU coherent-query T (QPE_Total_T_Count, √2·π) vs L at n_b=2 (L≥2)."""
+    """r3 compiled PauliLCU coherent-query T (π·λ/ε_qpe · walk_T) vs L at n_b=2 (L≥2)."""
     q = {}
     for f in sorted(glob.glob(f"{data_dir}/*fock_pauli*.json")):
         j = json.load(open(f))
@@ -44,7 +58,7 @@ def load_qubitization(data_dir):
             continue
         r = j["results"][0]
         if r["n_b"] == 2 and r["L"] >= 2:
-            q[r["L"]] = float(r["QPE_Total_T_Count"])
+            q[r["L"]] = qubit_total_T_pi(r)
     return dict(sorted(q.items()))
 
 
@@ -139,7 +153,8 @@ def main():
     md = ["# Old (Watson Trotter, analytic bound) vs New (compiled PauliLCU) — n_b=2, A=1, 1 MeV\n",
           "_Architecture comparison (amplitude/local-map Watson vs Fock/JW PauliLCU), matched n_b=2 /"
           " ΔE=1 MeV. Trotter = analytic product-formula UPPER BOUND (loose); qubitization = direct"
-          " compiled coherent-query T (√2·π). See codex trotter_comparison_status 2026-08-24._\n",
+          " compiled coherent-query T with the adopted π constant (N_walk = π·λ/ε_qpe). See codex"
+          " trotter_comparison_status 2026-08-24._\n",
           "| L | qubitization T (compiled) | Trotter T (A=1, bound) | ratio T/Q |",
           "|--:|--:|--:|--:|"]
     for i, L in enumerate(Ls):

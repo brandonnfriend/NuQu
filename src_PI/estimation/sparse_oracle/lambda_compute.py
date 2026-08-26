@@ -100,7 +100,7 @@ def _sparse_lambda_for_boson_monomial(monomial, n_b):
     The cost (T-count) is unchanged and remains a valid *upper* bound (the d=2
     `(â+â†)` encoder is at least as expensive as a d=1 encoder), so the
     tightened Λ with the conservative cost is still a conservative total-cost
-    estimate — just a sharper one (smaller N_walk = √2·π·Λ/ΔE).
+    estimate — just a sharper one (smaller N_walk = π·Λ/ΔE).
     """
     if monomial == ():
         return 1.0

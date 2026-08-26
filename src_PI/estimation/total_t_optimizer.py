@@ -4,7 +4,7 @@ The 1 MeV target energy error splits between QPE phase RESOLUTION (`eps_qpe`) an
 BLOCK-ENCODING/synthesis error (`eps_be`), `eps_qpe + eps_be = ΔE`. The split trades
 off two costs:
 
-  * `N_walk = √2·π·λ / eps_qpe`  — more resolution budget → fewer walk queries.
+  * `N_walk = π·λ / eps_qpe`  — more resolution budget → fewer walk queries (π = adopted constant).
   * `walk_T  = a + b·log2(1/circuit_precision)`, `circuit_precision = eps_be/(2λ)`
     — more block-encoding budget → looser rotation synthesis → cheaper walk step.
 

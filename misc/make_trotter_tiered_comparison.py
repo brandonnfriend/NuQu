@@ -8,8 +8,9 @@ scenarios, deliberately NOT connected as a convergence curve.
   Tier H  Watson energy-bound cutoff       n_b≈33-40 (Lemma 5)   Trotter UB only (qubit compile-infeasible)
 
 Trotter = Watson analytic product-formula UPPER BOUND (loose worst-case). Qubitization = direct
-compiled Fock/PauliLCU coherent-query T (r3, √2·π). Architecture comparison (amplitude/local-map vs
-Fock/JW), A=1, ΔE=1 MeV. Writes trotter_tiered.{pdf,png} + trotter_tiered_table.md.
+compiled Fock/PauliLCU coherent-query T (r3), N_walk with the adopted π constant (= π·λ/ε_qpe,
+recomputed from each shard's λ / ε_qpe). Architecture comparison (amplitude/local-map vs Fock/JW),
+A=1, ΔE=1 MeV. Writes trotter_tiered.{pdf,png} + trotter_tiered_table.md.
 
     python -m misc.make_trotter_tiered_comparison
 """
@@ -29,6 +30,18 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 from src_PI.trotter_theory.trotter_exact import qpe_cost                     # noqa: E402
 from src_PI.hamiltonians.core.EFTParameters import get_physical_parameters   # noqa: E402
+from src_PI.estimation.qpe_cost import (                                     # noqa: E402
+    walk_queries, WALK_QUERY_CONSTANT_HEISENBERG, WALK_QUERY_CONSTANT_BABBUSH_UB)
+
+
+def _qubit_total_T_pi(r):
+    """Compiled qubitization coherent-query T with the ADOPTED π constant: N_walk = π·λ/ε_qpe
+    (from the shard's own λ / ε_qpe) × walk_T — not the raw √2·π QPE_Total_T_Count."""
+    lam, walkT = r["Physical_Lambda"], r["Walk_T_Count"]
+    eps = (r.get("QPE_Budget") or {}).get("eps_qpe")
+    if eps:
+        return walk_queries(lam, eps, constant=WALK_QUERY_CONSTANT_HEISENBERG) * walkT
+    return float(r["QPE_Total_T_Count"]) * (WALK_QUERY_CONSTANT_HEISENBERG / WALK_QUERY_CONSTANT_BABBUSH_UB)
 
 BLUE, ORANGE, MUTED = "#2a78d6", "#eb6834", "#898781"
 INK, INK2, GRID, AXIS, SURFACE = "#0b0b0b", "#52514e", "#e1e0d9", "#c3c2b7", "#fcfcfb"
@@ -43,7 +56,7 @@ def load_qubit_by_nb(data_dir):
         if not j.get("done") or not j["results"] or "rep2" in os.path.basename(f):
             continue
         r = j["results"][0]
-        q[(r["L"], r["n_b"])] = float(r["QPE_Total_T_Count"])
+        q[(r["L"], r["n_b"])] = _qubit_total_T_pi(r)
     return q
 
 
@@ -110,7 +123,8 @@ def make_table(q, out_path):
     md = [
         "# Tiered Old (Watson Trotter) vs New (compiled PauliLCU) comparison — #6\n",
         "_Three distinct cutoff SCENARIOS, not a convergence curve. Trotter = analytic product-formula"
-        " UPPER BOUND (loose); qubitization = direct compiled coherent-query T (√2·π). A=1, ΔE=1 MeV."
+        " UPPER BOUND (loose); qubitization = direct compiled coherent-query T (adopted π: N_walk ="
+        " π·λ/ε_qpe). A=1, ΔE=1 MeV."
         " Architecture comparison: Trotter uses an amplitude/discretized-field basis + locality-"
         "preserving fermion map; PauliLCU uses truncated-Fock + Jordan–Wigner. Boson cutoff is"
         " CONDITIONAL for all tiers (physical adequacy from the classical convergence study)._\n",
@@ -137,7 +151,7 @@ def make_table(q, out_path):
               f"| — (compile-infeasible; needs validated analytic continuation) "
               f"| Trotter only / — |")
     md.append("\n**Reading:** the ranking flips with the cutoff scenario. At the low empirical cutoff "
-              "(L) qubitization wins at small L (crossover L≈3.8, A=1); at the higher reference cutoff "
+              "(L) qubitization wins at small L (crossover L≈4.3, A=1); at the higher reference cutoff "
               "(M) the Trotter *upper bound* already sits below compiled qubitization at L=2,3, because "
               "qubitization's λ grows far faster with n_b (×~510 over n_b=2→4) than Trotter (×~21); at "
               "Watson's own cutoff (H) qubitization is not compilable. All Trotter numbers are loose "

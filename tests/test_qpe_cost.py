@@ -34,15 +34,15 @@ def _make_sweep_file(tmpdir, results, metadata=None):
 
 
 def test_walk_queries_formula():
-    """N_walk = √2·π·Λ / ΔE."""
+    """N_walk = π·Λ / ΔE (adopted constant)."""
     lam, dE = 1.97e5, 1.0
-    expected = math.sqrt(2.0) * math.pi * lam / dE
+    expected = math.pi * lam / dE
     assert abs(walk_queries(lam, dE) - expected) < 1e-6
 
 
 def test_total_qpe_t_count_formula():
     t_step, lam, dE = 6.85e6, 1.97e5, 1.0
-    expected = t_step * math.sqrt(2.0) * math.pi * lam / dE
+    expected = t_step * math.pi * lam / dE
     assert abs(total_qpe_t_count(t_step, lam, dE) - expected) < 1e-3
 
 
@@ -58,7 +58,7 @@ def test_compute_writes_fields_and_metadata():
         for r in data['results']:
             assert 'QPE_Walk_Queries' in r
             assert 'QPE_Total_T_Count' in r
-            exp_nq = math.sqrt(2.0) * math.pi * r['Physical_Lambda'] / 1.0
+            exp_nq = math.pi * r['Physical_Lambda'] / 1.0
             assert abs(r['QPE_Walk_Queries'] - exp_nq) < 1e-3
             assert abs(r['QPE_Total_T_Count'] - r['Total_T_Count'] * exp_nq) < 1.0
         assert data['metadata']['delta_E_MeV'] == 1.0
@@ -112,9 +112,9 @@ def test_default_delta_e_is_one_mev():
 # --- QPE phase-register ancilla (Babbush 2018 Eq. 24) -------------------------- #
 
 def test_phase_register_equals_babbush_eq24():
-    """m = ⌈log₂(√2·π·λ / (2·ε_qpe))⌉ — Babbush Eq. 24, verbatim."""
+    """m = ⌈log₂(N_walk / 2)⌉ = ⌈log₂(π·λ / (2·ε_qpe))⌉ — Babbush Eq. 24 form, adopted π constant."""
     lam, eps_qpe = 46521.0, 0.96
-    expected = math.ceil(math.log2(math.sqrt(2.0) * math.pi * lam / (2.0 * eps_qpe)))
+    expected = math.ceil(math.log2(math.pi * lam / (2.0 * eps_qpe)))
     assert qpe_phase_register_qubits(lam, eps_qpe) == expected
 
 
@@ -135,11 +135,11 @@ def test_phase_register_anchor_magnitudes():
 
 
 def test_phase_register_constant_switch():
-    """Tightening the N_walk prefactor to π gives m one bit smaller when N_walk halves."""
+    """The historical √2·π upper bound never gives fewer phase bits than the adopted π default."""
     lam, eps_qpe = 46521.0, 0.96
-    m_upper = qpe_phase_register_qubits(lam, eps_qpe)                       # √2·π
-    m_pi = qpe_phase_register_qubits(lam, eps_qpe, constant=math.pi)        # π (0.707×)
-    assert m_pi <= m_upper  # fewer walks → never more phase bits
+    m_pi = qpe_phase_register_qubits(lam, eps_qpe)                                    # adopted π (default)
+    m_upper = qpe_phase_register_qubits(lam, eps_qpe, constant=math.sqrt(2)*math.pi)  # √2·π
+    assert m_pi <= m_upper  # π (fewer walks) → never more phase bits
 
 
 def test_total_logical_qubits_reuse_is_max_not_sum():
@@ -152,9 +152,13 @@ def test_total_logical_qubits_reuse_is_max_not_sum():
     assert total_logical_qubits(walk, m, a_prep) < walk + m + a_prep
 
 
-def test_walk_query_constant_is_babbush_upper_bound():
-    assert abs(WALK_QUERY_CONSTANT - math.sqrt(2.0) * math.pi) < 1e-12
-    assert abs(WALK_QUERY_CONSTANT - 4.4428829) < 1e-6
+def test_walk_query_constant_is_heisenberg_pi():
+    """Adopted module default is π (Heisenberg), not Babbush's √2·π upper bound. The upper
+    bound stays available as a named constant to reproduce the historical r3 raw shards."""
+    from src_PI.estimation.qpe_cost import WALK_QUERY_CONSTANT_BABBUSH_UB
+    assert abs(WALK_QUERY_CONSTANT - math.pi) < 1e-12
+    assert abs(WALK_QUERY_CONSTANT - 3.14159265) < 1e-6
+    assert abs(WALK_QUERY_CONSTANT_BABBUSH_UB - math.sqrt(2.0) * math.pi) < 1e-12
 
 
 import pytest

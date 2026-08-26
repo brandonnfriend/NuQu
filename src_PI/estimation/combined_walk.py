@@ -32,7 +32,7 @@ species-selective branches are not extracted, and controlled-branch overhead is 
                WT ε-terms this is QFT · SELECT_i · QFT† applied *inside* SELECT.
     W_H = R · B_H                   (one reflection about |0⟩ on the combined ancilla)
 
-QPE then makes N_walk = √2·π·λ/ΔE queries to the SINGLE walk W_H. λ (= Σ_i λ_i) and
+QPE then makes N_walk = π·λ/ΔE queries to the SINGLE walk W_H. λ (= Σ_i λ_i) and
 N_walk are unchanged from the legacy path (they were already right); what changes is the
 per-step T-count (one combined walk, not two summed), the logical-qubit count (adds the
 LCU control register + QFT workspace the real walk needs), and the QFT is now a coherent

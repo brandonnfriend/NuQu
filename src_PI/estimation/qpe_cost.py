@@ -5,7 +5,7 @@ The total T-cost of a qubitized QPE run is the per-walk-step T-count times
 the number of walk-operator queries:
 
     QPE_Total_T_Count = Total_T_Count · N_walk
-    N_walk            = √2 · π · Λ / ΔE          (Eq. 9; Λ = Physical_Lambda)
+    N_walk            = π · Λ / ΔE               (Λ = Physical_Lambda; adopted constant)
 
 This used to be computed inside `plot_sweep_data.py` at plot time. Per the
 pseudocode (`human_knowledge/pseudocode/Block Encoders.md` step 7) the
@@ -30,7 +30,7 @@ encoder; for the sparse-oracle encoder λ is the BCK subnormalization
 (`Σ_l |c_l|·α_l`, what `sparse_oracle.compute_native_lambda` returns). So
 this function works for every encoder: it reads each sweep's own
 `Physical_Lambda` (= that encoder's λ) and plugs it into the same formula
-with the same √2·π constant (a QPE-protocol property, encoder-independent).
+with the same π constant (a QPE-protocol property, encoder-independent).
 A sparse vs PauliLCU comparison via `QPE_Total_T_Count` is therefore
 apples-to-apples even though the two λ values differ for the same H.
 
@@ -47,36 +47,37 @@ DEFAULT_DELTA_E_MEV = 1.0
 
 # The qubitized-walk query prefactor `C` in `N_walk = C·λ/ΔE`.
 #
-#   √2·π ≈ 4.443  — Babbush 2018 Eq. 26 UPPER bound. The extra √2 over the
-#                   Heisenberg constant is an EQUAL-ERROR-BUDGET split: Babbush
-#                   sets phase-estimation variance = gate-synthesis variance and
-#                   gives each ΔE/√2 (his Eqs. 23–25). This is the historical
-#                   default; it is what the committed r3 raw shards used, so it
-#                   stays the module default for shard reproducibility.
-#   π ≈ 3.142     — SOTA/Heisenberg-optimal single-window constant. Our cost
-#                   model budgets synthesis error SEPARATELY (`eps_be`, via
-#                   `circuit_precision`), so keeping Babbush's √2 double-counts
-#                   the synthesis budget. Dropping it (synthesis ≪ PE error)
-#                   gives π — a 1.41× reduction that keeps the upper-bound
-#                   confidence factor. This is the ADOPTED HEADLINE constant
-#                   (applied at the reporting layer: `make_headline_resource_figure`).
+#   π ≈ 3.142     — SOTA/Heisenberg-optimal single-window constant. This is the
+#                   ADOPTED constant everywhere N_walk is computed (the whole
+#                   pipeline default). Our cost model budgets synthesis error
+#                   SEPARATELY (`eps_be`, via `circuit_precision`), so Babbush's
+#                   equal-split √2 (below) would DOUBLE-COUNT the synthesis budget;
+#                   dropping it (synthesis ≪ PE error) gives π — a 1.41× tightening
+#                   that keeps the upper-bound confidence factor.
+#   √2·π ≈ 4.443  — Babbush 2018 Eq. 26 UPPER bound: an EQUAL-ERROR-BUDGET split
+#                   (phase-estimation variance = gate-synthesis variance, ΔE/√2 each,
+#                   his Eqs. 23–25). HISTORICAL only — the committed r3 raw shards
+#                   were generated with this; kept as a named constant so those raw
+#                   QPE_Walk_Queries values can be reproduced/validated. Reporting
+#                   layers recompute N_walk with π from the shard's own λ, ε_qpe
+#                   (the ε-split is C-independent, so it is a clean ×1/√2).
 #   π/2 ≈ 1.571   — 1σ information floor (drops the confidence factor too); not used.
 #
 # See `claude/research/total_costs/00_literature_review.md` for the full provenance.
-WALK_QUERY_CONSTANT_BABBUSH_UB = math.sqrt(2.0) * math.pi   # 4.443 — Eq. 26 upper bound
-WALK_QUERY_CONSTANT_HEISENBERG = math.pi                    # 3.142 — adopted headline
-WALK_QUERY_CONSTANT = WALK_QUERY_CONSTANT_BABBUSH_UB        # module default (raw shards)
+WALK_QUERY_CONSTANT_HEISENBERG = math.pi                    # 3.142 — ADOPTED default
+WALK_QUERY_CONSTANT_BABBUSH_UB = math.sqrt(2.0) * math.pi   # 4.443 — historical (raw r3 shards)
+WALK_QUERY_CONSTANT = WALK_QUERY_CONSTANT_HEISENBERG        # module default = π (adopted)
 
 
 def walk_queries(physical_lambda, delta_E=DEFAULT_DELTA_E_MEV,
                  constant=WALK_QUERY_CONSTANT):
     """N_walk = C · Λ / ΔE — the qubitized-walk query count for QPE.
 
-    `C` defaults to `√2·π` (`WALK_QUERY_CONSTANT_BABBUSH_UB`, Babbush 2018
-    Eq. 26 upper bound — the constant the committed shards were generated with).
-    Pass `constant=WALK_QUERY_CONSTANT_HEISENBERG` (= π) for the adopted-headline
-    value: a 1.41× tightening justified because our model budgets synthesis error
-    separately, so Babbush's equal-split √2 would double-count it.
+    `C` defaults to `π` (`WALK_QUERY_CONSTANT_HEISENBERG`), the ADOPTED constant:
+    a 1.41× tightening over Babbush's equal-split √2·π, justified because our model
+    budgets synthesis error separately (so the √2 would double-count it). Pass
+    `constant=WALK_QUERY_CONSTANT_BABBUSH_UB` (= √2·π) only to reproduce the
+    historical r3 raw shards, which were generated with that upper bound.
     """
     return (constant * physical_lambda) / delta_E
 
@@ -148,7 +149,7 @@ def qpe_phase_register_qubits(physical_lambda, eps_qpe=DEFAULT_DELTA_E_MEV,
     Babbush et al. 2018 (PRX 8 041015, arXiv:1805.03662): standard qubitized
     QPE uses `m` phase-register ancilla whose largest controlled walk power is
     `W^(2^(m-1))`, so the total number of walk applications is `N_walk ≈ 2^m`,
-    i.e. `2^m ≈ √2·π·Λ/ε_qpe` (their Eq. 26 upper bound). Since our
+    i.e. `2^m ≈ π·Λ/ε_qpe` (adopted π constant). Since our
     `walk_queries` already returns that `N_walk`, `m = ⌈log₂(N_walk/2)⌉` ties
     the ancilla count to the SAME N_walk we report — there is no independent
     constant to get out of sync. This is the **QPE phase register**, which the
@@ -225,7 +226,7 @@ def compute_total_qpe_cost(filepath, delta_E=DEFAULT_DELTA_E_MEV, write=True):
     """Read a sweep JSON, compute the total QPE cost per result entry, write back.
 
     For each entry in `data['results']` adds:
-      * 'QPE_Walk_Queries'   = √2·π·Λ / ΔE
+      * 'QPE_Walk_Queries'   = π·Λ / ΔE
       * 'QPE_Total_T_Count'  = Total_T_Count · QPE_Walk_Queries
 
     Records the `ΔE` used under `data['metadata']['delta_E_MeV']`. Idempotent:

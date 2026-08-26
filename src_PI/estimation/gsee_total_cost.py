@@ -39,10 +39,9 @@ def total_gsee_cost(*, physical_lambda, walk_T, walk_register_qubits, eps_qpe,
     p0 → few reps. The frame does NOT change the walk (same λ, same walk_T) — only p0 and prep.
     `branch='sampling'` (exact Bernoulli) is the default; 'binary' is experimental (warmstart audit).
 
-    `n_walk_override` (warmstart audit §8): pass the shard's ALREADY-STORED `QPE_Walk_Queries` to
-    consume the accepted query count as-is (its √2·π convention), rather than silently re-deriving
-    N_walk with a different constant — so the one-window cost matches the published anchor.
-    `total_gsee_cost_from_record` does this by default.
+    `n_walk_override`: pass a precomputed N_walk to consume it as-is (e.g. the shard's stored
+    `QPE_Walk_Queries` to reproduce the historical √2·π anchor). Left None, N_walk is derived with
+    the adopted π constant from λ / ε_qpe. `total_gsee_cost_from_record` derives with π by default.
     """
     N_walk = (float(n_walk_override) if n_walk_override is not None
               else walk_queries(physical_lambda, eps_qpe, constant=n_walk_constant))
@@ -78,12 +77,11 @@ def total_gsee_cost(*, physical_lambda, walk_T, walk_register_qubits, eps_qpe,
 
 
 def total_gsee_cost_from_record(record, *, p0_warm, p0_cold, D_warm, n_bos_modes, N_f, **kw):
-    """Adapter: pull λ / walk_T / walk-register / ε_qpe from a quantum-shard result dict, and by
-    default CONSUME the record's stored `QPE_Walk_Queries` (√2·π convention) so the one-window cost
-    equals the accepted anchor (warmstart audit §8). Pass `n_walk_override=None` in kw to instead
-    re-derive N_walk under a chosen constant (a deliberate versioned scenario)."""
+    """Adapter: pull λ / walk_T / walk-register / ε_qpe from a quantum-shard result dict and derive
+    N_walk with the ADOPTED π constant (headline convention) from λ / ε_qpe. To instead reproduce
+    the historical √2·π anchor query count, pass `n_walk_override=record['QPE_Walk_Queries']` in kw
+    (a deliberate versioned scenario)."""
     b = record.get("QPE_Budget") or {}
-    kw.setdefault("n_walk_override", record.get("QPE_Walk_Queries"))
     return total_gsee_cost(
         physical_lambda=record["Physical_Lambda"], walk_T=record["Walk_T_Count"],
         walk_register_qubits=record["Logical_Qubits"], eps_qpe=b.get("eps_qpe"),

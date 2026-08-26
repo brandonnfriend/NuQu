@@ -51,10 +51,10 @@ def test_l10_dim3_anchor_is_sane():
     assert r['sites'] == 1000 and r['bonds'] == 2700
     # exact quantities
     assert 8.0e6 < r['lambda'] < 9.5e6
-    assert r['walk_queries'] > 3.5e7
+    assert r['walk_queries'] > 2.5e7                # N_walk = π·λ/ΔE (adopted π constant)
     assert 8000 < r['logical_qubits'] < 9200        # ~ (4 + 3·2)·1000
-    # modelled total_T is order 1e16, with an asymmetric (low-biased) band
-    assert 1e16 < r['total_T_model'] < 2e16
+    # modelled total_T is order 1e16 (π constant), with an asymmetric (low-biased) band
+    assert 7e15 < r['total_T_model'] < 1e16
     lo, hi = r['total_T_band']
     assert lo < r['total_T_model'] < hi
     assert hi > r['total_T_model'] * 1.5            # upward JW-nonlocality room

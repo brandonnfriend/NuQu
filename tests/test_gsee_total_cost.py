@@ -49,22 +49,29 @@ def test_binary_is_opt_in_not_auto():
     assert rb["cold"]["branch"] == "binary" and rb["cold"]["ae_register_qubits"] >= 1
 
 
-def test_from_record_consumes_accepted_n_walk():
-    """audit §8: the assembler must consume the shard's stored QPE_Walk_Queries (√2·π), not
-    silently re-derive N_walk with a different constant."""
+def test_from_record_derives_pi_n_walk_by_default():
+    """The record adapter derives N_walk with the ADOPTED π constant from λ / ε_qpe (headline
+    convention), NOT the shard's stored √2·π QPE_Walk_Queries. An explicit n_walk_override
+    reproduces the historical stored value verbatim."""
+    from src_PI.estimation.qpe_cost import walk_queries, WALK_QUERY_CONSTANT_HEISENBERG
     rec = {"Physical_Lambda": 8.797966e6, "Walk_T_Count": 3.27e8, "Logical_Qubits": 10021,
-           "QPE_Walk_Queries": 4.0091e7,          # the accepted √2·π value stored in the shard
+           "QPE_Walk_Queries": 4.0091e7,          # historical √2·π value stored in the shard
            "QPE_Budget": {"eps_qpe": 0.975}}
     r = total_gsee_cost_from_record(rec, p0_warm=0.5, p0_cold=0.02, D_warm=5000,
                                     n_bos_modes=3000, N_f=4)
-    assert r["n_walk_from_record"] is True
-    assert abs(r["N_walk"] - 4.0091e7) < 1.0                # used the stored value verbatim
-    assert abs(r["coherent_query_T"] - 4.0091e7 * 3.27e8) < 1e6
+    expected_pi = walk_queries(rec["Physical_Lambda"], 0.975, constant=WALK_QUERY_CONSTANT_HEISENBERG)
+    assert r["n_walk_from_record"] is False
+    assert abs(r["N_walk"] - expected_pi) < 1.0             # derived π N_walk, not the stored √2·π
+    assert abs(r["N_walk"] - 4.0091e7 / (2 ** 0.5)) < 4.0091e7 * 0.02   # ≈ stored/√2
+    # explicit override reproduces the historical stored value verbatim:
+    r2 = total_gsee_cost_from_record(rec, p0_warm=0.5, p0_cold=0.02, D_warm=5000, n_bos_modes=3000,
+                                     N_f=4, n_walk_override=rec["QPE_Walk_Queries"])
+    assert r2["n_walk_from_record"] is True and abs(r2["N_walk"] - 4.0091e7) < 1.0
 
 
 if __name__ == "__main__":
     for fn in (test_warm_beats_cold_two_named_metrics, test_prep_is_subdominant,
                test_total_width_is_max_not_sum, test_binary_is_opt_in_not_auto,
-               test_from_record_consumes_accepted_n_walk):
+               test_from_record_derives_pi_n_walk_by_default):
         fn()
     print("all gsee_total_cost checks passed")

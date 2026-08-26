@@ -18,7 +18,7 @@ Two quantum payoffs, both read off the same frame:
 Against these gains, the frame's **state-prep circuit** is a ONE-TIME additive cost:
 per-mode squeeze = N parallel single-mode squeezers (O(1) depth); displacement = one
 (conditional) displacement/mode; orbital rotation = an n_ferm Givens network (O(n²) gates,
-O(n) depth). Compared to the QPE walk — `N_walk = √2·π·Λ/ΔE` steps, each `Total_T_Count`
+O(n) depth). Compared to the QPE walk — `N_walk = π·Λ/ΔE` steps, each `Total_T_Count`
 T-gates, times ~1/p₀ repetitions — the state prep is negligible. So the net is: pay a tiny
 one-time state-prep, buy a 1/p₀-fewer-repetitions × fewer-qubits QPE.
 
@@ -160,7 +160,7 @@ def qpe_payoff(*, p0_bare, p0_frame, mean_n_bare, mean_n_frame,
                delta_E=1.0, frame_layers=("squeeze",), eps_synth=1e-10):
     """Combine the measured frame quantities into the QPE-cost impact (task 14 row).
 
-    Cold QPE total ≈ `T_step · N_walk · 1/p₀` (walk queries `N_walk=√2·π·Λ/ΔE`, times
+    Cold QPE total ≈ `T_step · N_walk · 1/p₀` (walk queries `N_walk=π·Λ/ΔE`, times
     ~1/p₀ repetitions to hit the ground state). The frame changes:
       * repetitions: `1/p₀_bare → 1/p₀_frame`  ⇒  factor `p₀_frame/p₀_bare` fewer runs;
       * boson qubits: `n_b_bare → ⌈log₂(⟨n⟩_frame + margin)⌉` per mode (cutoff shrinks with ⟨n⟩);

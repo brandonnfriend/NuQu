@@ -28,8 +28,8 @@ def test_budget_splits_energy_and_derives_parameters():
     b = qpe_error_budget(physical_lambda=4471.0, delta_E=1.0, qpe_fraction=0.5)
     # energy split adds up to ΔE
     assert abs(b['eps_qpe'] + b['eps_be'] - 1.0) < 1e-12
-    # N_walk = √2·π·λ/ε_QPE
-    assert abs(b['walk_queries'] - math.sqrt(2) * math.pi * 4471.0 / b['eps_qpe']) < 1e-6
+    # N_walk = π·λ/ε_QPE (adopted constant)
+    assert abs(b['walk_queries'] - math.pi * 4471.0 / b['eps_qpe']) < 1e-6
     # block-encoding error λ·(ε_prep + ε_rot) == ε_BE (even split)
     assert abs(4471.0 * (b['probability_epsilon'] + b['circuit_precision'])
                - b['eps_be']) < 1e-9
