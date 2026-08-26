@@ -120,10 +120,11 @@ def make_figure(q, out_base):
         if xcA:
             axB.plot([xcA], [1.0], "v", color=col, ms=9, mec=SURFACE, mew=1.0, zorder=4)
     axB.axhline(1.0, ls="-", color=INK2, lw=1.1, zorder=2)
-    axB.annotate("qubitization cheaper ↓", (Ls[0], 1.0), textcoords="offset points",
-                 xytext=(2, -13), fontsize=8, color=INK2)
-    axB.annotate("Trotter cheaper ↑", (Ls[0], 1.0), textcoords="offset points",
+    # ratio = Trotter/qubitization: ABOVE 1 → Trotter costs more → qubitization wins; BELOW → Trotter wins
+    axB.annotate("qubitization cheaper ↑", (Ls[0], 1.0), textcoords="offset points",
                  xytext=(2, 5), fontsize=8, color=INK2)
+    axB.annotate("Trotter cheaper ↓", (Ls[0], 1.0), textcoords="offset points",
+                 xytext=(2, -13), fontsize=8, color=INK2)
     axB.set_xlabel("lattice size $L$", color=INK2, fontsize=9.5)
     axB.set_ylabel("Trotter / qubitization $T$ ratio", color=INK2, fontsize=9.5)
     axB.set_title("b  Crossover shifts with nucleon number $A$", color=INK, fontsize=11,
