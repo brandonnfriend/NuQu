@@ -61,9 +61,10 @@ def _save(out, name):
 
 
 def study_A():
-    """L=2 d=1 A=1 — exact Lanczos reachable up to N_f=6; validates TrimCI+PT2."""
+    """L=2 d=1 A=1 — exact Lanczos, validates TrimCI+PT2 against truth. N_f≤8 (the exact solve at
+    N_f=16 blows the 16^modes space — ran 5h; N_f=(2,3,4,5,6,8) already covers n_b=1,2,3)."""
     out = nb_convergence_sweep(L=2, dim=1, A=1,
-                               N_f_list=(2, 3, 4, 5, 6, 8, 16),
+                               N_f_list=(2, 3, 4, 5, 6, 8),
                                core=800, n_runs=3, seed=0)
     _save(out, "studyA_L2d1A1")
     return out
@@ -204,10 +205,12 @@ def study_Bdense_cheap(A=8, core=3000, n_runs=3):
 
 
 def study_Bdilute_cheap(core=4000, n_runs=3):
-    """L=2 d=3 DILUTE (A=1) — the clean single-nucleon curve. N_f=(2,4,8,16) with PT2 (cheap fermion
-    sector), pairs with the exact ED anchor (study_A) for the energy-convergence validation."""
-    out = nb_convergence_sweep(L=2, dim=3, A=1, N_f_list=(2, 4, 8, 16),
-                               core=core, n_runs=n_runs, seed=0, pt2=True)
+    """L=2 d=3 DILUTE (A=1) — the clean single-nucleon curve (low-density end of the L=2 series).
+    N_f=(2,4,8), PT2 off: capping N_f=8 avoids the N_f=16 slow point (the PT2 external-space sum at
+    N_f=16 ran 5h) and the tail carries the claim — the exact ED anchor (study_A) supplies the
+    energy-convergence validation."""
+    out = nb_convergence_sweep(L=2, dim=3, A=1, N_f_list=(2, 4, 8),
+                               core=core, n_runs=n_runs, seed=0, pt2=False)
     _save(out, "studyBdiluteCheap_L2d3A1")
     return out
 
