@@ -61,10 +61,12 @@ def _save(out, name):
 
 
 def study_A():
-    """L=2 d=1 A=1 — exact Lanczos, validates TrimCI+PT2 against truth. N_f≤8 (the exact solve at
-    N_f=16 blows the 16^modes space — ran 5h; N_f=(2,3,4,5,6,8) already covers n_b=1,2,3)."""
+    """L=2 d=1 A=1 — exact Lanczos, validates TrimCI+PT2 against truth. N_f≤6: the exact sector is
+    N_f^(n_bos=6), so N_f=6→373k (reachable) but N_f=8→2.1M (hung 68h) and N_f=16→134M. N_f=(2,3,4,
+    5,6) covers n_b=1 (N_f=2) and n_b=2 (N_f=4) exactly + convergence points — the physically relevant
+    cutoffs. n_b=3 (N_f=8) exact is out of reach here; the selected-CI shards cover it."""
     out = nb_convergence_sweep(L=2, dim=1, A=1,
-                               N_f_list=(2, 3, 4, 5, 6, 8),
+                               N_f_list=(2, 3, 4, 5, 6),
                                core=800, n_runs=3, seed=0)
     _save(out, "studyA_L2d1A1")
     return out
