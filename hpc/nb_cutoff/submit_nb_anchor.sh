@@ -11,7 +11,7 @@
 #   cd /nfs_scratch/bfriend3/NuQu/NuQu && git fetch origin -q \
 #       && git checkout remediation/vertex-fix && git reset --hard origin/remediation/vertex-fix
 #   cd hpc/nb_cutoff
-#   sh submit_nb_anchor.sh        # single study_A shard (capped N_f=6; should finish in minutes)
+#   sh submit_nb_anchor.sh        # single study_A shard (capped N_f=4; should finish fast)
 set -eu
 CAMPAIGN="$(date +%Y%m%d-%H%M%S)-nbAnchor"
 DIR="campaign_${CAMPAIGN}"; mkdir -p "$DIR/logs"
@@ -35,5 +35,5 @@ Log                     = ${DIR}/logs/campaign.log
 queue
 EOF
 condor_submit "$DIR/campaign.sub"
-echo "CAMPAIGN=${CAMPAIGN}  (study_A ED anchor, capped N_f=6 -> max sector 373k; expect minutes)"
+echo "CAMPAIGN=${CAMPAIGN}  (study_A ED anchor, capped N_f=4 -> max sector 373k; expect minutes)"
 echo "pull -> data/classical/nb_convergence/ ; then re-run misc.make_nb_figure (adds exact energy)"
