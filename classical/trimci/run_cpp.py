@@ -1340,7 +1340,7 @@ def nb_convergence_sweep(L=2, dim=3, A=1, N_f_list=(2, 4, 8, 16, 32),
     2026-07-07) is why we report both E_var and E_var+PT2 and key the axis on n_b.
     """
     from math import log2, ceil, comb as _comb
-    from .observables import mean_occupation, occupation_tail
+    from .observables import mean_occupation, occupation_tail, occupation_histogram
     from .pt2 import pt2_from_result
     from .tong_bound import cutoff_predictions
 
@@ -1432,6 +1432,12 @@ def nb_convergence_sweep(L=2, dim=3, A=1, N_f_list=(2, 4, 8, 16, 32),
     leaked_weight_vs_cutoff = {int(k): float(v) for k, v in
                                (leaked.items() if isinstance(leaked, dict) else [])}
 
+    # PER-LEVEL OCCUPATION HISTOGRAM p(n) on the deepest solve — the population histogram: the
+    # |c|²-weighted fraction of modes at boson level n. sum_{n≥N} p(n) is the weight a cutoff of N
+    # levels drops, so a DEEP Nf_deepest (n_b≥4) lets us SEE the tail die off and quantify that the
+    # n_b=2 cut (N_f=4 → keep n≤3) drops <1%. Validated against a reference two n_b deeper than the cut.
+    occ_histogram = occupation_histogram(res_deepest).tolist() if res_deepest is not None else []
+
     if verbose:
         print("  " + "-" * 96)
         print(f"  ENERGY CONVERGENCE |E_var+PT2(N_f) - E(N_f={ref_row['N_f']})| vs n_b:")
@@ -1448,9 +1454,10 @@ def nb_convergence_sweep(L=2, dim=3, A=1, N_f_list=(2, 4, 8, 16, 32),
         print("=" * 84)
 
     return {"rows": rows, "predictions": pred, "L": L, "dim": dim, "A": A,
-            "core": core, "n_runs": n_runs, "Nf_ref": Nf_deepest,
+            "core": core, "n_runs": n_runs, "Nf_ref": Nf_deepest, "Nf_deepest": Nf_deepest,
             "n_b_for_accuracy_MeV": n_b_for_accuracy,
-            "leaked_weight_vs_cutoff": leaked_weight_vs_cutoff}
+            "leaked_weight_vs_cutoff": leaked_weight_vs_cutoff,
+            "occ_histogram": occ_histogram}
 
 
 def occupation_vs_A_sweep(L=2, dim=3, A_list=(1, 2, 3, 4), n_b=4, N_f=None,
@@ -1476,7 +1483,7 @@ def occupation_vs_A_sweep(L=2, dim=3, A_list=(1, 2, 3, 4), n_b=4, N_f=None,
     Returns {rows, ...} where each row is the LARGEST-core solve for that A, plus a
     `ladder` list (core, <N>, E_var) and a `converged` flag (last <N> step small)."""
     from math import log2, ceil, comb as _comb
-    from .observables import mean_occupation, occupation_tail
+    from .observables import mean_occupation, occupation_tail, occupation_histogram
     from .pt2 import pt2_from_result
     from .tong_bound import mean_occupation_scs
 

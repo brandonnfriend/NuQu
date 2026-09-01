@@ -247,6 +247,20 @@ def study_Ddilute_cheap(core=1000, n_runs=2):
     return out
 
 
+def study_hist(L=2, A=8, dim=3, core=None, n_runs=2):
+    """DEEP-reference occupation histogram (validation): sweep N_f=(2,4,8,16) — i.e. up to n_b=4,
+    two levels deeper than the n_b=2 cut — with PT2 off, so the per-level population p(n) on the
+    N_f=16 solve is fully resolved. This lets us (a) SEE the tail die off well before the reference
+    cutoff and (b) confirm the n_b=2 (keep n≤3) leak is <1% measured against that deep reference —
+    answering 'is n_b=2 validated, or is the leak undercounted by a too-shallow reference?'."""
+    if core is None:
+        core = 3000 if L == 2 else 1500
+    out = nb_convergence_sweep(L=L, dim=dim, A=A, N_f_list=(2, 4, 8, 16),
+                               core=core, n_runs=n_runs, seed=0, pt2=False)
+    _save(out, f"studyHist_L{L}d{dim}A{A}")
+    return out
+
+
 def plot_all():
     """Read whatever studies have been saved and produce the summary plots."""
     import matplotlib
@@ -409,6 +423,11 @@ def main():
         study_Cdense_cheap()
     if which in ("Ddilute_cheap", "cheap"):
         study_Ddilute_cheap()
+    if which.startswith("hist_"):
+        import re
+        m = re.match(r"hist_L(\d+)A(\d+)", which)      # hist_L2A8 / hist_L2A32 / hist_L3A27
+        if m:
+            study_hist(L=int(m.group(1)), A=int(m.group(2)))
     if which == "plot":
         plot_all()
         return
