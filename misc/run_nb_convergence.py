@@ -61,12 +61,14 @@ def _save(out, name):
 
 
 def study_A():
-    """L=2 d=1 A=1 — exact Lanczos, validates TrimCI+PT2 against truth. N_f≤6: the exact sector is
-    N_f^(n_bos=6), so N_f=6→373k (reachable) but N_f=8→2.1M (hung 68h) and N_f=16→134M. N_f=(2,3,4,
-    5,6) covers n_b=1 (N_f=2) and n_b=2 (N_f=4) exactly + convergence points — the physically relevant
-    cutoffs. n_b=3 (N_f=8) exact is out of reach here; the selected-CI shards cover it."""
+    """L=2 d=1 A=1 — exact Lanczos, validates TrimCI+PT2 ENERGY against truth. N_f≤4: the exact
+    sector is N_f^(n_bos=6), and the mixed fermion-boson Lanczos matvec is expensive even at moderate
+    dim (N_f=6→373k ran 1h18m+, N_f=8→2.1M hung 68h). N_f=(2,3,4) is fast (max 32k) and covers
+    n_b=1 (N_f=2) and n_b=2 (N_f=4) exactly — enough for the TrimCI-vs-exact energy cross-check at
+    the physical cutoffs. The DEEP-reference validation (tail vs a two-levels-deeper reference) comes
+    from the selected-CI occupation histogram (study_hist, N_f=16), not from the exact anchor."""
     out = nb_convergence_sweep(L=2, dim=1, A=1,
-                               N_f_list=(2, 3, 4, 5, 6),
+                               N_f_list=(2, 3, 4),
                                core=800, n_runs=3, seed=0)
     _save(out, "studyA_L2d1A1")
     return out
