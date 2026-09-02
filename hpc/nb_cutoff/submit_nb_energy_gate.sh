@@ -62,8 +62,10 @@ fi
 # (~202.5/site) — so BE's convergence in n_b is the physically meaningful observable, not raw E_0.
 # n_b={2,3,4} x A={0,1,32} x seed{0..4} = 45 shards (A=0 is a cheap boson-only solve).
 SH="$DIR/grid.txt"; : > "$SH"
+# right-sized after the smoke (N_f=16 @128k used 440 MB): 12G is ample headroom for the 256k n_b=2/3
+# cores too. n_b=4 caps shallower (N_f=16 H is bigger per rung).
 for NB in 2 3 4; do
-  case "$NB" in 2) MC=262144; MEM=32G;; 3) MC=262144; MEM=48G;; 4) MC=131072; MEM=64G;; esac
+  case "$NB" in 2) MC=262144; MEM=12G;; 3) MC=262144; MEM=12G;; 4) MC=131072; MEM=12G;; esac
   for A in 0 1 32; do
     for S in 0 1 2 3 4; do printf '%s %s %s %s %s\n' "$NB" "$A" "$S" "$MC" "$MEM" >> "$SH"; done
   done
