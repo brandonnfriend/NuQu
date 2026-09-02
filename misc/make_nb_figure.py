@@ -127,8 +127,11 @@ def main():
               f"wavefunction at EVERY density (A=1→32) and volume (L=2,3,4), dilute and dense. n_b=3 "
               f"saturates the tail to ~0. The quantum anchor uses n_b=2; anyone wanting <0.1% uses "
               f"n_b=3. NOTE: E_var at fixed core is NOT a clean cutoff signal (it rises with N_f from "
-              f"core-incompleteness); the ED-exact anchor (L=2 d=1, studyG occupation + study_A energy "
-              f"at N_f≤6) supplies the unconfounded validation.\n")
+              f"core-incompleteness). The unconfounded validation comes from the DEEP-reference "
+              f"occupation histogram (studyHist, N_f=16 = n_b=4; see nb_occupation_histogram) — which "
+              f"gives the SAME leaked numbers as the N_f=8 reference, so the tail is not undercounted — "
+              f"plus studyG's ED-exact occupation (L=2 d=1). The exact-energy anchor was dropped (the "
+              f"mixed fermion-boson Lanczos is pathologically slow).\n")
     open(f"{args.out_dir}/nb_cutoff_adequacy_table.md", "w").write("\n".join(md) + "\n")
     print(f"[tbl] wrote {args.out_dir}/nb_cutoff_adequacy_table.md")
     print("[done] " + " | ".join(f"L{r['L']}A{r['A']}:{r['leak2']*100:.2f}%" for r in recs))
