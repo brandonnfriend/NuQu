@@ -16,7 +16,11 @@
 #       && git checkout remediation/vertex-fix && git reset --hard origin/remediation/vertex-fix
 #   cd hpc/nb_cutoff
 #   sh submit_nb_energy_gate.sh test   # 1 heaviest shard (n_b=4,A=32,seed0) — de-risk N_f=16 @256k
-#   sh submit_nb_energy_gate.sh        # n_b={2,3,4} x A={1,32} x seed{0..4} = 30 shards
+#   sh submit_nb_energy_gate.sh        # n_b={2,3,4} x A={0,1,32} x seed{0..4} = 45 shards
+#
+# Observables tracked per rung (run_frame_shard stores them): E_var (E_0), <N>/mode (pion occupation),
+# occupation tail. Derived post-hoc: BINDING ENERGY BE(A)=A*E(1)-(A-1)*E(0)-E(A) (needs A=0,1,A), and
+# lambda(n_b) (the block-encoding 1-norm that sets N_walk) reported separately as the cost sensitivity.
 set -eu
 MODE="${1:-run}"
 BASE="$(date +%Y%m%d-%H%M%S)-nbEgate"
@@ -53,11 +57,14 @@ EOF
   exit 0
 fi
 
-# build the 30-shard grid: NB A SEED MAXCORE MEM  (n_b=4 capped shallower + more memory)
+# build the grid: NB A SEED MAXCORE MEM.  A=0 (pion vacuum, no nucleons) is the reference for the
+# BINDING ENERGY BE(A) = A*E(1) - (A-1)*E(0) - E(A), which subtracts the large pion-vacuum energy
+# (~202.5/site) — so BE's convergence in n_b is the physically meaningful observable, not raw E_0.
+# n_b={2,3,4} x A={0,1,32} x seed{0..4} = 45 shards (A=0 is a cheap boson-only solve).
 SH="$DIR/grid.txt"; : > "$SH"
 for NB in 2 3 4; do
   case "$NB" in 2) MC=262144; MEM=32G;; 3) MC=262144; MEM=48G;; 4) MC=131072; MEM=64G;; esac
-  for A in 1 32; do
+  for A in 0 1 32; do
     for S in 0 1 2 3 4; do printf '%s %s %s %s %s\n' "$NB" "$A" "$S" "$MC" "$MEM" >> "$SH"; done
   done
 done
