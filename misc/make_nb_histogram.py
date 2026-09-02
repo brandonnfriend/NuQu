@@ -1,9 +1,11 @@
-"""Boson occupation POPULATION HISTOGRAM — the direct validation that n_b=2 clips a <1% tail.
+"""Boson occupation POPULATION HISTOGRAM of the selected-CI reference state (DIAGNOSTIC).
 
-x-axis = boson occupation level n; y-axis = |c|²-weighted population p(n) at the DEEP reference
-(N_f=16 = n_b=4, two levels past the n_b=2 cut). A cutoff at N_f=4 keeps levels n≤3 (n_b=2); the
-weight beyond it (Σ_{n≥4} p(n)) is the leaked tail — shown to be <1% AND to die off well before the
-reference cutoff, so the number isn't undercounted by a too-shallow reference.
+x-axis = boson occupation level n; y-axis = PER-MODE |c|²-weighted population p(n) at the deep
+reference (N_f=16 = n_b=4). The n_b=2 cut (N_f=4) keeps levels n≤3; the tail beyond it is small and
+the N_f=8→16 reruns agree — but this is a SELECTED-STATE diagnostic (each state holds only ~1.5–3k
+determinants), NOT a solver-convergence proof of the true tail, and NOT an energy/observable error
+bound (per the 2026-09-02 cutoff audit). It motivates n_b=2; the energy gate is the separate L=2
+study. NB: bars are per-mode p(n); the quoted percentages are whole-lattice P(∃ mode ≥ N).
 
     python -m misc.make_nb_histogram --data data/classical/nb_convergence
 """
@@ -67,8 +69,9 @@ def make_figure(recs, out_base):
 
     for r, c in zip(recs, cols):
         n = np.arange(r["p"].size)
+        # bars are PER-MODE p(n); the quoted % is the WHOLE-LATTICE P(∃ mode≥4) (different metric)
         lbl = (f"$L$={r['L']}, $A$={r['A']}" + (" (dense)" if r["A"] >= r["L"] ** r["dim"] else "")
-               + f"  —  n_b=2 leak {r['px_nb2']*100:.2f}%")
+               + f"  —  P(∃ mode≥4) = {r['px_nb2']*100:.2f}%")
         ax.step(n, np.clip(r["p"], 1e-9, None), where="mid", color=c, lw=1.9, zorder=4, label=lbl)
         ax.plot(n, np.clip(r["p"], 1e-9, None), "o", color=c, ms=3.5, mec=SURFACE, mew=0.5, zorder=5)
 
@@ -77,14 +80,17 @@ def make_figure(recs, out_base):
     ax.set_xlim(-0.5, min(nmax - 0.5, 11.5))
     ax.set_xticks(range(0, min(nmax, 12)))
     ax.set_xlabel("boson occupation level $n$  (a mode holds $n$ pions)", color=INK2, fontsize=10)
-    ax.set_ylabel("population  $p(n)$  (|c|²-weighted fraction of modes)", color=INK2, fontsize=10)
-    ax.set_title("Boson occupation histogram — n_b=2 clips only a <1% tail (deep reference $N_f$=16, "
-                 "n_b=4)", color=INK, fontsize=11.5, loc="left", weight="bold")
+    ax.set_ylabel("PER-MODE population  $p(n)$  (|c|²-weighted fraction of modes)", color=INK2, fontsize=10)
+    ax.set_title("Selected-CI occupation histogram — no population near the $N_f$=16 boundary "
+                 "(bars = per-mode $p(n)$; legend = whole-lattice P)", color=INK, fontsize=10.3,
+                 loc="left", weight="bold")
     ax.legend(frameon=False, fontsize=8.5, loc="upper right", labelcolor=INK2)
     _style(ax)
-    # annotate that the tail is dead well before the reference cutoff
-    ax.annotate("tail dead ($p<10^{-5}$) well before\nthe $N_f$=16 reference → not undercounted",
-                (7.5, 3e-5), color=MUTED, fontsize=8, ha="left", style="italic")
+    # diagnostic caveat: agreement with N_f=8 shows the same low-occupation SELECTED basin, not that
+    # the true tail is solver-converged (each state has only ~1.5-3k determinants).
+    ax.annotate("no selected population beyond $n$≈6 → same low-occupation basin\nas $N_f$=8 (a "
+                "selected-state diagnostic, NOT solver-convergence of the true tail)",
+                (5.4, 4e-6), color=MUTED, fontsize=7.5, ha="left", style="italic")
 
     fig.tight_layout()
     for ext in ("pdf", "png"):
@@ -101,23 +107,28 @@ def main():
     assert recs, "no studyHist_*.json with occ_histogram found — run submit_nb_hist.sh first"
     make_figure(recs, f"{args.out_dir}/nb_occupation_histogram")
 
-    md = ["# Boson occupation histogram — n_b=2 clips a <1% tail (deep N_f=16 reference)\n",
-          "_Per-level population p(n) on the N_f=16 (n_b=4) solve — two levels past the n_b=2 cut, so "
-          "the tail is fully resolved (not undercounted by a shallow reference). n_b=2 keeps levels "
-          "n≤3. Two truncation metrics: the per-mode histogram tail Σ_{n≥4} p(n), and the whole-"
-          "lattice leaked weight P(∃ mode ≥ 4) — the conservative one (= the topic-04 adequacy fig)._\n",
-          "| L | A | filling | n_b=2 per-mode Σp(n≥4) | **n_b=2 leaked P(∃≥4)** | n_b=1 leaked P(∃≥2) |",
+    md = ["# Selected-CI occupation histogram vs boson level (deep N_f=16 reference)\n",
+          "_Per-level population p(n) of the SELECTED-CI reference state at N_f=16 (n_b=4). Two "
+          "metrics: the per-mode histogram tail Σ_{n≥4} p(n), and the whole-lattice P(∃ mode ≥ 4) "
+          "(they differ by ~the mode count). DIAGNOSTIC, not an energy bound: agreement with the N_f=8 "
+          "reference shows the same low-occupation SELECTED basin was found — with only ~1.5–3k "
+          "determinants in an astronomical space — NOT that the true ground-state tail is "
+          "solver-converged._\n",
+          "| L | A | filling | n_b=2 per-mode Σp(n≥4) | **n_b=2 P(∃≥4)** | n_b=1 P(∃≥2) |",
           "|--:|--:|:--|--:|--:|--:|"]
     for r in recs:
         md.append(f"| {r['L']} | {r['A']} | {r['fill']:.2f}"
                   f"{' (dense)' if r['A'] >= r['L']**r['dim'] else ''} | {r['leak_nb2']*100:.3f}% | "
                   f"**{r['px_nb2']*100:.2f}%** | {r['px_nb1']*100:.1f}% |")
     worst = max(r["px_nb2"] for r in recs)
-    md.append(f"\n**Reading:** the population dies off by n≈4–6 (p<10⁻⁵ well before the N_f=16 "
-              f"reference), so the tail is fully captured — not undercounted. n_b=1 leaks "
-              f"{min(r['px_nb1'] for r in recs)*100:.0f}–{max(r['px_nb1'] for r in recs)*100:.0f}%; "
-              f"**n_b=2 leaks at most {worst*100:.2f}% (<1%)** and n_b=3 ~0. Confirms n_b=2 adequacy "
-              f"against a reference two n_b deeper than the cut.\n")
+    md.append(f"\n**Reading (diagnostic):** the selected state has no population beyond n≈6, and the "
+              f"N_f=8→16 reruns give the same tail — so the found basin is low-occupation. n_b=1 P(∃≥2) "
+              f"is {min(r['px_nb1'] for r in recs)*100:.0f}–{max(r['px_nb1'] for r in recs)*100:.0f}% "
+              f"(strongly rejected); n_b=2 P(∃≥4) is at most {worst*100:.2f}%. This MOTIVATES n_b=2 but "
+              f"does NOT bound the energy truncation error, nor prove solver-convergence of the true "
+              f"tail (fixed ~few-k-determinant support). The energy gate (E_0(N_f) at core-converged "
+              f"states, with seed uncertainty) is the separate L=2 study; the anchor stays conditional "
+              f"on n_b=2 until it passes.\n")
     open(f"{args.out_dir}/nb_occupation_histogram_table.md", "w").write("\n".join(md) + "\n")
     print(f"[tbl] wrote {args.out_dir}/nb_occupation_histogram_table.md")
     print("[done] " + " | ".join(f"L{r['L']}A{r['A']}: n_b2 tail {r['leak_nb2']*100:.2f}%" for r in recs))
