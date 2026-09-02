@@ -23,18 +23,24 @@ ADEQ = 0.01                                                  # 1% adequacy budge
 
 
 def load(d):
-    recs = []
+    # dedup by (L,A): the deep-reference studyHist_* (N_f=16) and the studyBdenseCheap_* (N_f=8) both
+    # carry the same config — keep the one with the DEEPEST reference (largest Nf_deepest).
+    best = {}
     for f in sorted(glob.glob(f"{d}/study*.json")):
         j = json.load(open(f))
         lw = j.get("leaked_weight_vs_cutoff") or {}
         if not lw:
             continue
-        recs.append(dict(L=j["L"], A=j["A"], dim=j.get("dim", 3),
-                         fill=j["A"] / (j["L"] ** j.get("dim", 3)),
-                         leak1=lw.get("2"), leak2=lw.get("4"),
-                         dense=(abs(j["A"] / (j["L"] ** j.get("dim", 3)) - round(j["A"] / (j["L"] ** j.get("dim", 3)))) < 1e-9 and j["A"] >= j["L"] ** j.get("dim", 3))))
-    recs.sort(key=lambda r: (r["L"], r["A"]))
-    return recs
+        dim = j.get("dim", 3)
+        fill = j["A"] / (j["L"] ** dim)
+        nf = j.get("Nf_deepest", j.get("Nf_ref", 0)) or 0
+        rec = dict(L=j["L"], A=j["A"], dim=dim, Nf=nf, fill=fill,
+                   leak1=lw.get("2"), leak2=lw.get("4"),
+                   dense=(abs(fill - round(fill)) < 1e-9 and j["A"] >= j["L"] ** dim))
+        key = (j["L"], j["A"])
+        if key not in best or nf > best[key]["Nf"]:
+            best[key] = rec
+    return sorted(best.values(), key=lambda r: (r["L"], r["A"]))
 
 
 def _style(ax):
