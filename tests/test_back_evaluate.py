@@ -94,9 +94,63 @@ def test_convergence_is_enforced():
         pass
 
 
+def test_eps_leak_reported_and_shrinks_with_reference_cutoff():
+    """eps_leak = 1 - norm_ratio^2 is in [0,1], matches the identity, and does not GROW when
+    the map-back reference H uses a larger Fock cutoff (the silent-ceiling-leak fix): a higher
+    ceiling captures more of U|psi~>, so the leaked norm can only shrink."""
+    H_solve = build_from_eft(L, DIM, N_B)                       # solve at n_b=1 (N_f=2)
+    state, res, H_frame, info = initial_frame_state(
+        H_solve, A, has_gaussian=True, has_lf=True, core=120, num_runs=8, seed=0)
+    r_small = back_evaluate_frame(H_solve, state, res)          # reference N_f=2
+    r_big = back_evaluate_frame(build_from_eft(L, DIM, 3), state, res)   # reference N_f=8
+    for rr in (r_small, r_big):
+        assert 0.0 <= rr['eps_leak'] <= 1.0
+        assert abs((1.0 - rr['norm_ratio'] ** 2) - rr['eps_leak']) < 1e-12
+    assert r_big['eps_leak'] <= r_small['eps_leak'] + 1e-9, "bigger ceiling should not leak more"
+
+
+def test_coo_is_isospectral_operator_identity():
+    """COO (fermion orbital rotation) is an EXACT operator identity: at full ED the framed
+    spectrum equals the bare one, so E_frame is DIRECTLY variational (no back-eval needed) —
+    the reason the benchmark routes COO around the map-back. Also confirms back_evaluate_frame
+    refuses a COO (R) map-back."""
+    from classical.trimci.frame import natural_orbital_terms
+    H_bare = build_from_eft(L, DIM, N_B)
+    _, _, e0 = _ground_vector(H_bare, A)
+    _, _, e_coo = _ground_vector(natural_orbital_terms(H_bare, A), A)
+    assert abs(e_coo - e0) < 1e-6, f"COO not isospectral at full ED: {e_coo - e0:+.2e}"
+    try:
+        back_evaluate_frame(H_bare, {'R': np.eye(2)}, {})
+        assert False, "expected NotImplementedError for COO map-back"
+    except NotImplementedError:
+        pass
+
+
+def test_kato_temple_brackets_ground_energy():
+    """Ritz upper bound (E_orig) + Kato-Temple lower bound bracket the true E_0 on a tiny ED
+    system (LF-framed state back-evaluated)."""
+    from classical.trimci.back_evaluate import kato_temple_lower
+    from classical.trimci.frame import _low_spectrum
+    H = build_from_eft(L, DIM, N_B)
+    ev = [float(e) for e in _low_spectrum(H, A, k=12)]
+    e0 = ev[0]
+    above = [e for e in ev if e > e0 + 1e-6]                    # skip degenerate ground multiplet
+    e1 = above[0] if above else None
+    state, res, H_frame, info = initial_frame_state(
+        H, A, has_gaussian=True, has_lf=True, core=120, num_runs=8, seed=0)
+    r = back_evaluate_frame(H, state, res)
+    assert r['E_orig'] >= e0 - 1e-6, "Ritz upper bound below true E_0"
+    if e1 is not None and r['E_orig'] < e1:                     # KT hypothesis beta > E
+        kt = kato_temple_lower(r['E_orig'], r['residual'], e1)
+        assert kt is not None and kt <= e0 + 1e-6, f"KT lower bound above true E_0 ({kt} > {e0})"
+
+
 def main():
     for fn in (test_pure_lf_ritz_and_dense_match, test_composed_gaussian_lf_matches_dense,
-               test_production_result_interface, test_convergence_is_enforced):
+               test_production_result_interface, test_convergence_is_enforced,
+               test_eps_leak_reported_and_shrinks_with_reference_cutoff,
+               test_coo_is_isospectral_operator_identity,
+               test_kato_temple_brackets_ground_energy):
         fn()
         print(f"  PASS {fn.__name__}")
     # headline demo

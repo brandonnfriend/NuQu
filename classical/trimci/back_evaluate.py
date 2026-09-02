@@ -117,6 +117,22 @@ def exp_generator_apply(S, lam, state_dict, N_f, max_order=200, tol=1e-12, suppo
     return {s: c for s, c in psi.items() if abs(c) > 1e-14}, info
 
 
+def kato_temple_lower(E, residual, beta):
+    """Kato–Temple certified LOWER bound on the true ground energy from a Rayleigh
+    quotient `E`, its residual norm `residual = ‖(H−E)ψ‖/‖ψ‖`, and `beta` — ANY rigorous
+    lower bound on the FIRST EXCITED level (E_1) with `beta > E`. Then
+        E − residual² / (beta − E)  ≤  E_0  ≤  E.
+    Together with the Ritz upper bound `E`, this brackets E_0 in a certified interval at
+    zero extra cost (the residual is already computed by `rayleigh`). Returns None if the
+    hypothesis `beta > E` fails (can't certify) or inputs are missing. See Kato 1949 /
+    Temple 1928; the residual is the honest one from the mapped-back (variational) state."""
+    if E is None or residual is None or beta is None:
+        return None
+    if not (beta > E):
+        return None
+    return float(E - (residual ** 2) / (beta - E))
+
+
 def rayleigh(H_ref, state_dict):
     """`(E, residual)` = `⟨ψ|H_ref|ψ⟩/⟨ψ|ψ⟩` and `‖(H_ref−E)ψ‖/‖ψ‖`, sparse (matrix-free)."""
     Hpsi = {}
@@ -144,13 +160,19 @@ def back_evaluate(H_ref, S, lam, state_dict, max_order=200, tol=1e-12, strict=Fa
             f"exp(λS) map-back did not converge (order {info['order']}, "
             f"tail_bound {info['tail_bound']}) — tighten max_order/tol or reduce λ‖S‖")
     E, resid = rayleigh(H_ref, psi)
+    nr = _norm(psi) / max(_norm(state_dict), 1e-300)
     return {
         'E_orig': E, 'residual': resid,
         'support_in': len(state_dict), 'support_out': len(psi),
         'max_support': info['max_support'], 'dropped_weight': info['dropped_weight'],
         'taylor_order': info['order'], 'converged': info['converged'],
         'tail_bound': info['tail_bound'], 'max_term_norm': info['max_term_norm'],
-        'norm_ratio': _norm(psi) / max(_norm(state_dict), 1e-300),
+        'norm_ratio': nr,
+        # ε_leak = 1 − ‖P_{N_f} U|ψ̃⟩‖² / ‖U|ψ̃⟩‖²: the exact state-specific norm the frame
+        # unitary pushes past the Fock ceiling (U is unitary ⇒ ‖U|ψ̃⟩‖=‖|ψ̃⟩‖). It quantifies
+        # how TIGHT E_orig is (validity never depends on it; ε_leak→0 ⇒ back-eval is exact for
+        # this state). Meaningful only with support_cap=None (else it conflates cap pruning).
+        'eps_leak': max(0.0, 1.0 - nr * nr),
     }
 
 
@@ -249,9 +271,14 @@ def back_evaluate_frame(H_bare, state, result, strict=False, max_order=200, tol=
     if strict and not converged:
         raise RuntimeError(f"composed frame map-back did not converge: steps={steps}")
     E, resid = rayleigh(H_bare, psi)
+    nr = _norm(psi) / max(_norm(sd), 1e-300)
     out = {'E_orig': E, 'residual': resid, 'support_in': len(sd), 'support_out': len(psi),
            'max_support': max_supp, 'dropped_weight': dropped, 'map_steps': steps,
-           'converged': converged, 'norm_ratio': _norm(psi) / max(_norm(sd), 1e-300)}
+           'converged': converged, 'norm_ratio': nr,
+           # ε_leak = 1 − ‖P_{N_f} U|ψ̃⟩‖²: norm the composed frame unitary leaks past the Fock
+           # ceiling for THIS state (the silent hij.py ceiling drop, now surfaced). Sets how
+           # TIGHT E_orig is, not its validity. Raise the reference N_f (H_bare) if it's large.
+           'eps_leak': max(0.0, 1.0 - nr * nr)}
     ef = None if isinstance(result, dict) else getattr(result, 'energy', None)
     if ef is not None:
         out['E_frame'] = float(ef)

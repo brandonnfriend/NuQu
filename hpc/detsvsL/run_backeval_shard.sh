@@ -56,9 +56,17 @@ case "${NUQU_SUPPORT_CAP:-}" in
     *) CAP_ARG="--support-cap ${NUQU_SUPPORT_CAP}"; CAP_TAG="_cap${NUQU_SUPPORT_CAP}" ;;
 esac
 OUT="$OUTDIR/backeval_${FRAME}_L${L}d${DIM}nb${NB}${FTAG}${CAP_TAG}_s${SEED}.json"
+# NUQU_BACKEVAL_NF: score the LF map-back against a LARGER-cutoff reference H (kills the silent
+#   Fock-ceiling leak; the per-core eps_leak verifies the ceiling is high enough -> 0).
+# NUQU_EXACT_REF: guarded Lanczos E_0/E_1 anchor -> gap_orig + Kato-Temple interval (small ED only).
+BKNF_ARG=""
+case "${NUQU_BACKEVAL_NF:-}" in ""|"-"|"none"|"0") : ;; *) BKNF_ARG="--back-eval-nf ${NUQU_BACKEVAL_NF}" ;; esac
+EXREF_ARG=""
+case "${NUQU_EXACT_REF:-}" in ""|"-"|"none"|"0") : ;; *) EXREF_ARG="--exact-ref --exact-max-mem-gb ${NUQU_EXACT_MAX_MEM_GB:-24}" ;; esac
 # shellcheck disable=SC2086
 "$PY" -m misc.run_backeval_benchmark --L "$L" --dim "$DIM" --n_b "$NB" --frame "$FRAME" \
-    --cores "$CORES" --A "$A" $FILL_ARG $CAP_ARG --num-runs "$NRUNS" --seed "$SEED" --out "$OUT"
+    --cores "$CORES" --A "$A" $FILL_ARG $CAP_ARG $BKNF_ARG $EXREF_ARG \
+    --num-runs "$NRUNS" --seed "$SEED" --out "$OUT"
 status=$?
 echo "[bkshard] done status=$status -> $OUT"
 exit "$status"
