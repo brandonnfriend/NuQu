@@ -23,6 +23,7 @@ import tracemalloc
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from classical.trimci.hamiltonian import build_from_eft
+from classical.trimci.frame import squeeze_terms
 from classical.trimci.frame_workflow import initial_frame_state, apply_frame, _solver, new_frame_state
 from classical.trimci.back_evaluate import (back_evaluate_frame, kato_temple_lower,
                                             rayleigh, state_dict_from_result)
@@ -110,9 +111,11 @@ def run_benchmark(L, dim, n_b, frame, cores, A=1, seed=0, num_runs=16,
         os.replace(tmp, out)
 
     save()
-    # gaussian/LF frames map back through the EXACT unitary; COO/bare are operator-identity
-    # (E_frame already variational) so they skip the map-back (COO's R would raise anyway).
-    do_backeval = has_lf or (has_g and not has_coo)
+    # ONLY LF frames back-evaluate. squeeze (gaussian) and COO are operator-identity builds, so
+    # their E_frame is already a Ritz-valid variational bound — back-evaluating the squeeze would
+    # also fan its Taylor map-back over EVERY boson mode up to N_f_ref (an all-modes combinatorial
+    # explosion that OOMs at d=3). See docs/lf_backevaluation.md + the theory verdict.
+    do_backeval = has_lf
     for core in cores:
         t0 = time.time()
         res = solve(H_frame, n_elec=A, n_dets=core, n_runs=num_runs, seed=seed)
@@ -132,7 +135,17 @@ def run_benchmark(L, dim, n_b, frame, cores, A=1, seed=0, num_runs=16,
             try:
                 tracemalloc.start()
                 t1 = time.time()
-                be = back_evaluate_frame(H_ref, state, res, support_cap=support_cap)
+                # Back-evaluate ONLY the LF displacement (bounded, fermion-local) and score against
+                # the SQUEEZED operator-identity reference H_sq = U_sq†·H_ref·U_sq (an EXACT
+                # degree-≤2 term list). This equals the full composed ⟨U_sq U_lf ψ̃|H|U_sq U_lf ψ̃⟩
+                # but never Taylor-propagates U_sq over the boson modes (the all-modes fan-out that
+                # OOMs). For pure LF (no squeeze) H_score = H_ref and the map is unchanged.
+                H_score = H_ref
+                lf_state = dict(state)
+                if has_g:
+                    H_score = squeeze_terms(H_ref, state['r'], state.get('phi', 0.0))
+                    lf_state['r'] = None                 # skip the squeeze map in back_evaluate_frame
+                be = back_evaluate_frame(H_score, lf_state, res, support_cap=support_cap)
                 be_s = time.time() - t1
                 peak = tracemalloc.get_traced_memory()[1] / 1e6
                 tracemalloc.stop()

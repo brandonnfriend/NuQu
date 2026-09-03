@@ -137,4 +137,19 @@ The Λ audit at L=2, dim=3, A=2 measured **c_Π · Π_max² = 73.25%** of Λ and
   the squeezed n_b=1 register reaches E=460.37, below the bare n_b=2 energy 461.32 (the "similar-enough
   n_b" win in miniature). **STAGED, not launched — awaiting push + go-ahead** (smoke one shard first
   to calibrate CPU-h). Pre-fix frame energy numbers stay retired.
+- **Frame-isospectrality campaign — first run + OOM fix + prelim results (2026-09-03, cluster 291037 → re-run).**
+  Launched the 66-shard grid (smoke `291036` clean). **40 finished, 26 OOM'd** — root cause was a routing bug:
+  squeeze-containing frames were sent into back-evaluation, and the squeeze Taylor map-back fans over EVERY
+  boson mode (24 at L2d3, 81 at L3d3) up to N_f_ref → combinatorial OOM (+ a few L3 solves near the 48G limit).
+  **Fix** (`misc/run_backeval_benchmark.py`): `do_backeval = has_lf` only (squeeze/COO are operator-identity →
+  E_frame already variational, no map-back); LF frames back-evaluate ONLY the LF displacement (bounded,
+  fermion-local) and score against the SQUEEZED operator-identity reference `H_sq = U_sq†·H_ref·U_sq` (exact
+  term list) — the same bound, no all-modes fan-out (also removes a squeeze-Taylor-ceiling artifact ⇒ E_orig
+  slightly tighter). Re-run of the 26 via `submit_frame_isospectrality_rerun.sh` (L2 32G / L3 96G, support-cap
+  200k on the 6 dense-filling LF shards). **Prelim science from the 40 done:** (1) anchor L2d1 validates Ritz +
+  Kato-Temple bracket + operator-identity; (2) cutoff converges by **n_b=3** across all frames (n_b=2 within
+  ~3-4 MeV), near-vacuum framed occupation ⇒ low n_b suffices; (3) **`gaussian+coo` wins big and the win GROWS
+  with filling and L**: dE_vs_bare = **−125 → −237 MeV** (L2, f0.5→f1.0), **−610 MeV** (L3, f0.5); COO alone
+  also grows with filling; LF alone marginal. The two headline frames (`gaussian`, `gaussian+lf`) were the OOM
+  victims and are in the re-run.
 - Current uncommitted changes — verify with `git diff` before assuming.
