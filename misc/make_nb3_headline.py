@@ -47,20 +47,28 @@ def _style(ax):
 
 
 def build(nb2, nb3):
-    """Return per-L dict with n_b=3 T + qubits: exact where available, else scaled from n_b=2."""
-    exactL = sorted(nb3)
-    # L-stable scaling factors from the exact overlap (use L>=4 asymptote)
-    big = [L for L in exactL if L >= 4]
-    Tr = st.mean(nb3[L]["T"] / nb2[L]["T"] for L in big)
-    qr = st.mean(nb3[L]["q"] / nb2[L]["q"] for L in big)
-    lamr = st.mean(nb3[L]["lam"] / nb2[L]["lam"] for L in big)
+    """Per-L dict with n_b=3 T + qubits: exact where the n_b=3 shard exists, else PROJECTED from the
+    n_b=2 anchor by the L≥4 ratios — with a BAND from the observed ratio VARIATION (not just the mean,
+    per re-audit P0-5). Missing L (no n_b=2 either) are skipped."""
+    big = [L for L in sorted(nb3) if L >= 4 and L in nb2]
+    if not big:                                            # fall back to any common L if <4 overlap
+        big = [L for L in sorted(nb3) if L in nb2]
+    Trs = [nb3[L]["T"] / nb2[L]["T"] for L in big]
+    qrs = [nb3[L]["q"] / nb2[L]["q"] for L in big]
+    lrs = [nb3[L]["lam"] / nb2[L]["lam"] for L in big]
+    Tr, qr, lamr = st.mean(Trs), st.mean(qrs), st.mean(lrs)
     rows = {}
     for L in sorted(nb2):
-        if L in nb3:
-            rows[L] = dict(T=nb3[L]["T"], q=nb3[L]["q"], lam=nb3[L]["lam"], exact=True)
-        else:
-            rows[L] = dict(T=nb2[L]["T"] * Tr, q=nb2[L]["q"] * qr, lam=nb2[L]["lam"] * lamr, exact=False)
-    return rows, dict(Tr=Tr, qr=qr, lamr=lamr)
+        if L in nb3:                                       # direct compiled
+            rows[L] = dict(T=nb3[L]["T"], q=nb3[L]["q"], lam=nb3[L]["lam"], exact=True,
+                           Tlo=nb3[L]["T"], Thi=nb3[L]["T"], qlo=nb3[L]["q"], qhi=nb3[L]["q"])
+        else:                                              # projected + band from ratio spread
+            rows[L] = dict(T=nb2[L]["T"] * Tr, q=nb2[L]["q"] * qr, lam=nb2[L]["lam"] * lamr, exact=False,
+                           Tlo=nb2[L]["T"] * min(Trs), Thi=nb2[L]["T"] * max(Trs),
+                           qlo=nb2[L]["q"] * min(qrs), qhi=nb2[L]["q"] * max(qrs))
+    sc = dict(Tr=Tr, qr=qr, lamr=lamr, Trange=(min(Trs), max(Trs)), qrange=(min(qrs), max(qrs)),
+              lamrange=(min(lrs), max(lrs)), fitL=big)
+    return rows, sc
 
 
 def main():
@@ -82,57 +90,68 @@ def main():
                  zorder=3, label="n_b=2 (under-converged)")
     ex = [L for L in Ls if rows[L]["exact"]]; sc_ = [L for L in Ls if not rows[L]["exact"]]
     axT.semilogy(ex, [rows[L]["T"] for L in ex], "-o", color=CRIT, lw=2.2, ms=7, mec=SURFACE, mew=1.2,
-                 zorder=5, label="n_b=3 EXACT (converged)")
-    axT.semilogy(sc_, [rows[L]["T"] for L in sc_], "o", color=CRIT, ms=8, mfc="none", mew=1.8,
-                 zorder=5, label=f"n_b=3 scaled (×{sc['Tr']:.0f})")
+                 zorder=5, label=f"n_b=3 COMPILED (L=1..{max(ex)})")
+    if sc_:
+        yerr = [[rows[L]["T"] - rows[L]["Tlo"] for L in sc_], [rows[L]["Thi"] - rows[L]["T"] for L in sc_]]
+        axT.errorbar(sc_, [rows[L]["T"] for L in sc_], yerr=yerr, fmt="o", color=CRIT, ms=8, mfc="none",
+                     mew=1.8, capsize=4, elinewidth=1.4, zorder=5, label="n_b=3 PROJECTED (ratio band)")
     axT.set_xlabel("lattice size $L$", color=INK2, fontsize=9.5)
     axT.set_ylabel("QPE coherent-query $T$-count ($\\pi$, $\\Delta E$=1 MeV)", color=INK2, fontsize=9.5)
-    axT.set_title(f"a  Corrected T-count — n_b=3 is ×{sc['Tr']:.0f} the n_b=2 headline", color=INK,
-                  fontsize=10.3, loc="left", weight="bold")
+    axT.set_title(f"a  T-count — n_b=3 is ×{sc['Trange'][0]:.0f}–{sc['Trange'][1]:.0f} the n_b=2 value",
+                  color=INK, fontsize=10.0, loc="left", weight="bold")
     axT.legend(frameon=False, fontsize=8, loc="upper left", labelcolor=INK2)
     _style(axT)
     # qubits
     axQ.plot(Ls, [nb2[L]["q"] for L in Ls], "--s", color=MUTED, lw=1.6, ms=5, mec=SURFACE, mew=1.0,
-             zorder=3, label="n_b=2")
+             zorder=3, label="n_b=2 (historical low cutoff)")
     axQ.plot(ex, [rows[L]["q"] for L in ex], "-o", color=BLUE, lw=2.2, ms=7, mec=SURFACE, mew=1.2,
-             zorder=5, label="n_b=3 exact")
-    axQ.plot(sc_, [rows[L]["q"] for L in sc_], "o", color=BLUE, ms=8, mfc="none", mew=1.8, zorder=5,
-             label=f"n_b=3 scaled (×{sc['qr']:.2f})")
+             zorder=5, label="n_b=3 compiled")
+    if sc_:
+        qerr = [[rows[L]["q"] - rows[L]["qlo"] for L in sc_], [rows[L]["qhi"] - rows[L]["q"] for L in sc_]]
+        axQ.errorbar(sc_, [rows[L]["q"] for L in sc_], yerr=qerr, fmt="o", color=BLUE, ms=8, mfc="none",
+                     mew=1.8, capsize=4, elinewidth=1.4, zorder=5, label="n_b=3 projected")
     axQ.set_xlabel("lattice size $L$", color=INK2, fontsize=9.5)
     axQ.set_ylabel("total logical qubits", color=INK2, fontsize=9.5)
     axQ.set_title(f"b  Logical qubits — n_b=3 is ×{sc['qr']:.2f}", color=INK, fontsize=10.3,
                   loc="left", weight="bold")
     axQ.legend(frameon=False, fontsize=8, loc="upper left", labelcolor=INK2)
     _style(axQ)
-    fig.suptitle("Quantum headline at the CONVERGED cutoff n_b=3 (energy gate: n_b=2 under-converged)",
-                 fontsize=11.0, color=INK, y=1.02, x=0.01, ha="left")
+    fig.suptitle("Quantum headline at the L=2-selected cutoff n_b=3 — COMPILED L=1..%d + PROJECTED "
+                 "L=%d..10 (ratio band)" % (max(ex), max(ex) + 1), fontsize=10.6, color=INK,
+                 y=1.02, x=0.01, ha="left")
     fig.tight_layout(rect=(0, 0, 1, 0.96))
     for e in ("pdf", "png"):
         fig.savefig(f"{args.out_dir}/nb3_headline.{e}", dpi=200, bbox_inches="tight", facecolor=SURFACE)
     print(f"[fig] wrote {args.out_dir}/nb3_headline.pdf / .png")
 
-    md = ["# Corrected quantum headline — converged cutoff n_b=3\n",
-          f"_The energy gate showed n_b=2 is under-converged; n_b=3 is the converged cutoff. Exact "
-          f"n_b=3 compile for L=1..{max(nb3)}; L>{max(nb3)} scaled from the n_b=2 anchor by the "
-          f"L-stable (L≥4) ratios: λ ×{sc['lamr']:.2f}, coherent-T ×{sc['Tr']:.1f}, qubits "
-          f"×{sc['qr']:.3f}. π walk constant, ΔE=1 MeV._\n",
-          "| L | T(n_b=2) | **T(n_b=3)** | ×T | qubits(n_b=2) | **qubits(n_b=3)** | source |",
+    exmax = max(L for L in rows if rows[L]["exact"])
+    md = ["# Quantum headline at the L=2-selected cutoff n_b=3 — compiled L=1..%d + projected L=%d..10\n"
+          % (exmax, exmax + 1),
+          f"_The L=2 energy gate rejected n_b=2 and found n_b=3≈n_b=4 (at L=2); n_b=3 is the selected "
+          f"cutoff scenario. **Direct compiled** n_b=3 for L=1..{exmax}; **ratio-PROJECTED** L={exmax+1}"
+          f"..10 (not compiled) — projection uses the L≥4 ratios with a BAND from their variation: "
+          f"λ ×{sc['lamrange'][0]:.2f}–{sc['lamrange'][1]:.2f}, coherent-T ×{sc['Trange'][0]:.1f}–"
+          f"{sc['Trange'][1]:.1f}, qubits ×{sc['qrange'][0]:.3f}–{sc['qrange'][1]:.3f} (fit on L="
+          f"{sc['fitL']}). π walk constant, ΔE=1 MeV. Large-volume cutoff adequacy is CONDITIONAL "
+          f"(P0-4)._\n",
+          "| L | T(n_b=2) | **T(n_b=3)** | band | ×T | qubits(n_b=3) | source |",
           "|--:|--:|--:|--:|--:|--:|:--|"]
     for L in Ls:
         r = rows[L]
-        md.append(f"| {L} | {nb2[L]['T']:.2e} | **{r['T']:.2e}** | {r['T']/nb2[L]['T']:.0f} | "
-                  f"{nb2[L]['q']} | **{r['q']:.0f}** | {'exact' if r['exact'] else 'scaled'} |")
+        band = "—" if r["exact"] else f"[{r['Tlo']:.1e}, {r['Thi']:.1e}]"
+        md.append(f"| {L} | {nb2[L]['T']:.2e} | **{r['T']:.2e}** | {band} | {r['T']/nb2[L]['T']:.0f} | "
+                  f"**{r['q']:.0f}** | {'compiled' if r['exact'] else 'projected'} |")
     L10 = rows[10]
-    md.append(f"\n**Headline (L=10, A-independent):** corrected QPE coherent-query T ≈ **{L10['T']:.2e}** "
-              f"(n_b=2 was {nb2[10]['T']:.2e}, ×{L10['T']/nb2[10]['T']:.0f} low), total logical qubits "
-              f"≈ **{L10['q']:.0f}**. The ×{sc['Tr']:.0f} T increase = λ ×{sc['lamr']:.2f} × per-step "
-              f"walk_T ×{sc['Tr']/sc['lamr']:.1f} (bigger Fock register + more Pauli terms). Conditional "
-              f"note discharged: n_b=3 is the converged cutoff (energy gate); n_b=4 changes E_0 by "
-              f"0.01 MeV. Caveat: gate is L=2 (per-mode cutoff ~L-independent); L=3 trap-limited.\n")
+    md.append(f"\n**Headline (L=10, A-independent, PROJECTED):** QPE coherent-query T ≈ **{L10['T']:.2e}** "
+              f"(band [{L10['Tlo']:.1e}, {L10['Thi']:.1e}]; n_b=2 was {nb2[10]['T']:.2e}), total logical "
+              f"qubits ≈ **{L10['q']:.0f}**. The ×{sc['Tr']:.0f} T rise = λ ×{sc['lamr']:.2f} × per-step "
+              f"walk_T ×{sc['Tr']/sc['lamr']:.1f}. NOTE: L=1..{exmax} are direct compiled estimates; "
+              f"L={exmax+1}..10 are ratio projections. Cutoff selected at L=2 (n_b=3≈n_b=4); its total-"
+              f"energy adequacy through L=10 is a separate volume-scaling test (P0-4).\n")
     open(f"{args.out_dir}/nb3_headline_table.md", "w").write("\n".join(md) + "\n")
     print(f"[tbl] wrote {args.out_dir}/nb3_headline_table.md")
-    print(f"[done] scaling: T×{sc['Tr']:.1f} q×{sc['qr']:.3f} lam×{sc['lamr']:.2f}; "
-          f"L=10 T {nb2[10]['T']:.2e}->{rows[10]['T']:.2e}")
+    print(f"[done] T-range x{sc['Trange'][0]:.1f}-{sc['Trange'][1]:.1f}; compiled to L={exmax}; "
+          f"L=10 T {rows[10]['T']:.2e} band [{rows[10]['Tlo']:.1e},{rows[10]['Thi']:.1e}]")
 
 
 if __name__ == "__main__":
