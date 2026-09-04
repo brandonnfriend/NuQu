@@ -133,11 +133,13 @@ def main():
               f"MOTIVATES n_b=2 but does NOT bound the truncation error: E_var at fixed core is "
               f"confounded (rises with N_f from core-incompleteness), and the deep-reference (N_f=16) "
               f"reruns show only that the same low-occupation selected basin was found — not resolved "
-              f"solver convergence. The ENERGY gate — E_0(N_f) convergence at core-converged states "
-              f"with seed uncertainty — is a separate L=2-feasible study (pending; larger L hits the "
-              f"extensivity/H-build wall). The quantum anchor stays CONDITIONAL on n_b=2 until that "
-              f"gate passes; report n_b=3 resource sensitivity alongside it. No per-seed uncertainty is "
-              f"shown here (best-of-ensemble only — a solver-output upgrade is in progress).\n")
+              f"solver convergence. The ENERGY gate — E_0(N_f) convergence at core-converged states — "
+              f"is the decisive test, and it has since RUN (L=2): it **REJECTED n_b=2** (E_0 off 4–7 "
+              f"MeV, binding energy ~91 MeV) and found n_b=3 ≈ n_b=4, so **the anchor was moved to "
+              f"n_b=3** (this tail is now a motivating diagnostic only, superseded by the gate). The "
+              f"large-volume adequacy of n_b=3 is CONDITIONAL (volume-scaling P0-4: shift small but "
+              f"below classical differencing precision; see `volume_scaling_P04_result.md`). No per-seed "
+              f"uncertainty is shown here (best-of-ensemble only).\n")
     open(f"{args.out_dir}/nb_occupation_tail_diagnostic_table.md", "w").write("\n".join(md) + "\n")
     print(f"[tbl] wrote {args.out_dir}/nb_occupation_tail_diagnostic_table.md")
     print("[done] " + " | ".join(f"L{r['L']}A{r['A']}:{r['leak2']*100:.2f}%" for r in recs))

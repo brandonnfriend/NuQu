@@ -126,9 +126,9 @@ def main():
               f"is {min(r['px_nb1'] for r in recs)*100:.0f}–{max(r['px_nb1'] for r in recs)*100:.0f}% "
               f"(strongly rejected); n_b=2 P(∃≥4) is at most {worst*100:.2f}%. This MOTIVATES n_b=2 but "
               f"does NOT bound the energy truncation error, nor prove solver-convergence of the true "
-              f"tail (fixed ~few-k-determinant support). The energy gate (E_0(N_f) at core-converged "
-              f"states, with seed uncertainty) is the separate L=2 study; the anchor stays conditional "
-              f"on n_b=2 until it passes.\n")
+              f"tail (fixed ~few-k-determinant support). The decisive L=2 energy gate (E_0(N_f) at "
+              f"core-converged states) has since RUN and **REJECTED n_b=2** (E_0 off 4–7 MeV), moving "
+              f"the anchor to **n_b=3** (n_b=3 ≈ n_b=4); this tail is now a motivating diagnostic only.\n")
     open(f"{args.out_dir}/nb_occupation_histogram_table.md", "w").write("\n".join(md) + "\n")
     print(f"[tbl] wrote {args.out_dir}/nb_occupation_histogram_table.md")
     print("[done] " + " | ".join(f"L{r['L']}A{r['A']}: n_b2 tail {r['leak_nb2']*100:.2f}%" for r in recs))
