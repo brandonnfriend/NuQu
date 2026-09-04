@@ -69,12 +69,25 @@ def validate(data_dir):
         # adopted-π recompute self-consistent (walk_queries(lam,eps,π)*walkT)
         pi_T = walk_queries(r["Physical_Lambda"], eps, PI) * r["Walk_T_Count"]
         assert pi_T > 0 and math.isfinite(pi_T), f"{tag}: π T recompute failed"
-        recs.append(dict(L=r["L"], file=f))
+        # PADDING-LAW consistency (guards against a stale/mislabeled walk_T — the re-audit L=7 lesson):
+        # pyLIQTR pads PREPARE to a power of 2, so the rotation count must be derived from THIS shard's
+        # own term count. rot == 2·2^⌈log2(terms)⌉. (L=6,7 sharing a bin → identical rot is LEGITIMATE;
+        # this catches only a rot that doesn't match its own terms — the true corruption signature.)
+        terms, rot = r.get("Pauli_Term_Count"), r.get("Rotation_Count")
+        assert terms and rot, f"{tag}: missing Pauli_Term_Count/Rotation_Count"
+        P = 2 ** math.ceil(math.log2(terms))
+        assert rot == 2 * P, f"{tag}: rotation count {rot} != 2·2^⌈log2({terms})⌉={2*P} (walk_T not from this shard)"
+        assert abs(fit["b"] / P - 6.0206) < 0.05, f"{tag}: b/P={fit['b']/P:.4f} off the synthesis constant 6.02"
+        recs.append(dict(L=r["L"], file=f, bP=fit["b"] / P))
     Ls = [r["L"] for r in recs]
     assert len(Ls) == len(set(Ls)), f"duplicate L in n_b=3 anchor: {Ls}"
     assert len(commits) == 1 and None not in commits, f"multiple/absent commits: {commits}"
+    # cross-shard: the per-rotation synthesis slope b/P is a fixed constant — all shards must agree
+    bps = [x["bP"] for x in recs]
+    assert max(bps) - min(bps) < 0.02, f"b/P inconsistent across shards: {bps}"
     print(f"[validate nb3] PASS — {len(recs)} shards L={sorted(Ls)}, commit {list(commits)[0][:10]}, "
-          f"all pruning-clean, fit resid<1, arithmetic coherent")
+          f"all pruning-clean, fit resid<1, arithmetic coherent, padding-law rot==2·2^⌈log2 terms⌉, "
+          f"b/P const {sum(bps)/len(bps):.3f}")
     return sorted(Ls), list(commits)[0], files
 
 
@@ -86,8 +99,9 @@ def main():
     manifest = {
         "dataset": "nb3_anchor (fock_pauli, n_b=3)", "cutoff_n_b": 3,
         "L_compiled": Ls, "generating_commit": commit,
-        "note": "n_b=3 quantum anchor — validated with the round-3 acceptance invariants. "
-                "L=1..%d compiled; L>%d in the headline are ratio projections (not in this manifest)."
+        "note": "n_b=3 quantum anchor — validated with the round-3 acceptance invariants + the "
+                "padding-law rotation-count check (rot==2·2^ceil(log2 terms)). L=1..%d compiled; L>%d "
+                "in the headline are padding-model projections (not in this manifest)."
                 % (max(Ls), max(Ls)),
         "dependencies": _dep_versions(),
         "files": {os.path.basename(f): _sha256(f) for f in files},

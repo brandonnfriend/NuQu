@@ -17,22 +17,19 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from src_PI.estimation.qpe_cost import walk_queries, WALK_QUERY_CONSTANT_HEISENBERG as PI
+from misc.nb3_padding_model import _load as _pad_load, project as _pad_project
 
 BLUE, ORANGE, CRIT, GREEN, MUTED = "#2a78d6", "#eb6834", "#d03b3b", "#3a9b6a", "#898781"
 INK, INK2, GRID, AXIS, SURFACE = "#0b0b0b", "#52514e", "#e1e0d9", "#c3c2b7", "#fcfcfb"
 
 
 def load(d, patt):
-    o = {}
-    for f in glob.glob(f"{d}/{patt}"):
-        j = json.load(open(f))
-        if not (j.get("done") and j.get("results")) or "rep2" in os.path.basename(f):
-            continue
-        r = j["results"][0]
-        eps = (r.get("QPE_Budget") or {}).get("eps_qpe")
-        nwalk = walk_queries(r["Physical_Lambda"], eps, PI) if eps else None
-        o[r["L"]] = dict(lam=r["Physical_Lambda"], walkT=r["Walk_T_Count"], q=r["Logical_Qubits"],
-                         T=(nwalk * r["Walk_T_Count"]) if nwalk else None)
+    """Full per-L schema (lam, walkT, q, terms, eps, a, b) + the composed QPE T. Shared by the
+    headline, the padding projection, and the Trotter comparison."""
+    o = _pad_load(d, patt)
+    for r in o.values():
+        nwalk = walk_queries(r["lam"], r["eps"], PI) if r.get("eps") else None
+        r["T"] = (nwalk * r["walkT"]) if nwalk else None
     return o
 
 
@@ -47,27 +44,31 @@ def _style(ax):
 
 
 def build(nb2, nb3):
-    """Per-L dict with n_b=3 T + qubits: exact where the n_b=3 shard exists, else PROJECTED from the
-    n_b=2 anchor by the L≥4 ratios — with a BAND from the observed ratio VARIATION (not just the mean,
-    per re-audit P0-5). Missing L (no n_b=2 either) are skipped."""
-    big = [L for L in sorted(nb3) if L >= 4 and L in nb2]
-    if not big:                                            # fall back to any common L if <4 overlap
-        big = [L for L in sorted(nb3) if L in nb2]
-    Trs = [nb3[L]["T"] / nb2[L]["T"] for L in big]
-    qrs = [nb3[L]["q"] / nb2[L]["q"] for L in big]
-    lrs = [nb3[L]["lam"] / nb2[L]["lam"] for L in big]
+    """Per-L n_b=3 T + qubits: COMPILED where the n_b=3 shard exists (L=1..7), else PADDING-MODEL
+    projected (L=8..10). walk_T is power-of-2 quantized (pyLIQTR pads PREPARE to 2^ceil(log2 terms)),
+    so a smooth per-step total-T ratio JITTERS at bin boundaries — the L=7 ratio (16.3) is a genuine
+    bin mis-alignment vs the smooth ~33 at L=3..6, NOT representative. So walk_T is projected by the
+    quantization-aware `nb3_padding_model` (back-tested <1.1% on L=1..7); λ keeps its ×3.75 ratio and
+    qubits their ×1.30 ratio. The projected T band spans the bins n_terms×(1±10%) can occupy. Display
+    ratios (sc) are taken from the SMOOTH regime L=4..6 (L=7 excluded). Same (rows, sc) schema as before."""
+    rows_p, meta = _pad_project(nb2, nb3)
+    ls46 = meta["ls46"]                                    # [4,5,6] — smooth, bin-aligned regime
+    Trs = [rows_p[L]["T"] / nb2[L]["T"] for L in ls46]
+    qrs = [nb3[L]["q"] / nb2[L]["q"] for L in ls46]
+    lrs = [nb3[L]["lam"] / nb2[L]["lam"] for L in ls46]
     Tr, qr, lamr = st.mean(Trs), st.mean(qrs), st.mean(lrs)
     rows = {}
-    for L in sorted(nb2):
-        if L in nb3:                                       # direct compiled
-            rows[L] = dict(T=nb3[L]["T"], q=nb3[L]["q"], lam=nb3[L]["lam"], exact=True,
-                           Tlo=nb3[L]["T"], Thi=nb3[L]["T"], qlo=nb3[L]["q"], qhi=nb3[L]["q"])
-        else:                                              # projected + band from ratio spread
-            rows[L] = dict(T=nb2[L]["T"] * Tr, q=nb2[L]["q"] * qr, lam=nb2[L]["lam"] * lamr, exact=False,
-                           Tlo=nb2[L]["T"] * min(Trs), Thi=nb2[L]["T"] * max(Trs),
-                           qlo=nb2[L]["q"] * min(qrs), qhi=nb2[L]["q"] * max(qrs))
+    for L in sorted(rows_p):
+        r = rows_p[L]
+        if r["exact"]:                                     # direct compiled (L=1..7)
+            rows[L] = dict(T=r["T"], q=r["q"], lam=r["lam"], exact=True,
+                           Tlo=r["T"], Thi=r["T"], qlo=r["q"], qhi=r["q"], P=r["P"], terms=r["terms"])
+        else:                                              # padding-model projection (L=8..10)
+            rows[L] = dict(T=r["T"], q=r["q"], lam=r["lam"], exact=False,
+                           Tlo=r["Tlo"], Thi=r["Thi"],
+                           qlo=nb2[L]["q"] * min(qrs), qhi=nb2[L]["q"] * max(qrs), P=r["P"], terms=r["terms"])
     sc = dict(Tr=Tr, qr=qr, lamr=lamr, Trange=(min(Trs), max(Trs)), qrange=(min(qrs), max(qrs)),
-              lamrange=(min(lrs), max(lrs)), fitL=big)
+              lamrange=(min(lrs), max(lrs)), fitL=ls46, model=meta["mp"])
     return rows, sc
 
 
@@ -94,10 +95,10 @@ def main():
     if sc_:
         yerr = [[rows[L]["T"] - rows[L]["Tlo"] for L in sc_], [rows[L]["Thi"] - rows[L]["T"] for L in sc_]]
         axT.errorbar(sc_, [rows[L]["T"] for L in sc_], yerr=yerr, fmt="o", color=CRIT, ms=8, mfc="none",
-                     mew=1.8, capsize=4, elinewidth=1.4, zorder=5, label="n_b=3 PROJECTED (ratio band)")
+                     mew=1.8, capsize=4, elinewidth=1.4, zorder=5, label="n_b=3 PROJECTED (padding model)")
     axT.set_xlabel("lattice size $L$", color=INK2, fontsize=9.5)
     axT.set_ylabel("QPE coherent-query $T$-count ($\\pi$, $\\Delta E$=1 MeV)", color=INK2, fontsize=9.5)
-    axT.set_title(f"a  T-count — n_b=3 is ×{sc['Trange'][0]:.0f}–{sc['Trange'][1]:.0f} the n_b=2 value",
+    axT.set_title(f"a  T-count — n_b=3 is ×{sc['Tr']:.0f} the n_b=2 value (smooth regime L=4–6)",
                   color=INK, fontsize=10.0, loc="left", weight="bold")
     axT.legend(frameon=False, fontsize=8, loc="upper left", labelcolor=INK2)
     _style(axT)
@@ -117,7 +118,7 @@ def main():
     axQ.legend(frameon=False, fontsize=8, loc="upper left", labelcolor=INK2)
     _style(axQ)
     fig.suptitle("Quantum headline at the L=2-selected cutoff n_b=3 — COMPILED L=1..%d + PROJECTED "
-                 "L=%d..10 (ratio band)" % (max(ex), max(ex) + 1), fontsize=10.6, color=INK,
+                 "L=%d..10 (padding model)" % (max(ex), max(ex) + 1), fontsize=10.6, color=INK,
                  y=1.02, x=0.01, ha="left")
     fig.tight_layout(rect=(0, 0, 1, 0.96))
     for e in ("pdf", "png"):
@@ -128,12 +129,15 @@ def main():
     md = ["# Quantum headline at the L=2-selected cutoff n_b=3 — compiled L=1..%d + projected L=%d..10\n"
           % (exmax, exmax + 1),
           f"_The L=2 energy gate rejected n_b=2 and found n_b=3≈n_b=4 (at L=2); n_b=3 is the selected "
-          f"cutoff scenario. **Direct compiled** n_b=3 for L=1..{exmax}; **ratio-PROJECTED** L={exmax+1}"
-          f"..10 (not compiled) — projection uses the L≥4 ratios with a BAND from their variation: "
-          f"λ ×{sc['lamrange'][0]:.2f}–{sc['lamrange'][1]:.2f}, coherent-T ×{sc['Trange'][0]:.1f}–"
-          f"{sc['Trange'][1]:.1f}, qubits ×{sc['qrange'][0]:.3f}–{sc['qrange'][1]:.3f} (fit on L="
-          f"{sc['fitL']}). π walk constant, ΔE=1 MeV. Large-volume cutoff adequacy is CONDITIONAL "
-          f"(P0-4)._\n",
+          f"cutoff scenario. **Direct compiled** n_b=3 for L=1..{exmax}; **PADDING-MODEL projected** "
+          f"L={exmax+1}..10 (not compiled). walk_T is power-of-2 quantized (pyLIQTR pads PREPARE to "
+          f"2^⌈log₂ terms⌉), so a smooth per-step ratio jitters at bin boundaries — the L=7 total-T "
+          f"ratio (16.3) is a genuine bin mis-alignment vs the ~33 at L=3..6, NOT representative. So "
+          f"walk_T is projected by the quantization-aware model (n_terms/L³={sc['model']['c0']:.0f}"
+          f"{sc['model']['c1']:+.0f}/L → padded bin → walk_T; back-tested <1.1% on L=1..{exmax}); λ keeps "
+          f"its ×{sc['lamr']:.2f} ratio, qubits ×{sc['qr']:.2f}. The projected T band spans the bins "
+          f"n_terms×(1±10%) can occupy (widest at L=9, just under the 2²² edge). π walk constant, "
+          f"ΔE=1 MeV. Large-volume cutoff adequacy is CONDITIONAL (P0-4)._\n",
           "| L | T(n_b=2) | **T(n_b=3)** | band | ×T | qubits(n_b=3) | source |",
           "|--:|--:|--:|--:|--:|--:|:--|"]
     for L in Ls:
@@ -145,8 +149,9 @@ def main():
     md.append(f"\n**Headline (L=10, A-independent, PROJECTED):** QPE coherent-query T ≈ **{L10['T']:.2e}** "
               f"(band [{L10['Tlo']:.1e}, {L10['Thi']:.1e}]; n_b=2 was {nb2[10]['T']:.2e}), total logical "
               f"qubits ≈ **{L10['q']:.0f}**. The ×{sc['Tr']:.0f} T rise = λ ×{sc['lamr']:.2f} × per-step "
-              f"walk_T ×{sc['Tr']/sc['lamr']:.1f}. NOTE: L=1..{exmax} are direct compiled estimates; "
-              f"L={exmax+1}..10 are ratio projections. Cutoff selected at L=2 (n_b=3≈n_b=4); its total-"
+              f"walk_T ×{sc['Tr']/sc['lamr']:.1f} (smooth-regime L=4..6). NOTE: L=1..{exmax} are direct "
+              f"compiled estimates; L={exmax+1}..10 are padding-model projections (walk_T quantized in "
+              f"powers of two; back-tested <1.1%). Cutoff selected at L=2 (n_b=3≈n_b=4); its total-"
               f"energy adequacy through L=10 is a separate volume-scaling test (P0-4).\n")
     open(f"{args.out_dir}/nb3_headline_table.md", "w").write("\n".join(md) + "\n")
     print(f"[tbl] wrote {args.out_dir}/nb3_headline_table.md")

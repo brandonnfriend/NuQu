@@ -1,4 +1,5 @@
 import math
+import os
 
 from src_PI.estimation.block_encoders import get_block_encoder
 from src_PI.estimation.combined_walk import compose_combined_walk, wt_basis_change_t
@@ -48,7 +49,12 @@ def _optimized_single_walk(bundle, n_b, delta_E):
     dE = delta_E if delta_E else DEFAULT_DELTA_E_MEV
     name, H = nd['sub_hamiltonians'][0]
     pauli_terms = len(H.terms)                      # Pauli term count (audit item 5)
-    fits = sample_walk_fits(_ham_to_pyliqtr_instance(H))
+    # cp sample points for the walk_T(circuit_precision) fit. Default is 3 wide points; a denser set
+    # (via NUQU_CP_SAMPLES="1e-4,1e-6,...") over-determines the log-linear fit so a non-linearity /
+    # degenerate compile is caught by a non-zero residual (re-audit L=7 walk_T follow-up).
+    _cps = os.environ.get("NUQU_CP_SAMPLES")
+    _kw = {"cp_samples": tuple(float(x) for x in _cps.split(","))} if _cps else {}
+    fits = sample_walk_fits(_ham_to_pyliqtr_instance(H), **_kw)
     opt = optimize_qpe_fraction(fits['T'][0], fits['T'][1], lam, dE)
     cp = opt['circuit_precision']
     walk_C = fits['Clifford'][0] + fits['Clifford'][1] * math.log2(1.0 / cp)
