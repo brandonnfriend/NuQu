@@ -49,6 +49,9 @@ hpc/detsvsL/.uvpy/
 hpc/quantum/campaign_*/
 hpc/HPC_WORKFLOW.md
 
+# HPC n_b-cutoff / volume-scaling campaign artifacts — keep tracked scripts, ignore runtime
+hpc/nb_cutoff/campaign_*/
+
 paper/
 docs/
 results/
