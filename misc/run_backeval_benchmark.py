@@ -15,10 +15,20 @@ Incremental per-core save (a deep core that OOMs/times-out keeps every core belo
 """
 import argparse
 import json
+import math
 import os
 import sys
 import time
 import tracemalloc
+
+
+def _rounds_for(n_dets, n_init=20, patience=4):
+    """Rounds needed for the x1.5-per-round core ramp (from n_init) to REACH n_dets.
+    ground_state_arrays defaults to max_rounds=12, which tops out at 20*1.5^11 ~= 3482 dets
+    REGARDLESS of the requested n_dets (the P0-1 false-ladder bug) — so any requested core
+    above ~3.5k was silently truncated. This sizes max_rounds to the request (+patience for
+    the final genuine-dE convergence check)."""
+    return max(12, int(math.ceil(math.log(max(n_dets, 2) / n_init) / math.log(1.5))) + patience)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -118,10 +128,18 @@ def run_benchmark(L, dim, n_b, frame, cores, A=1, seed=0, num_runs=16,
     do_backeval = has_lf
     for core in cores:
         t0 = time.time()
-        res = solve(H_frame, n_elec=A, n_dets=core, n_runs=num_runs, seed=seed)
+        res = solve(H_frame, n_elec=A, n_dets=core, n_runs=num_runs, seed=seed,
+                    max_rounds=_rounds_for(core))
         solve_s = time.time() - t0
+        # P0-1 guard: the ACTUAL n_dets must reach the requested core (within 10%), else the
+        # rung is a growth failure (or a genuine sector/convergence stop). stop_reason
+        # distinguishes 'converged' (real dE<tol) / 'capped' / 'max_rounds' (round-limited).
+        stop_reason = getattr(res, 'stop_reason', None)
+        reached_target = res.n_dets >= 0.9 * core
         row = {'core': core, 'n_dets': res.n_dets, 'E_frame': float(res.energy),
-               'solve_s': round(solve_s, 2)}
+               'solve_s': round(solve_s, 2), 'reached_target': bool(reached_target),
+               'stop_reason': stop_reason,
+               'growth_ok': bool(reached_target or stop_reason == 'converged')}
         # Framed-basis boson-cutoff diagnostics: leaked-weight tail a Fock box of size N_f would
         # drop, and the per-mode occupation histogram p(n) (near-vacuum in a good frame -> the
         # "similar-enough n_b" evidence). Best-effort — never kills the rung.
