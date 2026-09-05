@@ -13,10 +13,28 @@
 #           Delta34 = E_3 - E_4 >= 0  by construction (sign-definite).
 #       Verified locally: the nested Delta is exactly 0 at most rungs where the legacy
 #       independent arm returns small values of BOTH signs at the same points.
+#   (c) BOUNDARY AUGMENTATION — nesting alone is NOT enough. The n_b=3 core tops out around
+#       occupation 4 (near-vacuum pion sector), one expansion step raises it by one, and
+#       high-occupation determinants are trimmed on amplitude before they can climb. Measured:
+#       the un-augmented nested solve reached occupation 6 and put EXACTLY ZERO weight on the
+#       n_b=4-only region — so Delta=0 would have meant "the search never looked", and the
+#       decision rule below would have passed for the wrong reason. The nested solve is now
+#       seeded with ~19k n_b=4-only determinants (the dominant n_b=3 determinants with one
+#       boson mode raised into levels 8..11), so the variational solve is SHOWN the new states
+#       and keeps them only if they lower the energy. `n_hi_only_seeded` / `n_hi_only_kept` /
+#       `hi_only_weight` per rung are the evidence that it looked.
 #   Every energy is a Rayleigh quotient over an explicitly named determinant set (NOT
 #   GroundStateResult.energy, which is the larger survivor POOL's energy — mixing the two
 #   produced a spurious ~39 MeV artifact during development; see misc/run_nb_nested_shard.py).
 #   `--also-independent` runs the legacy arm alongside, so nested-vs-independent is measured.
+#
+#   WHAT DELTA IS AND IS NOT. Both sides are variational upper bounds, so their difference is
+#   NOT a bound on the true cutoff effect E_3^exact - E_4^exact (no variational-difference
+#   method can be — this is the audit's objection 7 and it stands). The augmented n_b=4 side
+#   gets the richer round-0 pool, so Delta is if anything an OVER-estimate of the nested
+#   effect — the conservative direction for a smallness claim. The defensible statement is:
+#   "at equal core budget, with the n_b=4-only states explicitly offered, raising the cutoff
+#   buys at most Delta of variational improvement."
 #
 # THE GRID (A = nucleon count; fermion modes = 4 x sites, so L=2/A=32 is fully filled)
 #   L=2 (8 sites, 32 modes):  A = 1, 2, 4, 8, 16, 32     x seeds{0,1,2}   = 18 shards
@@ -26,7 +44,8 @@
 #
 # PRE-SPECIFIED DECISION RULE (written down BEFORE the data — task 35 T3/D3). Discharge the
 # large-volume conditional over the TESTED RANGE only if BOTH:
-#   (a) nested Delta34/site < 0.001 at every sampled (L, A), AND
+#   (a) nested Delta34/site < 0.001 at every sampled (L, A) WITH n_hi_only_seeded > 0 at
+#       every rung (i.e. the search demonstrably looked at the new states), AND
 #   (b) the core-ladder residual is also < 0.001 MeV/site (the measurement can resolve the
 #       target — this is the condition that FAILS today, at +-0.0028).
 # If either fails: the conditional is RETAINED and we widen the empirical claim instead,

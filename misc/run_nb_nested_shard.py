@@ -48,6 +48,69 @@ from classical.trimci.graph_arrays import (ground_state_arrays,
                                            ground_state_ensemble_arrays)
 
 
+def _boundary_augment(core, coeffs, N_f_lo, N_f_hi, top_m=200, levels=4):
+    """Seed the high-cutoff solve with determinants that live in the HIGH-CUTOFF-ONLY
+    region -- without this the nested comparison measures nothing.
+
+    THE PROBLEM IT SOLVES. The n_b=3 ground-state core tops out around occupation 4 (the
+    pion sector is near-vacuum, <n> ~ 0.045). One selected-CI expansion step raises an
+    occupation by one, and high-occupation determinants carry tiny amplitudes so they are
+    trimmed before they can climb again. Measured at L=2 A=8: the nested n_b=4 solve
+    reaches occupation 6 and puts EXACTLY ZERO weight on the n_b=4-only region (occ >= 8).
+    So a nested Delta of 0 would have meant "the greedy search never looked there", not
+    "those states do not matter" -- and the pre-specified decision rule would have passed
+    for the wrong reason.
+
+    THE FIX. For each of the `top_m` dominant low-cutoff determinants and each boson mode,
+    add a copy with that mode raised into the high-cutoff-only band (levels N_f_lo ..
+    N_f_lo+levels-1). These enter round 0's diagonalization, so the variational solve is
+    SHOWN the new states and keeps them only if they lower the energy; the trim returns the
+    core to the requested size, so the two cutoffs are still compared at equal budget.
+    Delta = 0 then means the search looked and declined -- a physics statement.
+
+    Returns (ferm, bos, n_added)."""
+    ferm = np.asarray(core[0])
+    bos = np.asarray(core[1])
+    lv = list(range(N_f_lo, min(N_f_hi, N_f_lo + levels)))
+    if not lv or ferm.shape[0] == 0:
+        return (np.ascontiguousarray(ferm, dtype=np.uint64),
+                np.ascontiguousarray(bos, dtype=np.uint16), 0)
+    amp = np.abs(np.asarray(coeffs))
+    top = np.argsort(amp)[::-1][:min(top_m, amp.shape[0])]
+    n_modes = bos.shape[1]
+    add_f = np.repeat(ferm[top], n_modes * len(lv), axis=0)
+    add_b = np.repeat(bos[top], n_modes * len(lv), axis=0)
+    # for row (i, m, v) set boson mode m to level v
+    idx = np.arange(add_b.shape[0])
+    modes = (idx // len(lv)) % n_modes
+    vals = np.asarray(lv, dtype=add_b.dtype)[idx % len(lv)]
+    add_b[idx, modes] = vals
+    all_f = np.concatenate([ferm, add_f], axis=0)
+    all_b = np.concatenate([bos, add_b], axis=0)
+    # de-duplicate: two top determinants differing only in mode m collide once m is reset
+    keyed = np.concatenate([all_f.reshape(all_f.shape[0], -1).astype(np.int64),
+                            all_b.astype(np.int64)], axis=1)
+    _, uniq = np.unique(keyed, axis=0, return_index=True)
+    uniq = np.sort(uniq)
+    return (np.ascontiguousarray(all_f[uniq], dtype=np.uint64),
+            np.ascontiguousarray(all_b[uniq], dtype=np.uint16),
+            int(uniq.shape[0] - ferm.shape[0]))
+
+
+def _hi_only_weight(res, N_f_lo):
+    """Weight the converged high-cutoff state puts on the high-cutoff-ONLY region, and how
+    many such determinants it kept. This is the evidence that the search actually saw the
+    new states -- a Delta of 0 alongside `n_hi_only_seeded > 0` and a tiny weight here is a
+    physics result; a Delta of 0 with nothing seeded and nothing kept is not."""
+    bos = np.asarray(res.bos_arr)
+    c2 = np.abs(np.asarray(res.coeffs)) ** 2
+    tot = float(c2.sum())
+    if tot <= 0 or bos.size == 0:
+        return 0.0, 0
+    mask = (bos >= N_f_lo).any(axis=1)
+    return float(c2[mask].sum() / tot), int(mask.sum())
+
+
 def _core_energy(H, core):
     """Rayleigh energy of an EXPLICIT determinant set -- the quantity the nesting
     argument needs.
@@ -82,6 +145,12 @@ def main():
     ap.add_argument("--max-core", type=int, default=262144)
     ap.add_argument("--phase0-runs", type=int, default=32)
     ap.add_argument("--max-rung-seconds", type=float, default=14400.0)
+    ap.add_argument("--augment-top-m", type=int, default=200,
+                    help="dominant low-cutoff determinants whose boson modes are raised into "
+                         "the high-cutoff-only band to seed the nested solve (0 disables — "
+                         "which makes the comparison blind to the new states)")
+    ap.add_argument("--augment-levels", type=int, default=4,
+                    help="how many high-cutoff-only levels to seed (N_f_lo .. N_f_lo+k-1)")
     ap.add_argument("--also-independent", action="store_true",
                     help="ALSO run the legacy independently-selected n_b=hi solve per rung "
                          "(the comparison switch: nested vs independent, measured)")
@@ -112,7 +181,9 @@ def main():
             "solver": {"ladder_start": args.ladder_start, "n_rungs": args.n_rungs,
                        "max_core": args.max_core, "phase0_runs": args.phase0_runs,
                        "seed": args.seed, "max_rung_seconds": args.max_rung_seconds,
-                       "also_independent": bool(args.also_independent)},
+                       "also_independent": bool(args.also_independent),
+                       "augment_top_m": args.augment_top_m,
+                       "augment_levels": args.augment_levels},
             "condor": {k: os.environ.get(k) for k in
                        ("_CONDOR_SLOT", "_CONDOR_REQUEST_CPUS", "_CONDOR_REQUEST_MEMORY")},
         }),
@@ -146,10 +217,17 @@ def main():
         # --- the embedding check: H_hi on the SAME core must give exactly E_lo
         E_embed = _core_energy(H_hi, core_lo)
 
-        # --- high cutoff, NESTED: same core budget, superset space, warm-started
+        # --- high cutoff, NESTED + BOUNDARY-AUGMENTED: same core budget, superset space,
+        # warm-started, and explicitly SHOWN the high-cutoff-only states (see
+        # _boundary_augment -- without this the greedy search cannot reach them and a
+        # Delta of 0 would be meaningless).
+        aug_f, aug_b, n_seeded = _boundary_augment(
+            core_lo, r_lo.coeffs, H_lo.N_f, H_hi.N_f,
+            top_m=args.augment_top_m, levels=args.augment_levels)
         r_hi = ground_state_arrays(H_hi, n_elec=args.A, n_dets=n,
-                                   initial_core=core_lo, seed=args.seed + i)
+                                   initial_core=(aug_f, aug_b), seed=args.seed + i)
         core_hi = (r_hi.ferm_arr, r_hi.bos_arr)
+        hi_w, n_hi_kept = _hi_only_weight(r_hi, H_lo.N_f)
         # the embedded core is itself a variational state of H_hi, so the better of the two
         # is a valid high-cutoff variational energy -- and makes delta >= 0 EXACT rather
         # than merely expected (greedy re-selection is not monotone round-to-round).
@@ -167,7 +245,12 @@ def main():
             # volume-scaling shards (which store it); never used in delta.
             "E_lo_pool": float(r_lo.energy),
             "pool_minus_core": float(r_lo.energy) - E_lo,
-            "core_hi": int(r_hi.n_dets), "wall_s": time.time() - t,
+            "core_hi": int(r_hi.n_dets),
+            # DID THE SEARCH LOOK? delta==0 is only a physics statement when these say yes.
+            "n_hi_only_seeded": n_seeded,
+            "n_hi_only_kept": n_hi_kept,
+            "hi_only_weight": hi_w,
+            "wall_s": time.time() - t,
         }
         if abs(rung["embed_gap"]) > 1e-6 * max(1.0, abs(E_lo)):
             raise AssertionError(
@@ -196,7 +279,8 @@ def main():
         save()
         print(f"  core={rung['core']:>7}  E_lo={E_lo:12.5f}  E_hi={E_hi:12.5f}  "
               f"delta={rung['delta_nested']:+.5f} ({rung['delta_nested_per_site']:+.6f}/site)  "
-              f"embed_gap={rung['embed_gap']:+.2e}  [{rung['wall_s']:.0f}s]", flush=True)
+              f"embed_gap={rung['embed_gap']:+.2e}  hi-only seeded/kept={n_seeded}/{n_hi_kept} "
+              f"w={hi_w:.2e}  [{rung['wall_s']:.0f}s]", flush=True)
         if rung["wall_s"] > args.max_rung_seconds:
             print(f"  (rung wall {rung['wall_s']:.0f}s > {args.max_rung_seconds:.0f}s — stop)")
             break

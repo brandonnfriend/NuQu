@@ -16,6 +16,12 @@ the method rests on, because if any of them is false the sign-definiteness claim
   3. SIGN-DEFINITENESS. With every energy taken over a named determinant set and the high-cutoff
      energy defined as the better of (embedded core, nested solve), Delta = E_lo - E_hi >= 0 holds
      exactly, not just usually.
+  4. THE SEARCH ACTUALLY LOOKS. Nesting alone is not enough: the n_b=3 core tops out around
+     occupation 4, one expansion step raises it by one, and high-occupation determinants are
+     trimmed on amplitude before they can climb -- measured at L=2 A=8, the un-augmented nested
+     solve reached occupation 6 and put EXACTLY ZERO weight on the n_b=4-only region. A Delta of 0
+     would then have meant "never looked", not "does not matter". `_boundary_augment` seeds the
+     high-cutoff-only states explicitly, and `n_hi_only_seeded` is what makes Delta==0 reportable.
 """
 import json
 import os
@@ -31,7 +37,8 @@ sys.path.insert(0, os.path.join(_ROOT, "classical", "trimci", "backend_fork"))
 
 from classical.trimci import build_from_eft                                    # noqa: E402
 from classical.trimci.graph_arrays import ground_state_ensemble_arrays          # noqa: E402
-from misc.run_nb_nested_shard import _core_energy                               # noqa: E402
+from misc.run_nb_nested_shard import (_boundary_augment, _core_energy,           # noqa: E402
+                                      _hi_only_weight)
 
 L, DIM, A, NB_LO, NB_HI = 2, 1, 2, 3, 4      # 1D, 2 sites -- tiny and fast
 
@@ -72,6 +79,31 @@ def main():
         fails.append(f"pool energy {res.energy:.6f} ABOVE core energy {e_lo:.6f} "
                      "(the pool is the larger space; it cannot be higher)")
 
+    # --- 3b. boundary augmentation actually produces high-cutoff-only determinants
+    aug_f, aug_b, n_added = _boundary_augment(core, res.coeffs, H_lo.N_f, H_hi.N_f,
+                                              top_m=20, levels=4)
+    if n_added <= 0:
+        fails.append("boundary augmentation added nothing -- the nested solve would be blind "
+                     "to the high-cutoff-only states and Delta==0 would be meaningless")
+    aug_only = (np.asarray(aug_b) >= H_lo.N_f).any(axis=1)
+    if int(aug_only.sum()) != n_added:
+        fails.append(f"augmented rows in the high-only band ({int(aug_only.sum())}) != "
+                     f"n_added ({n_added})")
+    if np.asarray(aug_b).max() >= H_hi.N_f:
+        fails.append("augmentation produced an occupation outside the HIGH cutoff")
+    if aug_f.shape[0] != aug_b.shape[0] or aug_f.shape[0] <= np.asarray(core[0]).shape[0]:
+        fails.append("augmented core is malformed or did not grow")
+    # duplicates would silently inflate the pool
+    keyed = np.concatenate([np.asarray(aug_f).reshape(aug_f.shape[0], -1).astype(np.int64),
+                            np.asarray(aug_b).astype(np.int64)], axis=1)
+    if np.unique(keyed, axis=0).shape[0] != keyed.shape[0]:
+        fails.append("augmented core contains duplicate determinants")
+    if _boundary_augment(core, res.coeffs, H_lo.N_f, H_hi.N_f, top_m=0)[2] != 0:
+        fails.append("top_m=0 should disable augmentation")
+    w, nk = _hi_only_weight(res, H_lo.N_f)
+    if w != 0.0 or nk != 0:
+        fails.append(f"a LOW-cutoff state cannot carry high-only weight (got {w}, {nk})")
+
     # --- 4. end-to-end: sign-definiteness and embed_gap==0 over a real ladder
     with tempfile.TemporaryDirectory() as tmp:
         out = os.path.join(tmp, "nested.json")
@@ -97,6 +129,11 @@ def main():
                                  "sign-definiteness violated")
                 if "delta_independent" not in r:
                     fails.append(f"core {r['core']}: --also-independent produced no column")
+                if r.get("n_hi_only_seeded", 0) <= 0:
+                    fails.append(f"core {r['core']}: no high-cutoff-only determinants seeded -- "
+                                 "the nested comparison would be blind and delta==0 meaningless")
+                if r.get("hi_only_weight") is None or r["hi_only_weight"] < 0:
+                    fails.append(f"core {r['core']}: hi_only_weight missing/negative")
                 if r["E_hi_nested"] > r["E_lo"] + 1e-9:
                     fails.append(f"core {r['core']}: E_hi above E_lo despite nesting")
             if "manifest" not in j or not j["manifest"].get("git_commit"):
@@ -109,7 +146,8 @@ def main():
         sys.exit(1)
     print(f"test_nb_nested: PASS  (identical term lists; embedding identity exact "
           f"(|E_hi-E_lo| < 1e-9 on a real core); pool energy {float(res.energy):.4f} distinct from "
-          f"core energy {e_lo:.4f}; nested delta >= 0 and embed_gap == 0 at every rung; "
+          f"core energy {e_lo:.4f}; boundary augmentation seeds {n_added} high-only "
+          f"determinants; nested delta >= 0 and embed_gap == 0 at every rung; "
           f"independent switch and provenance manifest present)")
 
 
