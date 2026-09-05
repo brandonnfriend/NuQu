@@ -524,11 +524,16 @@ def _adaptive_ladder_solve(H, A, ladder_start, n_rungs, solver, pt2_diag,
     n_rungs geometric ladder (the backward-compatible default).
 
     `pt2_max_core`: skip the deterministic EN-PT2 once the core exceeds this. The PT2
-    external space scales ~223x core (measured L=3), so it materializes ~228M
-    determinants / ~150 GB at 1M core and OOMs long before the E_var solve does. Past
-    the cap we record the VARIATIONAL energy only (the deep-convergence quantity we
-    compare to the DMRG bound); PT2 is still captured on the shallower rungs for the
-    extrapolation. None = always compute (backward compatible).
+    external space scales ~223x core (measured L=3), i.e. ~228M determinants at 1M core.
+    On the PURE-PYTHON path that materializes ~150 GB and OOMs long before the E_var solve
+    does -- which is why the cap exists. On the C++ path (`_cpp_pt2_available`, what the
+    cluster and the laptop both use) it is far leaner: measured 2026-09-05 at L=3 dim=3
+    n_b=3, 3.45M externals cost only ~55 MB ABOVE the solve's own 2.0 GB peak (~17 B/ext),
+    so the expansion pool -- not PT2 -- is the memory driver there. Prefer PT2 on EVERY
+    rung when the C++ path is active: capping it low puts every PT2 point in the
+    pre-collapse "exploration" basin, where the PT2 extrapolation demonstrably lies
+    (L=2: +19 MeV/site vs the deep variational answer). Past the cap we record the
+    VARIATIONAL energy only; None = always compute (backward compatible).
 
     `on_rung(rung, res)`, if given, is called after each rung completes (rung dict +
     the raw GroundStateResult) — used for INCREMENTAL SAVE on deep HPC runs, so a
