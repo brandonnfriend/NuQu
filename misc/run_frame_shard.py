@@ -25,6 +25,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from src_PI.utils.manifest import build_manifest
 from classical.trimci import build_from_eft, frame_workflow, frame
 from classical.trimci.back_evaluate import back_evaluate_frame
 from classical.trimci.frame_qpe import warmstart_overlap
@@ -206,6 +207,31 @@ def main():
                        "r_norm": float(np.linalg.norm(np.asarray(back_state["r"], dtype=float)))}
                       if back_state is not None else {"enabled": False}),
         "rungs": [], "done": False,
+        # PROVENANCE (audit 2026-09-05, P0-5). Classical shards used to carry no commit,
+        # host or timestamp -- unlike the quantum ones -- so an accepted classical result
+        # could not be traced to the code that produced it. Every knob that changes the
+        # physics or the solve is recorded here alongside the git state, so a shard is
+        # self-describing even after it is copied out of its campaign directory.
+        "manifest": build_manifest(extra={
+            "run": "misc.run_frame_shard",
+            "argv": sys.argv[1:],
+            "physical": {"L": args.L, "dim": args.dim, "n_b": args.n_b, "N_f": Hbare.N_f,
+                         "A": A, "filling": args.filling, "sites": sites,
+                         "n_terms": len(Hbare.terms), "frame": args.frame},
+            "solver": {"ladder_mode": args.ladder_mode, "ladder_start": args.ladder_start,
+                       "n_rungs": args.n_rungs, "max_core": args.max_core,
+                       "warm_grow": bool(args.warm_grow), "seed": args.seed,
+                       "phase0_runs": args.phase0_runs, "ladder_n_runs": args.ladder_n_runs,
+                       "pt2_max_core": args.pt2_max_core,
+                       "max_rung_seconds": args.max_rung_seconds,
+                       "boson_init_mean": ("none" if bim is None else bim),
+                       "frame_runs": args.frame_runs, "phase0_core": args.phase0_core,
+                       "orbopt_cycles": args.orbopt_cycles,
+                       "back_eval": bool(args.back_eval),
+                       "back_support_cap": args.back_support_cap},
+            "condor": {k: os.environ.get(k) for k in
+                       ("_CONDOR_SLOT", "_CONDOR_REQUEST_CPUS", "_CONDOR_REQUEST_MEMORY")},
+        }),
     }
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
 
