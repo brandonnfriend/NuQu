@@ -183,11 +183,15 @@ def make_figure(recs, out_base):
             bottom += vals
         axB.plot(x, [r["sigma_ps"] or 0.0 for r in ex], "D", color=INK, ms=5, zorder=6,
                  label="σ (quadrature)")
+        # explicit xlim: with a single (n_b, L) the auto-scaled axis stretches one bar
+        # across the whole panel and it stops reading as a bar chart.
+        axB.set_xlim(-0.6, len(ex) - 0.4)
         axB.set_xticks(x); axB.set_xticklabels(labels, fontsize=8)
+        axB.set_ylim(0, max(1e-9, max(r["sigma_ps"] or 0.0 for r in ex)) * 1.45)
         axB.set_ylabel("uncertainty contribution  (MeV / site)", color=INK2, fontsize=9.5)
         axB.set_title("b  Error budget — what σ is made of (linear stack; σ adds in quadrature)",
                       color=INK, fontsize=10.5, loc="left", weight="bold")
-        axB.legend(frameon=False, fontsize=7.6, loc="upper left", labelcolor=INK2, ncol=2)
+        axB.legend(frameon=False, fontsize=7.4, loc="upper right", labelcolor=INK2, ncol=2)
         _style(axB)
 
     fig.suptitle("Classical energy aggregate — rigorous variational bound and the reported "
