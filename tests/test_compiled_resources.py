@@ -133,6 +133,7 @@ def test_precision_propagates_into_walk_cost():
 # --------------------------------------------------------------------------- #
 
 
+@pytest.mark.slow   # ~22s -- see the test-tier note in pyproject.toml
 def test_no_dense_matrixgate_at_counting_boundary():
     """Every boson SELECT sub-circuit decomposes to elementary gates with NO
     dense ≥2-qubit `MatrixGate` (those are charged as free/1-Clifford by the

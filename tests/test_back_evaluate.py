@@ -9,6 +9,7 @@ real-GroundStateResult interface, and enforced Taylor convergence.
 Run: python -m pytest -q tests/test_back_evaluate.py   (or python -m tests.test_back_evaluate)
 """
 import numpy as np
+import pytest
 from scipy.linalg import expm
 
 from classical.trimci.hamiltonian import build_from_eft
@@ -94,6 +95,7 @@ def test_convergence_is_enforced():
         pass
 
 
+@pytest.mark.slow   # ~56s -- see the test-tier note in pyproject.toml
 def test_eps_leak_reported_and_shrinks_with_reference_cutoff():
     """eps_leak = 1 - norm_ratio^2 is in [0,1], matches the identity, and does not GROW when
     the map-back reference H uses a larger Fock cutoff (the silent-ceiling-leak fix): a higher

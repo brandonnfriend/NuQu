@@ -15,6 +15,7 @@ Run from the project root:
 """
 
 import numpy as np
+import pytest
 
 from classical.baselines.dmrg_block2 import validate_vs_lanczos
 from classical.baselines.dmrg_entanglement import (
@@ -35,6 +36,7 @@ def _chi_star(L, dim, A=2, N_f=2, eps=1e-6):
     return rep['chi_star'][eps], area, rep['S_vonNeumann']
 
 
+@pytest.mark.slow   # ~158s -- see the test-tier note in pyproject.toml
 def test_area_law_onset():
     chi_1d, a1, _ = _chi_star(2, 1)         # cut area 1
     chi_2d, a2, _ = _chi_star(2, 2)         # cut area 2

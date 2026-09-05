@@ -8,3 +8,18 @@ dependencies = [
     "openfermion==1.6.1",
     "pyliqtr==1.3.4",
 ]
+
+[tool.pytest.ini_options]
+# Test TIERS (audit 2026-09-05, lower-priority findings). The default run is still
+# EVERYTHING -- markers are opt-OUT, never opt-in, so nothing silently stops running:
+#
+#   python -m pytest -q                     # full suite, ~6.5 min   (release gate)
+#   python -m pytest -q -m "not slow"       # fast tier, ~2 min      (edit/commit loop)
+#
+# Five tests carry ~70% of the wall time (DMRG area-law onset ~160 s, back-evaluate
+# eps-leak ~56 s, projector-LF variational ~33 s, the pyLIQTR counting-boundary check
+# ~22 s, occupation A-independence ~15 s); they are marked `slow` so the fast tier is
+# usable, and they are physics/regression checks that must still run before a release.
+markers = [
+    "slow: takes >10 s; excluded by -m 'not slow'. Still runs in the default suite.",
+]

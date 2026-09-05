@@ -17,6 +17,7 @@ Run: python -m classical.trimci.tests.test_hij
 """
 
 import numpy as np
+import pytest
 import openfermion as of
 
 from classical.trimci import (
@@ -666,6 +667,7 @@ def test_frame_qpe_payoff():
           f"{pay['repetition_factor']:.2f}x reps, prep/walk={pay['prep_vs_walk']:.0e}  OK")
 
 
+@pytest.mark.slow   # ~33s -- see the test-tier note in pyproject.toml
 def test_frame_projector_lf_variational():
     """task 33 STEP 4 (projector-conditioned LF, variational amplitude) — go/no-go.
     (a) analytic_displacement reads the polaron seed λ=−g/ω off the diagonal density
@@ -1197,6 +1199,7 @@ def test_nb_convergence_smoke():
     print(f"[33] nb_convergence_sweep: 2 rows, exact-matched, E>=E_ED, ref trunc=0  OK")
 
 
+@pytest.mark.slow   # ~15s -- see the test-tier note in pyproject.toml
 def test_occupation_A_independence():
     """The A-dependence study's core claim, at an EXACT (ED) size: the GS pion
     occupation <N> is A-INDEPENDENT (vacuum-squeezing dominated), so a low n_b is
