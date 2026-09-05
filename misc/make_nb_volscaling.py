@@ -14,13 +14,16 @@ difference and its spread is not a valid uncertainty. Here we instead:
   * report, at the deepest core with ≥MIN_SEEDS paired good seeds, the MEDIAN Δ34/site and the SEED
     RANGE; deeper cores with fewer seeds are shown as single-/few-seed probes, NOT used for a range.
 
-WHAT THE DATA SHOWS (do not overclaim): at these sizes the solve is seed-insensitive (paired seeds
-agree to ≪1 MeV), so the scatter is NOT seed noise — it is residual CORE-INCOMPLETENESS: the n_b=3 and
-n_b=4 solves have different Fock spaces (different N_f) and select different spatial determinants, so
-the paired same-seed difference still does not fully cancel core-incompleteness and Δ34 oscillates
-down the ladder at the ~0.001–0.003 MeV/site level. The shift is SMALL (median |Δ34/site| below the
-0.001 MeV/site conservative target-equivalent at L=4) with no clean accumulation, but the core-residual
-is comparable to it, so no reliable L=10 projection exists and the large-volume conditional is RETAINED.
+WHAT THE DATA SHOWS (do not overclaim): seed labels reproduce bit-identically here (the warm-grow
+solve is deterministic — reproducibility, NOT independent samples), so no seed-based uncertainty is
+claimed. The scatter that matters is residual CORE-INCOMPLETENESS: the n_b=3 and n_b=4 solves have
+different Fock spaces (different N_f) and independently select spatial determinants, so the paired
+same-seed difference does not ISOLATE the operator-cutoff effect — Δ34 oscillates in sign down the
+ladder at the ~0.001–0.003 MeV/site level (the direct evidence of the residual). The shift is SMALL
+(deep-core median |Δ34/site| ≲ 0.0015; L=2 and L=4 inside the 0.001 MeV/site conservative
+target-equivalent, L=3 just outside) with no resolved accumulation across the tested dilute L=2–4
+points — but the core-residual is comparable to it, so this is EVIDENCE, not an L=10 certification, and
+the large-volume conditional is RETAINED (three volumes cannot establish volume-independence).
 
     python -m misc.make_nb_volscaling
 """
@@ -183,14 +186,14 @@ def main():
     xs = [r["L"] for r in rows]; ys = [r["med"] for r in rows]
     yerr = [[r["med"] - r["lo"] for r in rows], [r["hi"] - r["med"] for r in rows]]
     axB.errorbar(xs, ys, yerr=yerr, fmt="o", color=CRIT, ms=8, mec=SURFACE, mew=1.2, capsize=5,
-                 elinewidth=1.4, zorder=4, label="median (bars = seed range)")
+                 elinewidth=1.4, zorder=4, label="median (bars = seed spread; deterministic → ~0)")
     for r in rows:
         tag = f"{r['nseed']} seed{'s' if r['nseed'] != 1 else ''}\n@{r['rep_core']//1000}k"
         axB.annotate(tag, (r["L"], r["med"]), textcoords="offset points", xytext=(7, 6),
                      fontsize=7.2, color=INK2)
     axB.set_xticks(xs); axB.set_xlabel("lattice size $L$", color=INK2, fontsize=9.5)
     axB.set_ylabel("paired Δ$_{34}$/site @ deepest ≥3-seed core", color=INK2, fontsize=9.5)
-    axB.set_title("b  Shift small; seed-insensitive; residual straddles target", color=INK,
+    axB.set_title("b  Shift small; deterministic; residual straddles target", color=INK,
                   fontsize=10.0, loc="left", weight="bold")
     axB.legend(frameon=False, fontsize=7.4, labelcolor=INK2, loc="upper left")
     _style(axB)
@@ -206,8 +209,10 @@ def main():
           f"dim={args.dim}. Δ34 is formed per seed (never min-across-seeds) and only for seeds where "
           f"BOTH solves pass the convergence check (E_var within {OUTLIER_TOL:g} MeV of the best seed). "
           f"We report the deepest core with ≥{MIN_SEEDS} paired good seeds: median Δ34/site + seed "
-          f"range. The solve is seed-insensitive here, so the scatter is residual CORE-incompleteness "
-          f"(different N_f → different selected determinants), not seed noise._\n",
+          f"range. Seed labels reproduce bit-identically here (the warm-grow solve is deterministic — a "
+          f"reproducibility check, NOT independent-sample statistics), so no seed-based uncertainty is "
+          f"claimed; the scatter that matters is residual CORE-incompleteness (different N_f → different "
+          f"selected determinants) seen down the core ladder._\n",
           "| L | sites | reported core | paired seeds | median Δ34/site (MeV) | seed range | "
           "core-ladder residual (≥32k) | abs-E last-doubling (n_b=3) | deeper probes |",
           "|--:|--:|--:|--:|--:|--:|--:|--:|:--|"]
@@ -221,27 +226,42 @@ def main():
     if dropped_log:
         md.append("\n**Excluded seeds (under-converged, E_var > best + %g MeV):** " % OUTLIER_TOL
                   + "; ".join(f"L={L} core={c//1000}k {d}" for L, c, d in dropped_log))
+    seed_spread = max((r["hi"] - r["lo"]) for r in rows)
+    if dropped_log:
+        md.append("\n**Excluded seeds** (OUTLIER_TOL=%g MeV, **pre-specified** for this analysis; all raw "
+                  "shards retained — the filter is a quality gate, not a convergence certificate): "
+                  % OUTLIER_TOL + "; ".join(f"L={L} core={c//1000}k {d}" for L, c, d in dropped_log))
     else:
-        md.append("\n**No seeds excluded** — every paired seed is within %g MeV of the best at its core "
-                  "(seed-insensitive solve)." % OUTLIER_TOL)
+        md.append(f"\n**No seeds excluded** (OUTLIER_TOL={OUTLIER_TOL:g} MeV, **pre-specified**; all raw "
+                  f"shards retained; the filter is a quality gate, not a convergence certificate). Seed "
+                  f"labels are **indistinguishable at the displayed precision** (max seed spread "
+                  f"{seed_spread:.1e} MeV/site — the warm-grow solve is deterministic), so the seeds "
+                  f"establish reproducibility, not independent-sample statistics.")
     l4 = [r for r in rows if r["L"] == 4]
     l4med = l4[0]["med"] if l4 else float("nan")
-    md.append(f"\n**Reading (no overclaim):** with the paired same-seed method the shift is **small — "
-              f"|median Δ34/site| ≤ {absmax:.4f} MeV/site** (core-ladder residual) across L=2,3,4, and at "
-              f"the largest lattice (L=4) the reported median is {l4med:+.5f}/site, **consistent with** "
-              f"the 0.001 MeV/site *conservative* target-equivalent (1 MeV / 1000 sites — a uniform "
-              f"per-site allocation, NOT a derived budget). Seeds are insensitive (no exclusions), so "
-              f"the ±{absmax:.4f}/site scatter is residual CORE-incompleteness — the paired difference "
-              f"does not fully cancel it because the n_b=3/4 solves span different determinant spaces — "
-              f"and it STRADDLES the target line (sign flips down the ladder). **VERDICT: {verdict}.** "
-              f"The test finds the shift small with no resolved accumulation through L=4, but the "
-              f"residual is comparable to the signal, so it CANNOT certify the L=10 1 MeV target → C1's "
-              f"large-volume conditional is **retained, not discharged**. Limitations kept explicit: "
-              f"(i) same-seed pairs still use independent per-cutoff bases (a shared/union basis would "
-              f"be stronger); (ii) only dilute A=1 is probed (no dense-regime discharge; the dense L=3 "
-              f"gate was trap-limited); (iii) a paired difference near zero can still miss a common "
-              f"truncation bias shared by both selected-CI solves — this is not a total-energy bound. "
-              f"An earlier +1.78 MeV linear projection (min-over-seeds, shallow OOM core) is withdrawn.\n")
+    md.append(f"\n**Publishable claim (bounded, empirical):** in dilute A=1 calculations, paired "
+              f"same-seed n_b=3→4 shifts remain small and show **no resolved accumulation through the "
+              f"tested L=2–4 selected-CI points**; because the per-L core-ladder residual "
+              f"(≤{absmax:.4f} MeV/site) is comparable to the shift and the absolute energies are "
+              f"unconverged, this is **evidence, not a certification**, and the large-volume n_b=3 "
+              f"resource claim (C1) remains **conditional**.\n")
+    md.append(f"\n**Reading (no overclaim):** the deep-core paired medians are small — L=2 +0.00017, "
+              f"L=3 {[r['med'] for r in rows if r['L']==3][0]:+.5f}, L=4 {l4med:+.5f} MeV/site — "
+              f"**sign-mixed, no monotonic trend** over the three tested volumes (three points cannot "
+              f"establish volume-independence or justify an L=10 extrapolation). L=2 and L=4 fall inside, "
+              f"and **L=3 falls just outside**, the ±0.001 MeV/site band — a **conservative "
+              f"target-equivalent** (1 MeV / 1000 sites, a uniform per-site allocation; NOT a derived "
+              f"budget, tolerance, or confidence band). This is **consistent with** the L=2 gate "
+              f"(n_b=3 ≈ n_b=4). The paired difference does NOT isolate the operator-cutoff effect — the "
+              f"n_b=3/4 solves use independently selected bases of different boson dimension, and the "
+              f"sign-changing core ladder is the direct evidence pairing leaves a residual. **VERDICT: "
+              f"{verdict}** — evidence of no resolved accumulation in dilute L≤4, not an L=10 "
+              f"certification → C1 stays conditional. Limitations kept explicit: (i) independent "
+              f"per-cutoff bases (a shared/union basis would be stronger); (ii) dilute A=1 only (no "
+              f"dense-regime discharge; the dense L=3 gate was trap-limited); (iii) a paired difference "
+              f"near zero can still miss a common truncation bias in both solves — this is not a "
+              f"total-energy bound. An earlier +1.78 MeV linear projection (min-over-seeds, shallow OOM "
+              f"core) is withdrawn.\n")
     open(f"{args.out_dir}/nb_volscaling_table.md", "w").write("\n".join(md) + "\n")
     print(f"[tbl] wrote {args.out_dir}/nb_volscaling_table.md")
     for r in rows:
