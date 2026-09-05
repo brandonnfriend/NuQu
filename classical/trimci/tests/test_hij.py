@@ -59,7 +59,6 @@ def test_fermion_sector_spectrum(L=1, dim=1, n_b=2, tol=1e-8):
     err = np.max(np.abs(ours - theirs))
     assert err < tol, f"fermion spectrum mismatch {err:.2e}"
     print(f"[1] fermion spectrum: max|dE| = {err:.2e}  (n_states={len(basis)})  OK")
-    return err
 
 
 def test_boson_sector_spectrum(L=1, dim=1, n_b=2, tol=1e-8):
@@ -83,7 +82,6 @@ def test_boson_sector_spectrum(L=1, dim=1, n_b=2, tol=1e-8):
     err = np.max(np.abs(ours - theirs))
     assert err < tol, f"boson spectrum mismatch {err:.2e}"
     print(f"[2] boson spectrum:   max|dE| = {err:.2e}  (n_states={len(basis)})  OK")
-    return err
 
 
 def test_full_mixed_hermitian_and_solver(L=1, dim=1, n_b=2, A=1, tol=1e-8):
@@ -112,7 +110,6 @@ def test_full_mixed_hermitian_and_solver(L=1, dim=1, n_b=2, A=1, tol=1e-8):
     print(f"[3] mixed: hermiticity={herm_err:.2e}  E_ED={E_ed:.6f}  "
           f"E_solver(full)={res.energy:.6f} (err {solver_err:.1e})  "
           f"E_trim({res_trim.n_dets}/{full})={res_trim.energy:.6f}  OK")
-    return E_ed
 
 
 def test_dump_roundtrip(L=1, dim=1, n_b=2, A=1, tol=1e-10):

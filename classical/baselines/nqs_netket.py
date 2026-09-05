@@ -181,6 +181,12 @@ def run_vmc(L, dim, A, N_f=2, alpha=2, n_samples=4096, n_iter=300, lr=0.05,
     import netket as nk
     hi, op, H = build(L, dim, A, N_f=N_f, scales=scales)
 
+    # Complex-parameter RBM: netket's log-cosh RBM is a holomorphic function of its
+    # (complex) parameters, so the SR/QGT below is told so explicitly. Left undeclared,
+    # netket cannot infer it, emits HolomorphicUndeclaredWarning and falls back to the
+    # slower non-holomorphic QGT. Declaring it is the correct setting here, not a
+    # silencing of a real problem -- and an undeclared numerical setting is exactly the
+    # kind of thing an archival release should not carry (audit 2026-09-05).
     ma = nk.models.RBM(alpha=alpha, param_dtype=complex)
     exact = hi.is_indexable
     if exact:
@@ -190,7 +196,7 @@ def run_vmc(L, dim, A, N_f=2, alpha=2, n_samples=4096, n_iter=300, lr=0.05,
         vs = nk.vqs.MCState(sa, ma, n_samples=n_samples, seed=seed)
     n_params = vs.n_parameters
     opt = nk.optimizer.Sgd(learning_rate=lr)
-    sr = nk.optimizer.SR(diag_shift=diag_shift)
+    sr = nk.optimizer.SR(diag_shift=diag_shift, holomorphic=True)
     gs = nk.VMC(op, opt, variational_state=vs, preconditioner=sr)
 
     hist = []

@@ -16,6 +16,8 @@ Run from the project root:
     python -m tests.test_tong_cutoff
 """
 
+import pytest
+
 from src_PI.hamiltonians.core.EFTParameters import (
     calculate_ns_cutoffs,
     estimate_boson_cutoff,
@@ -147,11 +149,27 @@ def test_tong_rigorous_monotone_in_precision():
         N_prev = N_f
 
 
+def _cutoff_expecting_dim_warning(L, dim, A, p, **kw):
+    """`estimate_boson_cutoff` at dim != 3 emits a RuntimeWarning. It is DELIBERATE and
+    it is about the DIAGNOSTIC return values only: `n_q` comes from the requested
+    (dim-general) method, but the `pi_max`/`Pi_max` returned alongside it for
+    return-shape consistency come from `calculate_dynamic_cutoffs` (Watson Lemma 5),
+    whose a_L powers are 3D-specific and are NOT used in Fock operator construction.
+
+    The tests assert the warning instead of filtering it, so it keeps working as a real
+    signal for any caller that does consume pi_max/Pi_max, while no longer showing up as
+    unexplained noise in the suite (audit 2026-09-05, lower-priority findings)."""
+    if dim == 3:
+        return estimate_boson_cutoff(L, dim, A, p, **kw)
+    with pytest.warns(RuntimeWarning, match="Watson Lemma 5"):
+        return estimate_boson_cutoff(L, dim, A, p, **kw)
+
+
 def test_tong_rigorous_is_dim_general():
     """Unlike the Watson-3D baseline, the Gaussian-reference-estimate path runs for dim != 3."""
     p = get_physical_parameters()
     for dim in (1, 2, 3):
-        n_q, _, _ = estimate_boson_cutoff(
+        n_q, _, _ = _cutoff_expecting_dim_warning(
             2, dim, 2, p, epsilon_cut=1e-3, boson_cutoff_method='tong_rigorous')
         assert n_q >= 2
 
@@ -161,10 +179,11 @@ def test_gaussian_reference_estimate_is_canonical_alias():
     'tong_rigorous' alias (audit 03_cutoff rename)."""
     p = get_physical_parameters()
     for (L, dim) in ((2, 3), (2, 1)):
-        canon = estimate_boson_cutoff(L, dim, 4, p, epsilon_cut=1e-3,
-                                      boson_cutoff_method='gaussian_reference_estimate')[0]
-        alias = estimate_boson_cutoff(L, dim, 4, p, epsilon_cut=1e-3,
-                                      boson_cutoff_method='tong_rigorous')[0]
+        canon = _cutoff_expecting_dim_warning(
+            L, dim, 4, p, epsilon_cut=1e-3,
+            boson_cutoff_method='gaussian_reference_estimate')[0]
+        alias = _cutoff_expecting_dim_warning(
+            L, dim, 4, p, epsilon_cut=1e-3, boson_cutoff_method='tong_rigorous')[0]
         assert canon == alias
     assert Config(boson_cutoff_method='gaussian_reference_estimate').boson_cutoff_method \
         == 'gaussian_reference_estimate'
