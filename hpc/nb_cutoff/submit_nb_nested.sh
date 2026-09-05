@@ -46,6 +46,23 @@
 # large-volume conditional over the TESTED RANGE only if BOTH:
 #   (a) nested Delta34/site < 0.001 at every sampled (L, A) WITH n_hi_only_seeded > 0 at
 #       every rung (i.e. the search demonstrably looked at the new states), AND
+#
+# ADDENDUM (2026-09-05, after the first cluster run — cluster 292481, removed and relaunched).
+# A SECOND, CLEANER observable exists and is now recorded per rung: `delta_shared` =
+# E_4(core_3) - E_3(core_3), the two cutoffs on the IDENTICAL determinant set. It was expected
+# to be identically zero; it is not, and the reason is physics. The Hamiltonian has 252 terms
+# with `a a^dagger` ordering, and a^dagger|N_f-1> = 0 in a truncated Fock space, so a
+# determinant sitting at the low cutoff's TOP level (occupation 7 at n_b=3) is scored ~357.6 MeV
+# LOWER by H_3 than by H_4 (measured directly; the cutoffs agree exactly at occupations 4 and 6).
+# So the low cutoff does not merely OMIT the boundary states, it MIS-SCORES them — in the
+# direction that flatters the low cutoff. `delta_shared` carries NO selection noise at all,
+# which makes it the cleanest cutoff measurement available and a genuine shared-basis
+# comparison of the kind the audit named. `lo_boundary_weight` x ~358 MeV is the leading
+# estimate of the truncation error at fixed basis.
+# The pre-specified rule above is UNCHANGED (it was fixed before the data and stays that way);
+# delta_shared is reported ALONGSIDE it as additional evidence, not swapped in.
+# Consequence: `delta_nested` is NOT sign-definite once boundary population exists — E_4 can
+# exceed E_3 on the same core. Only delta_shared >= 0 is expected, and it is checked.
 #   (b) the core-ladder residual is also < 0.001 MeV/site (the measurement can resolve the
 #       target — this is the condition that FAILS today, at +-0.0028).
 # If either fails: the conditional is RETAINED and we widen the empirical claim instead,

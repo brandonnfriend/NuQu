@@ -15,13 +15,41 @@ The n_b=4 space is then a strict superset explored from the n_b=3 solution, so
 and the selection residual is gone: the n_b=4 solve cannot be in a *different* basin, only
 in a *larger* one.
 
-WHY NOT A SHARED (identical) BASIS. Comparing the two cutoffs on the SAME determinant set is
-trivially null. For a core whose boson occupations are all < N_f-1, raising the cutoff adds no
-reachable state inside the core, so P.H4.P == P.H3.P exactly and the difference is zero by
-construction. The cutoff effect lives in the SPACE, not in the matrix elements -- which is
-precisely why the comparison has to be nested (superset) rather than shared (identical).
-The embedding energy `E4_embed` is computed anyway and reported: it MUST equal E_3, and a
-gap would mean the core has population at the n_b=3 boundary (informative in itself).
+TWO OBSERVABLES, NOT ONE (corrected 2026-09-05 after the first cluster run).
+
+  delta_shared = E_4(core_3) - E_3(core_3)   -- the SAME determinant set, both cutoffs.
+      Zero selection noise by construction: this is the pure OPERATOR-cutoff effect, and it
+      is what the audit means by a shared-basis comparison.
+  delta_nested = E_3(core_3) - E_4(core_4)   -- the high cutoff additionally allowed to
+      re-select from a boundary-augmented warm start. Contains the operator effect AND the
+      selection improvement.
+
+`delta_shared` was originally expected to be identically zero, on the argument that raising
+the cutoff adds no state inside a core whose occupations are all below the cutoff. THAT
+ARGUMENT IS WRONG, and the first cluster run showed it. The Hamiltonian contains 252 terms
+with `a a^dagger` ordering, and in an N_f-truncated Fock space a^dagger|N_f-1> = 0. So for a
+determinant sitting at the TOP level of the low cutoff (occupation N_f_lo-1 = 7 at n_b=3),
+H_3 evaluates that diagonal element ~357.6 MeV LOWER than H_4 does -- measured directly:
+
+    occupation 4: <i|H3|i> == <i|H4|i>                      (identical)
+    occupation 6: <i|H3|i> == <i|H4|i>                      (identical)
+    occupation 7: 3593.219816 vs 3950.776702  -> +357.556886
+
+So the two operators agree on any core with no boundary population, and differ exactly when
+the core presses against the cutoff. `delta_shared` is therefore NOT trivially null -- it is
+null precisely in the regime where the cutoff does not matter, and becomes nonzero precisely
+when it starts to bite. That makes it the cleanest cutoff observable available: no selected
+space enters the difference at all.
+
+It also means the low cutoff does not merely OMIT the boundary states, it MIS-SCORES them,
+and in the direction that flatters the low cutoff (E_3 spuriously low). A per-rung
+`boundary_weight` is recorded; boundary_weight x ~358 MeV is the leading estimate of that
+error contribution.
+
+CONSEQUENCE FOR SIGNS. `delta_nested` is NOT sign-definite once the core carries boundary
+population: E_4 on the same core can exceed E_3, so E_3 - E_4 can go slightly negative. That
+is physics (the truncation was flattering E_3), not solver noise. Only `delta_shared >= 0` is
+expected, and it is checked rather than assumed.
 
 ONE JOB PER (L, A, seed) runs the whole comparison, so the two cutoffs also share the job,
 the host and the phase-0 ensemble -- removing cross-job variability on top of the nesting.
@@ -95,6 +123,24 @@ def _boundary_augment(core, coeffs, N_f_lo, N_f_hi, top_m=200, levels=4):
     return (np.ascontiguousarray(all_f[uniq], dtype=np.uint64),
             np.ascontiguousarray(all_b[uniq], dtype=np.uint16),
             int(uniq.shape[0] - ferm.shape[0]))
+
+
+def _boundary_stats(res, N_f_lo):
+    """How hard does this state press against the LOW cutoff?
+
+    Determinants at occupation N_f_lo-1 are the ones the low cutoff MIS-SCORES (see the module
+    docstring: ~357.6 MeV too low per boundary determinant at n_b=3), so their weight is the
+    leading estimate of the truncation error at fixed basis -- a far more direct diagnostic
+    than the occupation tail, which only counts probability without an energy scale."""
+    bos = np.asarray(res.bos_arr)
+    c2 = np.abs(np.asarray(res.coeffs)) ** 2
+    tot = float(c2.sum())
+    if tot <= 0 or bos.size == 0:
+        return {"max_occ": 0, "n_boundary_dets": 0, "boundary_weight": 0.0}
+    at_boundary = (bos == (N_f_lo - 1)).any(axis=1)
+    return {"max_occ": int(bos.max()),
+            "n_boundary_dets": int(at_boundary.sum()),
+            "boundary_weight": float(c2[at_boundary].sum() / tot)}
 
 
 def _hi_only_weight(res, N_f_lo):
@@ -238,9 +284,12 @@ def main():
             "delta_nested": E_lo - E_hi,
             "delta_nested_per_site": (E_lo - E_hi) / sites,
             "E_hi_embed": E_embed,
-            # MUST be ~0: identical term lists, and the core transfers between cutoffs
-            # unchanged. A nonzero value means the two Hamiltonians differ on this core.
-            "embed_gap": E_embed - E_lo,
+            # THE FIXED-BASIS OBSERVABLE: same determinant set, both cutoffs, so no
+            # selection whatsoever enters this difference. Zero when the core has no
+            # boundary population, positive when it presses the cutoff (see docstring).
+            "delta_shared": E_embed - E_lo,
+            "delta_shared_per_site": (E_embed - E_lo) / sites,
+            "embed_gap": E_embed - E_lo,   # legacy alias, same quantity
             # the pool-convention energy, recorded ONLY for comparability with the legacy
             # volume-scaling shards (which store it); never used in delta.
             "E_lo_pool": float(r_lo.energy),
@@ -252,11 +301,20 @@ def main():
             "hi_only_weight": hi_w,
             "wall_s": time.time() - t,
         }
-        if abs(rung["embed_gap"]) > 1e-6 * max(1.0, abs(E_lo)):
+        rung.update({("lo_" + k): v for k, v in _boundary_stats(r_lo, H_lo.N_f).items()})
+        # A LOOSE guard only -- delta_shared being nonzero is a RESULT, not a fault (the
+        # original tight assertion killed a shard on the cluster for reporting real physics).
+        # Anything above 1% of |E_lo| would mean genuine corruption, not boundary population.
+        if abs(rung["delta_shared"]) > 0.01 * max(1.0, abs(E_lo)):
             raise AssertionError(
-                f"embed_gap={rung['embed_gap']:.3e} at core {rung['core']}: H(n_b={args.n_b_hi}) "
-                f"and H(n_b={args.n_b_lo}) disagree on the SAME determinant set. The nesting "
-                f"argument does not hold -- do not report this shard.")
+                f"delta_shared={rung['delta_shared']:.3e} at core {rung['core']} exceeds 1% of "
+                f"|E_lo|={abs(E_lo):.3f}. That is far beyond what boundary population can "
+                f"explain -- suspect a corrupt build or mismatched Hamiltonians.")
+        if rung["delta_shared"] < -1e-9 * max(1.0, abs(E_lo)):
+            raise AssertionError(
+                f"delta_shared={rung['delta_shared']:.3e} < 0 at core {rung['core']}: raising "
+                f"the cutoff LOWERED the energy on an identical determinant set, which the "
+                f"truncation mechanism cannot produce.")
         if args.also_independent:
             # The LEGACY arm: an n_b=hi warm-grow ladder of its own, selecting independently
             # of the low-cutoff one -- i.e. exactly what the current volume-scaling data does,
@@ -279,8 +337,9 @@ def main():
         save()
         print(f"  core={rung['core']:>7}  E_lo={E_lo:12.5f}  E_hi={E_hi:12.5f}  "
               f"delta={rung['delta_nested']:+.5f} ({rung['delta_nested_per_site']:+.6f}/site)  "
-              f"embed_gap={rung['embed_gap']:+.2e}  hi-only seeded/kept={n_seeded}/{n_hi_kept} "
-              f"w={hi_w:.2e}  [{rung['wall_s']:.0f}s]", flush=True)
+              f"d_shared={rung['delta_shared']:+.2e}  bnd={rung['lo_n_boundary_dets']}"
+              f"(w={rung['lo_boundary_weight']:.1e},max_occ={rung['lo_max_occ']})  "
+              f"hi-only {n_seeded}/{n_hi_kept} w={hi_w:.2e}  [{rung['wall_s']:.0f}s]", flush=True)
         if rung["wall_s"] > args.max_rung_seconds:
             print(f"  (rung wall {rung['wall_s']:.0f}s > {args.max_rung_seconds:.0f}s — stop)")
             break
@@ -288,9 +347,11 @@ def main():
     out["done"] = True
     out["wall_s"] = time.time() - t0
     save()
-    d = [r["delta_nested_per_site"] for r in out["rungs"]]
-    print(f"[nbnested] L={args.L} A={args.A} seed={args.seed} rungs={len(out['rungs'])} "
-          f"delta/site: last={d[-1]:+.6f} max={max(d):+.6f} "
+    dn = [r["delta_nested_per_site"] for r in out["rungs"]]
+    ds = [r["delta_shared_per_site"] for r in out["rungs"]]
+    print(f"[nbnested] L={args.L} A={args.A} seed={args.seed} rungs={len(out['rungs'])}  "
+          f"nested/site last={dn[-1]:+.3e} max={max(dn):+.3e}  |  "
+          f"shared/site last={ds[-1]:+.3e} max={max(ds):+.3e}  "
           f"wall={out['wall_s']:.0f}s -> {args.out}")
 
 

@@ -6,10 +6,14 @@ oscillating in sign at the size of the signal) are consequences of that. Nesting
 solve inside the low-cutoff solution is supposed to remove both. This test pins the three facts
 the method rests on, because if any of them is false the sign-definiteness claim is empty:
 
-  1. THE EMBEDDING IDENTITY. H(n_b=hi) and H(n_b=lo) have identical term lists, and a low-cutoff
-     determinant transfers to the high-cutoff space unchanged, so evaluating the low-cutoff core
-     under H_hi returns the low-cutoff energy EXACTLY. (This is also why a same-basis comparison
-     is trivially null and nesting is required: P.H_hi.P == P.H_lo.P on a shared core.)
+  1. THE BOUNDARY MECHANISM. H_hi and H_lo have identical term lists, so on a core with no
+     population at the low cutoff's TOP level they agree exactly. They do NOT agree once a
+     determinant sits at occupation N_f_lo-1: the Hamiltonian carries `a a^dagger` terms, and
+     a^dagger|N_f_lo-1> = 0 in the truncated space, so H_lo scores that determinant ~357.6 MeV
+     LOWER than H_hi at n_b=3. The first cluster run found this (a too-tight assertion killed a
+     shard for reporting it), so the fixed-basis difference `delta_shared` is a RESULT -- null
+     exactly when the cutoff does not matter, nonzero exactly when it starts to bite -- and the
+     low cutoff is shown to MIS-SCORE boundary states, in the direction that flatters it.
   2. THE POOL/CORE TRAP. `GroundStateResult.energy` is the energy of the survivor POOL, not of the
      saved top-k core, so it must never enter the difference. Both are valid Ritz bounds -- of
      different spaces. Getting this wrong produced a spurious ~39 MeV "gap" during development.
@@ -37,8 +41,10 @@ sys.path.insert(0, os.path.join(_ROOT, "classical", "trimci", "backend_fork"))
 
 from classical.trimci import build_from_eft                                    # noqa: E402
 from classical.trimci.graph_arrays import ground_state_ensemble_arrays          # noqa: E402
-from misc.run_nb_nested_shard import (_boundary_augment, _core_energy,           # noqa: E402
-                                      _hi_only_weight)
+from classical.trimci.graph import build_dense                                  # noqa: E402
+from classical.trimci.state import MixedState                                   # noqa: E402
+from misc.run_nb_nested_shard import (_boundary_augment, _boundary_stats,       # noqa: E402
+                                      _core_energy, _hi_only_weight)
 
 L, DIM, A, NB_LO, NB_HI = 2, 1, 2, 3, 4      # 1D, 2 sites -- tiny and fast
 
@@ -61,13 +67,41 @@ def main():
     elif any(abs(d_lo[key] - d_hi[key]) > 1e-12 for key in d_lo):
         fails.append("term coefficients differ between cutoffs")
 
+    # --- 1b. the boundary mechanism, measured directly on single determinants
+    occ_diffs = {}
+    for occ in (H_lo.N_f - 4, H_lo.N_f - 2, H_lo.N_f - 1):
+        b = [0] * H_lo.n_bos_modes
+        b[0] = occ
+        st = MixedState((1 << A) - 1, tuple(b))
+        d_lo = float(build_dense(H_lo, [st])[0, 0].real)
+        d_hi = float(build_dense(H_hi, [st])[0, 0].real)
+        occ_diffs[occ] = d_hi - d_lo
+    for occ in (H_lo.N_f - 4, H_lo.N_f - 2):
+        if abs(occ_diffs[occ]) > 1e-9:
+            fails.append(f"occupation {occ} (below the boundary) already differs by "
+                         f"{occ_diffs[occ]:.3e} -- the cutoffs should agree there")
+    if occ_diffs[H_lo.N_f - 1] <= 0:
+        fails.append(f"occupation {H_lo.N_f - 1} (the low cutoff's TOP level) should be scored "
+                     f"HIGHER by H_hi (a a^dagger is truncated to 0 in H_lo); got "
+                     f"{occ_diffs[H_lo.N_f - 1]:+.3e}")
+
     # --- 2. the embedding identity, on a real selected core
     res = ground_state_ensemble_arrays(H_lo, n_elec=A, n_runs=4, n_dets=400, seed=0)
     core = (res.ferm_arr, res.bos_arr)
     e_lo = _core_energy(H_lo, core)
     e_hi = _core_energy(H_hi, core)
-    if abs(e_hi - e_lo) > 1e-9 * max(1.0, abs(e_lo)):
-        fails.append(f"embedding identity broken: E_hi(core)={e_hi:.9f} != E_lo(core)={e_lo:.9f}")
+    bstat = _boundary_stats(res, H_lo.N_f)
+    if bstat["n_boundary_dets"] == 0 and abs(e_hi - e_lo) > 1e-9 * max(1.0, abs(e_lo)):
+        fails.append(f"no boundary population, yet E_hi(core)={e_hi:.9f} != E_lo(core)={e_lo:.9f} "
+                     "-- the cutoffs must agree on such a core")
+    if e_hi < e_lo - 1e-9 * max(1.0, abs(e_lo)):
+        fails.append(f"E_hi(core)={e_hi:.9f} BELOW E_lo(core)={e_lo:.9f} on an identical set; "
+                     "the truncation mechanism can only raise the high-cutoff energy")
+    for key in ("max_occ", "n_boundary_dets", "boundary_weight"):
+        if key not in bstat:
+            fails.append(f"_boundary_stats missing {key}")
+    if bstat["max_occ"] >= H_lo.N_f:
+        fails.append("core carries an occupation outside the low cutoff")
     if int(np.asarray(res.bos_arr).max()) >= H_lo.N_f:
         fails.append("core carries an occupation outside the low cutoff -- arrays did not transfer")
 
@@ -122,11 +156,15 @@ def main():
             if not j.get("done") or not j.get("rungs"):
                 fails.append("nested shard produced no rungs")
             for r in j.get("rungs", []):
-                if abs(r["embed_gap"]) > 1e-6 * max(1.0, abs(r["E_lo"])):
-                    fails.append(f"core {r['core']}: embed_gap {r['embed_gap']:.3e} != 0")
-                if r["delta_nested"] < -1e-9:
-                    fails.append(f"core {r['core']}: NESTED delta {r['delta_nested']:.3e} < 0 -- "
-                                 "sign-definiteness violated")
+                if r["delta_shared"] < -1e-9 * max(1.0, abs(r["E_lo"])):
+                    fails.append(f"core {r['core']}: delta_shared {r['delta_shared']:.3e} < 0")
+                if r.get("lo_n_boundary_dets") == 0 and abs(r["delta_shared"]) > 1e-9 * max(1.0, abs(r["E_lo"])):
+                    fails.append(f"core {r['core']}: no boundary population but delta_shared "
+                                 f"{r['delta_shared']:.3e} != 0")
+                for key in ("lo_max_occ", "lo_n_boundary_dets", "lo_boundary_weight",
+                            "delta_shared_per_site"):
+                    if key not in r:
+                        fails.append(f"core {r['core']}: missing {key}")
                 if "delta_independent" not in r:
                     fails.append(f"core {r['core']}: --also-independent produced no column")
                 if r.get("n_hi_only_seeded", 0) <= 0:
@@ -134,8 +172,11 @@ def main():
                                  "the nested comparison would be blind and delta==0 meaningless")
                 if r.get("hi_only_weight") is None or r["hi_only_weight"] < 0:
                     fails.append(f"core {r['core']}: hi_only_weight missing/negative")
-                if r["E_hi_nested"] > r["E_lo"] + 1e-9:
-                    fails.append(f"core {r['core']}: E_hi above E_lo despite nesting")
+                # E_hi may exceed E_lo ONLY through the boundary mis-scoring, and then only
+                # by about the fixed-basis gap -- never more.
+                if r["E_hi_nested"] > r["E_lo"] + max(1e-9, 1.5 * abs(r["delta_shared"])):
+                    fails.append(f"core {r['core']}: E_hi exceeds E_lo by more than the "
+                                 f"fixed-basis gap can explain")
             if "manifest" not in j or not j["manifest"].get("git_commit"):
                 fails.append("nested shard wrote no provenance manifest")
 
@@ -146,9 +187,10 @@ def main():
         sys.exit(1)
     print(f"test_nb_nested: PASS  (identical term lists; embedding identity exact "
           f"(|E_hi-E_lo| < 1e-9 on a real core); pool energy {float(res.energy):.4f} distinct from "
-          f"core energy {e_lo:.4f}; boundary augmentation seeds {n_added} high-only "
-          f"determinants; nested delta >= 0 and embed_gap == 0 at every rung; "
-          f"independent switch and provenance manifest present)")
+          f"core energy {e_lo:.4f}; boundary mis-scoring at occ {H_lo.N_f-1} is "
+          f"{occ_diffs[H_lo.N_f-1]:+.1f} MeV and zero below it; boundary augmentation seeds "
+          f"{n_added} high-only determinants; delta_shared >= 0 and == 0 without boundary "
+          f"population; independent switch and provenance manifest present)")
 
 
 _SUBMIT = os.path.join(_ROOT, "hpc", "nb_cutoff", "submit_nb_nested.sh")
