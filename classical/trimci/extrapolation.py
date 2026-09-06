@@ -392,6 +392,23 @@ def einf_with_uncertainty(rungs, sites=None, sigma_seed=None, min_post=3):
     # which only synthetic/exact data produces. Never collapse the two.
     sigma = float(np.sqrt(sum(t ** 2 for t in have))) if have else None
 
+    # A FIT-ONLY uncertainty is not defensible. With the bare minimum number of rungs the
+    # fit has no leave-one-out refit and no second extrapolator to disagree with, so sigma
+    # collapses to the fit covariance -- which on a short ladder is tiny and says nothing
+    # about the extrapolation being right. Seen on real data: L=5, 3 post-collapse rungs,
+    # E_inf 1669 MeV BELOW the deepest computed value with a claimed +-16 MeV. Requiring at
+    # least one INDEPENDENT term (method or stability) demands >=4 post-collapse rungs, which
+    # is the honest floor -- and needs no free threshold.
+    if terms["method"] is None and terms["stability"] is None:
+        out.update(ok=False,
+                   reason=f"{primary} extrapolation has a FIT-ONLY uncertainty ({len(post)} "
+                          f"post-collapse rungs, {len(pt2_post)} with PT2): no second "
+                          f"extrapolator and no leave-one-out refit to cross-check it. Not "
+                          f"reportable -- quote the variational bound.",
+                   E_inf=None, E_inf_ps=None, sigma=None, sigma_ps=None,
+                   sigma_terms=terms, primary=primary)
+        return out
+
     # No error bar -> not reportable. A central value whose uncertainty could not be
     # estimated is exactly what audit P0-2 rejects, so refuse it rather than print it bare.
     if sigma is None:
@@ -431,35 +448,63 @@ def combine_seeds(per_seed, sites=None, min_post=3):
 
     `per_seed` maps seed -> full rung list. Returns the pooled record: the best (lowest)
     variational bound across seeds -- still rigorous, since every seed's E_var is a valid
-    Ritz bound -- and the mean E_infinity with the seed spread folded into sigma.
+    Ritz bound -- and the E_infinity of the seed that reached that bound, with the
+    between-seed spread folded into sigma.
     """
-    firsts = {s: einf_with_uncertainty(r, sites=sites, min_post=min_post)
-              for s, r in per_seed.items()}
-    good = {s: v for s, v in firsts.items() if v.get("ok")}
-    E_infs = np.array([v["E_inf"] for v in good.values()], dtype=float)
-    # sample std over >=2 seeds; a single seed gets no seed term (and we say so)
-    sigma_seed = float(E_infs.std(ddof=1)) if len(E_infs) >= 2 else None
-    final = {s: einf_with_uncertainty(per_seed[s], sites=sites, sigma_seed=sigma_seed,
-                                      min_post=min_post) for s in per_seed}
+    # Each seed is fitted on its OWN ladder only -- the seed spread is a property of the
+    # POOL, so folding it into every per-seed sigma and then averaging those sigmas would
+    # double-count it. It enters once, below.
+    final = {s: einf_with_uncertainty(r, sites=sites, min_post=min_post)
+             for s, r in per_seed.items()}
     ok = {s: v for s, v in final.items() if v.get("ok")}
+    E_infs = np.array([v["E_inf"] for v in ok.values()], dtype=float)
+    sigma_seed = float(E_infs.std(ddof=1)) if len(E_infs) >= 2 else None
     bounds = [v["E_var_bound"] for v in final.values() if v.get("E_var_bound") is not None]
+    bound = min(bounds) if bounds else None                      # tightest rigorous bound
     per = lambda x: (x / sites) if (x is not None and sites) else None
     pooled = {
         "seeds": sorted(per_seed), "n_seeds": len(per_seed), "n_seeds_extrapolated": len(ok),
         "sites": sites,
-        "E_var_bound": min(bounds) if bounds else None,          # tightest rigorous bound
-        "E_var_bound_ps": per(min(bounds)) if bounds else None,
+        "E_var_bound": bound, "E_var_bound_ps": per(bound),
         "sigma_seed": sigma_seed, "sigma_seed_ps": per(sigma_seed),
         "per_seed": final,
     }
-    if ok:
-        E = float(np.mean([v["E_inf"] for v in ok.values()]))
-        sig = float(np.mean([v["sigma"] for v in ok.values() if v["sigma"] is not None])) \
-            if any(v["sigma"] is not None for v in ok.values()) else None
-        pooled.update(ok=True, E_inf=E, E_inf_ps=per(E), sigma=sig, sigma_ps=per(sig),
-                      reason=f"mean over {len(ok)}/{len(per_seed)} extrapolated seeds")
-    else:
+    if not ok:
         pooled.update(ok=False, E_inf=None, E_inf_ps=None, sigma=None, sigma_ps=None,
                       reason="no seed produced a defensible extrapolation; "
                              "only the variational upper bound may be quoted")
+        return pooled
+
+    # POOLING: take the extrapolation from the seed with the TIGHTEST variational bound,
+    # not the mean over seeds. Independent warm-grow trajectories reach ladders of unequal
+    # quality -- a seed stuck in a worse basin carries a worse bound AND a worse
+    # extrapolation -- so averaging them mixes a good estimate with a bad one and can even
+    # land the mean ABOVE the tightest rigorous bound (observed on real data: n_b=3 L=2,
+    # mean 1809.25 vs tightest bound 1805.56). The best-ladder seed's estimate respects that
+    # bound by construction. The disagreement between seeds is not discarded -- it becomes
+    # the dominant uncertainty term.
+    best_seed = min(ok, key=lambda s: ok[s]["E_var_bound"])
+    E = float(ok[best_seed]["E_inf"])
+    within = ok[best_seed].get("sigma")
+    parts = ([within] if within is not None else []) + \
+            ([sigma_seed] if sigma_seed is not None else [])
+    sig = float(np.sqrt(sum(p ** 2 for p in parts))) if parts else None
+    pooled["best_seed"] = best_seed
+
+    # THE POOLED VARIATIONAL GUARD. Each seed's extrapolation respects its OWN bound, but
+    # the pooled estimate is a mean while the pooled bound is the tightest (lowest) seed's --
+    # so seeds of unequal ladder quality can average to a value ABOVE the best bound. Seen on
+    # real data (n_b=3, L=2: pooled 1809.25 vs tightest bound 1805.56). That is a
+    # contradiction, not a wide error bar, so it is refused rather than reported.
+    if bound is not None and E > bound + 1e-9:
+        pooled.update(ok=False, E_inf=None, E_inf_ps=None, sigma=None, sigma_ps=None,
+                      reason=f"pooled extrapolation ({E:.3f}) lies ABOVE the tightest "
+                             f"variational bound across seeds ({bound:.3f}) -- the seeds "
+                             f"disagree too much to average ({len(ok)} extrapolated: "
+                             f"{[round(x, 2) for x in E_infs]}); quote the bound")
+        return pooled
+
+    pooled.update(ok=True, E_inf=E, E_inf_ps=per(E), sigma=sig, sigma_ps=per(sig),
+                  reason=f"best-ladder seed {best_seed} of {len(ok)}/{len(per_seed)} "
+                         f"extrapolated; sigma = its own uncertainty (+) between-seed spread")
     return pooled

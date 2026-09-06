@@ -129,17 +129,55 @@ def main():
     else:
         if pooled["sigma_seed"] is None or pooled["sigma_seed"] < 1.0:
             fails.append(f"seed spread not captured (sigma_seed={pooled['sigma_seed']})")
+        # the seed spread is a property of the POOL: it must enter the pooled sigma ONCE,
+        # not be folded into every per-seed sigma and then averaged (that double-counts it).
         for s, v in pooled["per_seed"].items():
-            if v["ok"] and v["sigma_terms"].get("seed") is None:
-                fails.append(f"seed {s}: seed systematic not folded into its error bar")
-        if abs(pooled["E_inf"] - 1800.0) > 3.0:
-            fails.append(f"pooled E_inf {pooled['E_inf']:.2f} far from the seed mean")
-        # the tightest bound across seeds is the one that stays rigorous
+            if v["ok"] and v["sigma_terms"].get("seed") is not None:
+                fails.append(f"seed {s}: seed spread double-counted inside a per-seed sigma")
+        best = pooled["best_seed"]
+        if pooled["per_seed"][best]["E_var_bound"] != pooled["E_var_bound"]:
+            fails.append("pooled estimate did not come from the tightest-bound seed")
+        if abs(pooled["E_inf"] - pooled["per_seed"][best]["E_inf"]) > 1e-9:
+            fails.append("pooled E_inf is not the best-ladder seed's estimate")
+        want = np.sqrt(pooled["per_seed"][best]["sigma"] ** 2 + pooled["sigma_seed"] ** 2)
+        if abs(pooled["sigma"] - want) > 1e-6:
+            fails.append(f"pooled sigma {pooled['sigma']:.4f} != quadrature of the best seed's "
+                         f"own uncertainty and the between-seed spread ({want:.4f})")
+        if pooled["sigma"] < pooled["sigma_seed"] - 1e-9:
+            fails.append("pooled sigma smaller than the seed spread it contains")
+        if abs(pooled["E_inf"] - 1794.0) > 3.0:
+            fails.append(f"pooled E_inf {pooled['E_inf']:.2f} is not the best (lowest-bound) "
+                         "seed's planted value 1794")
         if pooled["E_var_bound"] != min(v["E_var_bound"] for v in pooled["per_seed"].values()):
             fails.append("pooled bound is not the tightest (lowest) seed bound")
+        if pooled["E_inf"] > pooled["E_var_bound"] + 1e-9:
+            fails.append("pooled E_inf above the pooled bound slipped through")
     single = combine_seeds({0: _power_ladder()}, sites=SITES)
     if single["sigma_seed"] is not None:
         fails.append("a single seed must not claim a seed spread")
+
+    # --- 6. the POOLED variational guard --------------------------------------------
+    # Each seed can respect its OWN bound while the mean exceeds the TIGHTEST bound, when
+    # the seeds reached ladders of unequal quality. Observed on real data (n_b=3, L=2:
+    # pooled 1809.25 vs tightest bound 1805.56); it is a contradiction, not a wide error bar.
+    mixed = {0: _power_ladder(E_inf=1800.0),
+             1: _power_ladder(E_inf=1860.0, drop=400.0)}   # seed 1: much worse ladder
+    pm = combine_seeds(mixed, sites=SITES)
+    if pm["ok"] and pm["E_inf"] > pm["E_var_bound"] + 1e-9:
+        fails.append(f"pooled E_inf {pm['E_inf']:.2f} exceeds the tightest bound "
+                     f"{pm['E_var_bound']:.2f} and was still reported")
+
+    # --- 7. a FIT-ONLY uncertainty is refused ----------------------------------------
+    # Exactly 3 post-collapse PT2 rungs: the linear fit works, but there is no second
+    # extrapolator and no leave-one-out refit, so sigma would be the fit covariance alone.
+    # 4 rungs -> the largest drop is the first, so exactly 3 survive the basin split
+    short_pt2 = _shci_ladder(dps=(-40.0, -26.0, -17.0, -11.0))
+    r7 = einf_with_uncertainty(short_pt2, sites=SITES)
+    if r7["ok"]:
+        fails.append(f"fit-only uncertainty reported (sigma_terms={r7.get('sigma_terms')}) -- "
+                     "needs an independent cross-check")
+    elif "FIT-ONLY" not in (r7.get("reason") or ""):
+        fails.append(f"refused for the wrong reason: {r7.get('reason')}")
 
     if fails:
         print("test_einf_uncertainty: FAILED")
@@ -148,7 +186,8 @@ def main():
         sys.exit(1)
     print(f"test_einf_uncertainty: PASS  (power-law E_inf {r['E_inf']:.2f}±{r['sigma']:.2f} "
           f"vs planted {E_INF}; SHCI intercept {r2['E_inf']:.3f} vs planted {E_FCI}; "
-          f"guard + min-rung refusals fire; seed spread {pooled['sigma_seed']:.2f} MeV folded in)")
+          f"guard + min-rung + fit-only + pooled-bound refusals fire; seed spread "
+          f"{pooled['sigma_seed']:.2f} MeV entering the pooled sigma exactly once)")
 
 
 def test_einf_uncertainty():

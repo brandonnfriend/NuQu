@@ -170,13 +170,15 @@ def make_figure(recs, out_base):
         x = np.arange(len(ex))
         bottom = np.zeros(len(ex))
         for term in ("fit", "method", "stability", "seed"):
-            # per-seed terms are identical across seeds except 'fit'; average them
+            # the terms that actually build sigma: the BEST-LADDER seed's own fit/method/
+            # stability, plus the between-seed spread (which is a property of the pool).
             vals = []
             for r in ex:
-                per = [v["sigma_terms_ps"].get(term) for v in r["per_seed"].values()
-                       if v.get("ok") and v.get("sigma_terms_ps")]
-                per = [p for p in per if p is not None]
-                vals.append(float(np.mean(per)) if per else 0.0)
+                if term == "seed":
+                    vals.append(float(r.get("sigma_seed_ps") or 0.0))
+                    continue
+                t = (r["per_seed"].get(r.get("best_seed"), {}).get("sigma_terms_ps") or {})
+                vals.append(float(t.get(term) or 0.0))
             vals = np.asarray(vals)
             axB.bar(x, vals, bottom=bottom, color=SIGMA_COLOR[term], width=0.62,
                     label=f"σ$_\\mathrm{{{term}}}$", edgecolor=SURFACE, lw=0.8)
@@ -241,20 +243,25 @@ def make_table(recs, out_path):
                   f"{r['E_var_bound_ps']:.1f} | {'—' if dE is None else f'{dE:.2f}'} | "
                   f"{'—' if pt2 is None else f'{pt2:.1f}'} | {rep} | {prim} | {v0.get('n_post', 0)} |")
 
-    md += ["", "### Error budget (MeV/site, per seed averaged)", "",
-           "| $n_b$ | L | σ fit | σ method | σ stability | σ seed | **σ total** |",
-           "|--:|--:|--:|--:|--:|--:|--:|"]
+    md += ["", "### Error budget (MeV/site)", "",
+           "_fit / method / stability are the BEST-LADDER seed's own terms (the seed whose "
+           "variational bound is tightest — that is the seed the reported $E_\\infty$ comes "
+           "from); σ seed is the spread of $E_\\infty$ ACROSS seeds. σ total is their "
+           "quadrature, so it is not the sum of the row._", "",
+           "| $n_b$ | L | best seed | σ fit | σ method | σ stability | σ seed | **σ total** |",
+           "|--:|--:|--:|--:|--:|--:|--:|--:|"]
     for r in recs:
         if not r["ok"]:
             continue
-        row = []
-        for term in ("fit", "method", "stability", "seed"):
-            per = [v["sigma_terms_ps"].get(term) for v in r["per_seed"].values()
-                   if v.get("ok") and v.get("sigma_terms_ps")]
-            per = [p for p in per if p is not None]
-            row.append(f"{np.mean(per):.2f}" if per else "—")
+        best = r.get("best_seed")
+        v = r["per_seed"].get(best, {})
+        terms = v.get("sigma_terms_ps") or {}
+        row = [(f"{terms[t]:.2f}" if terms.get(t) is not None else "—")
+               for t in ("fit", "method", "stability")]
+        row.append(f"{r['sigma_seed_ps']:.2f}" if r.get("sigma_seed_ps") is not None
+                   else "— (1 seed)")
         tot = f"{r['sigma_ps']:.2f}" if r.get("sigma_ps") is not None else "—"
-        md.append(f"| {r['n_b']} | {r['L']} | " + " | ".join(row) + f" | **{tot}** |")
+        md.append(f"| {r['n_b']} | {r['L']} | {best} | " + " | ".join(row) + f" | **{tot}** |")
 
     md += ["", "### Why we fit the POST-collapse basin (the failing diagnostic)", "",
            "The warm-grown ladder escapes a delocalized exploration basin onto the compact "
