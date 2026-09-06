@@ -57,7 +57,8 @@ BLUE, ORANGE, CRIT, GREEN = "#2a78d6", "#eb6834", "#d03b3b", "#3a9b6a"
 PURP, TEAL = "#7b5cd6", "#2f8f8a"
 INK, INK2, MUTED, GRID, AXIS, SURFACE = "#0b0b0b", "#52514e", "#898781", "#e1e0d9", "#c3c2b7", "#fcfcfb"
 NB_COLOR = {2: MUTED, 3: BLUE, 4: PURP}
-SIGMA_COLOR = {"fit": BLUE, "method": ORANGE, "stability": TEAL, "seed": PURP}
+SIGMA_COLOR = {"fit": BLUE, "method": ORANGE, "stability": TEAL,
+               "shci_half_distance": PURP}
 # Pre-vertex-fix data is inadmissible (the nucleon spin-isospin vertex bug, fixed
 # 2026-08-18 / 9404fac). Guard here too: a figure is the last place a retired shard
 # should be able to reappear.
@@ -169,20 +170,23 @@ def make_figure(recs, out_base):
         labels = [f"$n_b$={r['n_b']}\n$L$={r['L']}" for r in ex]
         x = np.arange(len(ex))
         bottom = np.zeros(len(ex))
-        for term in ("fit", "method", "stability", "seed"):
-            # the terms that actually build sigma: the BEST-LADDER seed's own fit/method/
-            # stability, plus the between-seed spread (which is a property of the pool).
+        for term in ("fit", "method", "stability", "shci_half_distance"):
+            # the terms sigma is actually built from, all from the best (tightest-bound)
+            # seed. sigma = max(SHCI half-distance, quadrature(fit, method, stability)),
+            # so this is a component view, not an additive decomposition.
             vals = []
             for r in ex:
-                if term == "seed":
-                    vals.append(float(r.get("sigma_seed_ps") or 0.0))
-                    continue
                 t = (r["per_seed"].get(r.get("best_seed"), {}).get("sigma_terms_ps") or {})
                 vals.append(float(t.get(term) or 0.0))
             vals = np.asarray(vals)
-            axB.bar(x, vals, bottom=bottom, color=SIGMA_COLOR[term], width=0.62,
-                    label=f"σ$_\\mathrm{{{term}}}$", edgecolor=SURFACE, lw=0.8)
-            bottom += vals
+            lbl = ("SHCI ½-dist" if term == "shci_half_distance"
+                   else f"σ$_\\mathrm{{{term}}}$")
+            axB.bar(x + (0.19 if term == "shci_half_distance" else -0.19), vals,
+                    bottom=(0.0 if term == "shci_half_distance" else bottom),
+                    color=SIGMA_COLOR[term], width=0.34, label=lbl,
+                    edgecolor=SURFACE, lw=0.8)
+            if term != "shci_half_distance":
+                bottom += vals
         axB.plot(x, [r["sigma_ps"] or 0.0 for r in ex], "D", color=INK, ms=5, zorder=6,
                  label="σ (quadrature)")
         # explicit xlim: with a single (n_b, L) the auto-scaled axis stretches one bar
@@ -191,7 +195,7 @@ def make_figure(recs, out_base):
         axB.set_xticks(x); axB.set_xticklabels(labels, fontsize=8)
         axB.set_ylim(0, max(1e-9, max(r["sigma_ps"] or 0.0 for r in ex)) * 1.45)
         axB.set_ylabel("uncertainty contribution  (MeV / site)", color=INK2, fontsize=9.5)
-        axB.set_title("b  Error budget — what σ is made of (linear stack; σ adds in quadrature)",
+        axB.set_title("b  σ components — internal quadrature (left) vs the SHCI convention (right)",
                       color=INK, fontsize=10.5, loc="left", weight="bold")
         axB.legend(frameon=False, fontsize=7.4, loc="upper right", labelcolor=INK2, ncol=2)
         _style(axB)
@@ -244,11 +248,20 @@ def make_table(recs, out_path):
                   f"{'—' if pt2 is None else f'{pt2:.1f}'} | {rep} | {prim} | {v0.get('n_post', 0)} |")
 
     md += ["", "### Error budget (MeV/site)", "",
-           "_fit / method / stability are the BEST-LADDER seed's own terms (the seed whose "
-           "variational bound is tightest — that is the seed the reported $E_\\infty$ comes "
-           "from); σ seed is the spread of $E_\\infty$ ACROSS seeds. σ total is their "
-           "quadrature, so it is not the sum of the row._", "",
-           "| $n_b$ | L | best seed | σ fit | σ method | σ stability | σ seed | **σ total** |",
+           "_σ is an **extrapolation** uncertainty: the larger of the **SHCI convention** "
+           "(Holmes, Tubman & Umrigar 2016 — \"the uncertainty in our extrapolated energy is "
+           "given as 1/2 of the energy extrapolation\") and our internal quadrature of "
+           "fit ⊕ method ⊕ stability. Taking the larger keeps us at or above what a referee "
+           "would compute from the same numbers. All terms belong to the **best (tightest-bound) "
+           "seed** — the trajectory taken furthest, which is the one reported._", "",
+           "**The seed spread is deliberately NOT in σ.** Multiple random starts are a *search* "
+           "device, not a statistical sample: TrimCI (Zhang & Otten 2025) runs many independent "
+           "starts, takes *\"the best-performing run\"* as the candidate for the global "
+           "ground-state basin, and uses run-to-run agreement as a **robustness check** — never "
+           "as an error bar. `E_var` is variational, so a seed that lands higher searched worse; "
+           "it is not a second measurement of the same quantity. The spread is reported in the "
+           "next table instead.", "",
+           "| $n_b$ | L | best seed | σ fit | σ method | σ stability | SHCI ½-dist | **σ (source)** |",
            "|--:|--:|--:|--:|--:|--:|--:|--:|"]
     for r in recs:
         if not r["ok"]:
@@ -257,11 +270,34 @@ def make_table(recs, out_path):
         v = r["per_seed"].get(best, {})
         terms = v.get("sigma_terms_ps") or {}
         row = [(f"{terms[t]:.2f}" if terms.get(t) is not None else "—")
-               for t in ("fit", "method", "stability")]
-        row.append(f"{r['sigma_seed_ps']:.2f}" if r.get("sigma_seed_ps") is not None
-                   else "— (1 seed)")
+               for t in ("fit", "method", "stability", "shci_half_distance")]
+        src = {"shci_half_distance": "SHCI", "internal_quadrature": "internal"}.get(
+            v.get("sigma_source"), "—")
         tot = f"{r['sigma_ps']:.2f}" if r.get("sigma_ps") is not None else "—"
-        md.append(f"| {r['n_b']} | {r['L']} | {best} | " + " | ".join(row) + f" | **{tot}** |")
+        md.append(f"| {r['n_b']} | {r['L']} | {best} | " + " | ".join(row) +
+                  f" | **{tot}** ({src}) |")
+
+    md += ["", "### Search robustness — did independent random starts find the same state?", "",
+           "_TrimCI's own robustness argument is that independent random starts converge to the "
+           "same final state. This table reports whether ours did. **A failed check does not "
+           "widen σ** — σ measures how far we extrapolated, and is structurally blind to landing "
+           "in the wrong basin. It is a caveat on the central value, stated rather than "
+           "absorbed._", "",
+           "**Standing caveat.** This is a variational heuristic and it can sit in a local "
+           "minimum; no error bar here would detect that. What we can say is that the result is "
+           "*self-consistent* — the reported value comes from the deepest, tightest-bound "
+           "trajectory, and every `E_var` is a rigorous upper bound whatever basin it found — "
+           "and that the agreement check below is reported honestly, including where it fails.", "",
+           "| $n_b$ | L | seeds | extrapolated | agree with best (within σ) | spread of $E_\\infty$ /site | verdict |",
+           "|--:|--:|--:|--:|--:|--:|:--|"]
+    for r in recs:
+        rob = r.get("seed_robustness") or {}
+        if not rob:
+            continue
+        sp = rob.get("spread_ps")
+        md.append(f"| {r['n_b']} | {r['L']} | {rob.get('n_seeds')} | {rob.get('n_extrapolated')} | "
+                  f"{rob.get('n_agreeing_with_best')} | "
+                  f"{'—' if sp is None else f'{sp:.2f}'} | {rob.get('check')} |")
 
     md += ["", "### Why we fit the POST-collapse basin (the failing diagnostic)", "",
            "The warm-grown ladder escapes a delocalized exploration basin onto the compact "

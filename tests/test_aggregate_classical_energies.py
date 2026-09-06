@@ -8,7 +8,7 @@ with a PLANTED E_infinity let all of that be checked exactly.
 Checks:
   * multi-seed pooling produces one row per (n_b, L) with an E_inf AND a sigma, and the
     planted E_infinity is recovered;
-  * the seed spread reaches the error budget;
+  * the seed spread is reported as a search diagnostic and kept OUT of sigma;
   * a short ladder is reported as a bound with NO invented central value;
   * the paired n_b=2 -> 3 cutoff-shift table appears when both cutoffs are present;
   * pre-vertex-fix directories are REFUSED by default (retired data must never reach a
@@ -86,8 +86,14 @@ def main():
                     fails.append(f"{k}: E_inf {r['E_inf']:.2f} != planted {E} (tol 5 MeV)")
                 if r["sigma"] is None:
                     fails.append(f"{k}: reported a value with no error bar")
-                if r["sigma_seed"] is None or r["sigma_seed"] < 1.0:
-                    fails.append(f"{k}: seed spread {r['sigma_seed']} not captured")
+                rob = r.get("seed_robustness") or {}
+                if rob.get("n_seeds") != 3:
+                    fails.append(f"{k}: robustness record missing/wrong ({rob})")
+                if rob.get("spread") is None or rob["spread"] < 1.0:
+                    fails.append(f"{k}: seed spread {rob.get('spread')} not reported")
+                if r["sigma"] is not None and rob.get("spread") is not None \
+                        and abs(r["sigma"] - rob["spread"]) < 1e-9:
+                    fails.append(f"{k}: sigma equals the seed spread -- it leaked into sigma")
             short = by.get((3, 5))
             if short and short["ok"]:
                 fails.append("a 1-rung post-collapse ladder produced a central value")
@@ -97,8 +103,15 @@ def main():
             md = open(os.path.join(out, "classical_energy_aggregate.md")).read()
             if "Cutoff shift $n_b$: 2 → 3" not in md:
                 fails.append("paired n_b=2->3 shift table missing though both cutoffs present")
-            if "Error budget" not in md or "σ seed" not in md:
-                fails.append("error-budget table missing")
+            if "Error budget" not in md or "SHCI ½-dist" not in md:
+                fails.append("error-budget table missing or not on the SHCI convention")
+            if "Search robustness" not in md:
+                fails.append("search-robustness table missing -- the seed spread must be "
+                             "reported somewhere once it is out of sigma")
+            # the seed spread must not be presented as an uncertainty
+            if "σ seed" in md:
+                fails.append("'σ seed' column still present -- seed spread is a search "
+                             "diagnostic, not an error-bar term")
             for f in ("classical_energy_aggregate.png", "classical_energy_aggregate.pdf"):
                 if not os.path.exists(os.path.join(out, f)):
                     fails.append(f"{f} not written")

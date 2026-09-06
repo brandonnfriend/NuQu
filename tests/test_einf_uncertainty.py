@@ -12,8 +12,12 @@ so this exercises both:
   * the variational guard rejects any extrapolation that lands ABOVE the deepest Ritz
     value it was fitted from;
   * too few post-collapse rungs -> ok=False with only the bound quotable (no invented number);
-  * `combine_seeds` turns a seed-to-seed spread into a sigma term that actually reaches the
-    per-seed error bars.
+  * sigma follows the LITERATURE convention -- the larger of SHCI's "1/2 of the energy
+    extrapolation" (Holmes/Tubman/Umrigar 2016, stated twice) and our internal quadrature --
+    and the seed spread is NOT in it: TrimCI (Zhang & Otten 2025) uses many random starts as a
+    SEARCH device, takes "the best-performing run", and treats run agreement as a robustness
+    check, never an error bar. `combine_seeds` reports the best (tightest-bound) seed and
+    surfaces the spread as a search diagnostic instead.
 
 Run: python tests/test_einf_uncertainty.py
 """
@@ -78,6 +82,14 @@ def main():
             fails.append("E_inf above the variational bound (guard failed to fire)")
         if r["sigma"] is None or not np.isfinite(r["sigma"]):
             fails.append("no sigma reported for a successful extrapolation")
+        # sigma must never fall below the SHCI convention a referee would compute
+        shci = r["sigma_terms"].get("shci_half_distance")
+        if shci is not None and r["sigma"] < shci - 1e-12:
+            fails.append(f"sigma {r['sigma']:.4f} below the SHCI half-distance {shci:.4f}")
+        if r.get("sigma_source") not in ("shci_half_distance", "internal_quadrature"):
+            fails.append(f"sigma_source not recorded ({r.get('sigma_source')})")
+        if r["sigma_terms"].get("seed") is not None:
+            fails.append("a 'seed' term appears in sigma_terms -- it must not be in sigma")
         if r["E_inf_ps"] is None or abs(r["E_inf_ps"] - r["E_inf"] / SITES) > 1e-9:
             fails.append("per-site mirror is wrong")
 
@@ -129,22 +141,31 @@ def main():
     else:
         if pooled["sigma_seed"] is None or pooled["sigma_seed"] < 1.0:
             fails.append(f"seed spread not captured (sigma_seed={pooled['sigma_seed']})")
-        # the seed spread is a property of the POOL: it must enter the pooled sigma ONCE,
-        # not be folded into every per-seed sigma and then averaged (that double-counts it).
-        for s, v in pooled["per_seed"].items():
-            if v["ok"] and v["sigma_terms"].get("seed") is not None:
-                fails.append(f"seed {s}: seed spread double-counted inside a per-seed sigma")
         best = pooled["best_seed"]
         if pooled["per_seed"][best]["E_var_bound"] != pooled["E_var_bound"]:
             fails.append("pooled estimate did not come from the tightest-bound seed")
         if abs(pooled["E_inf"] - pooled["per_seed"][best]["E_inf"]) > 1e-9:
             fails.append("pooled E_inf is not the best-ladder seed's estimate")
-        want = np.sqrt(pooled["per_seed"][best]["sigma"] ** 2 + pooled["sigma_seed"] ** 2)
-        if abs(pooled["sigma"] - want) > 1e-6:
-            fails.append(f"pooled sigma {pooled['sigma']:.4f} != quadrature of the best seed's "
-                         f"own uncertainty and the between-seed spread ({want:.4f})")
-        if pooled["sigma"] < pooled["sigma_seed"] - 1e-9:
-            fails.append("pooled sigma smaller than the seed spread it contains")
+        # LITERATURE CONVENTION: sigma is the best seed's extrapolation uncertainty alone.
+        # The seed spread is a search diagnostic (TrimCI takes the best run; it does not
+        # average runs), so it must NOT appear in sigma.
+        if abs(pooled["sigma"] - pooled["per_seed"][best]["sigma"]) > 1e-12:
+            fails.append(f"pooled sigma {pooled['sigma']:.4f} != the best seed's own "
+                         f"{pooled['per_seed'][best]['sigma']:.4f} -- seed spread leaked in")
+        if pooled["sigma_seed"] is not None and pooled["sigma"] >= pooled["sigma_seed"]:
+            # with a 6 MeV planted spread and a near-exact ladder, a sigma that large would
+            # mean the spread got folded in after all
+            if abs(pooled["sigma"] - pooled["sigma_seed"]) < 1e-9:
+                fails.append("pooled sigma equals the seed spread -- it was folded in")
+        rob = pooled.get("seed_robustness") or {}
+        for k in ("n_seeds", "n_extrapolated", "n_agreeing_with_best", "spread", "check"):
+            if k not in rob:
+                fails.append(f"seed_robustness missing {k}")
+        if rob.get("n_seeds") != 3:
+            fails.append(f"robustness record says {rob.get('n_seeds')} seeds, expected 3")
+        # planted spread is +-6 MeV against a near-exact fit, so the seeds cannot all agree
+        if rob.get("check", "").startswith("PASS"):
+            fails.append(f"robustness check PASSed on seeds planted 6 MeV apart: {rob}")
         if abs(pooled["E_inf"] - 1794.0) > 3.0:
             fails.append(f"pooled E_inf {pooled['E_inf']:.2f} is not the best (lowest-bound) "
                          "seed's planted value 1794")
@@ -186,8 +207,9 @@ def main():
         sys.exit(1)
     print(f"test_einf_uncertainty: PASS  (power-law E_inf {r['E_inf']:.2f}±{r['sigma']:.2f} "
           f"vs planted {E_INF}; SHCI intercept {r2['E_inf']:.3f} vs planted {E_FCI}; "
-          f"guard + min-rung + fit-only + pooled-bound refusals fire; seed spread "
-          f"{pooled['sigma_seed']:.2f} MeV entering the pooled sigma exactly once)")
+          f"guard + min-rung + fit-only + pooled-bound refusals fire; sigma >= the SHCI "
+          f"half-distance; seed spread {pooled['sigma_seed']:.2f} MeV kept OUT of sigma and "
+          f"reported as the robustness check)")
 
 
 def test_einf_uncertainty():

@@ -251,19 +251,36 @@ def _print_report(out):
 # error bars are the truthful outcome for a variational heuristic that has not
 # converged; they are not a failure of the method.
 #
-# WHAT THE ERROR BAR COVERS (and what it does NOT). The quoted sigma combines four
-# terms in quadrature, all of them about the N -> infinity (Full-CI-within-truncation)
-# limit of THIS ladder:
-#   fit        -- the extrapolator's own parameter uncertainty;
-#   method     -- |E_PT2-extrap - E_powerlaw-extrap|, the disagreement between two
-#                 independent extrapolators on the SAME rungs (a systematic);
-#   stability  -- the shift when the shallowest post-collapse rung is dropped and the
-#                 fit repeated (robustness to the fit window, not a free parameter);
-#   seed       -- supplied by the caller: the spread over independent solver
-#                 trajectories (see `combine_seeds`).
-# It does NOT cover, and must never be quoted as covering: the boson cutoff n_b, the
-# lattice spacing / finite volume L, the EFT truncation, or the selected-CI SEARCH
-# being stuck in the wrong basin altogether. Those are separate budget lines.
+# WHAT THE ERROR BAR COVERS (and what it does NOT). sigma is an EXTRAPOLATION
+# uncertainty and nothing else. It is the larger of:
+#   * the SHCI convention -- Holmes, Tubman & Umrigar 2016 state it twice: "the
+#     uncertainty in our extrapolated energy is given as 1/2 of the energy
+#     extrapolation", i.e. half the distance from the best COMPUTED total energy
+#     (E_var + dE_PT2) to the extrapolated limit. This is the literature-comparable
+#     number a referee will expect;
+#   * our internal quadrature of
+#       fit        -- the extrapolator's own parameter uncertainty,
+#       method     -- |E_PT2-extrap - E_powerlaw-extrap| on the SAME rungs,
+#       stability  -- the shift when the shallowest post-collapse rung is dropped.
+# Taking the larger keeps us at or above the literature convention rather than below it.
+#
+# THE SEED SPREAD IS NOT IN SIGMA. Multiple random starts are a SEARCH device, not a
+# statistical sample: Zhang & Otten 2025 (TrimCI) run many independent starts and take
+# "the best-performing run [as] the candidate for the global ground-state basin", and use
+# run-to-run agreement as a ROBUSTNESS CHECK ("both converge to the same final state"),
+# never as an error bar. E_var is variational, so a seed that lands higher is a worse
+# search, not a noisy measurement of the same quantity. We follow that: the reported
+# value comes from the best (tightest-bound) seed -- the one taken furthest -- and the
+# spread is reported alongside as a search-robustness diagnostic (`combine_seeds`).
+#
+# HONESTY CAVEAT THAT MUST TRAVEL WITH THE NUMBER. This is a variational heuristic. It
+# can sit in a LOCAL minimum, and no error bar here detects that -- the SHCI convention
+# measures how far you extrapolated, not whether you landed in the right basin. What we
+# can say is that the result is SELF-CONSISTENT (the reported value is the deepest,
+# tightest-bound trajectory, and E_var is a rigorous upper bound whatever basin it is in)
+# and that the seed-agreement check is reported honestly, including when it fails.
+# sigma does NOT cover: the boson cutoff n_b, lattice spacing / finite volume, the EFT
+# truncation, or the search being in the wrong basin. Those are separate budget lines.
 
 
 def split_at_collapse(rungs, sites=None):
@@ -295,13 +312,12 @@ def split_at_collapse(rungs, sites=None):
     }
 
 
-def einf_with_uncertainty(rungs, sites=None, sigma_seed=None, min_post=3):
+def einf_with_uncertainty(rungs, sites=None, min_post=3):
     """Basin-aware E_infinity for ONE ladder, with the honest error bar above.
 
     Args:
         rungs: the full ladder ({"core", "E_var", optional "dE_pt2"} per rung).
         sites: lattice sites, for the per-site mirror keys.
-        sigma_seed: seed-spread systematic supplied by the caller (see `combine_seeds`).
         min_post: minimum post-collapse rungs before an extrapolation is attempted.
 
     Returns a dict. `ok=False` (with `reason`) whenever no defensible extrapolation is
@@ -386,11 +402,23 @@ def einf_with_uncertainty(rungs, sites=None, sigma_seed=None, min_post=3):
     if alt.get("ok"):
         s_stab = abs(alt["E_inf"] - E_inf)
 
-    terms = {"fit": s_fit, "method": s_method, "stability": s_stab, "seed": sigma_seed}
-    have = [t for t in terms.values() if t is not None]
-    # None means "no uncertainty term could be formed" -- distinct from a genuine 0.0,
-    # which only synthetic/exact data produces. Never collapse the two.
-    sigma = float(np.sqrt(sum(t ** 2 for t in have))) if have else None
+    # SHCI convention (Holmes/Tubman/Umrigar 2016): half the extrapolation distance from
+    # the best computed total energy. Falls back to E_var when no PT2 rung exists.
+    ref = E_pt2_deepest if E_pt2_deepest is not None else E_var_bound
+    s_shci = (0.5 * abs(ref - E_inf)) if ref is not None else None
+
+    terms = {"fit": s_fit, "method": s_method, "stability": s_stab,
+             "shci_half_distance": s_shci}
+    internal = [t for t in (s_fit, s_method, s_stab) if t is not None]
+    s_internal = float(np.sqrt(sum(t ** 2 for t in internal))) if internal else None
+    # the LARGER of the literature convention and our internal quadrature -- never below
+    # what a referee would compute from the same numbers. None means no term could be
+    # formed at all, which is distinct from a genuine 0.0 (only exact data produces that).
+    cands = [t for t in (s_shci, s_internal) if t is not None]
+    sigma = max(cands) if cands else None
+    sigma_source = (None if sigma is None else
+                    ("shci_half_distance" if s_shci is not None and sigma == s_shci
+                     else "internal_quadrature"))
 
     # A FIT-ONLY uncertainty is not defensible. With the bare minimum number of rungs the
     # fit has no leave-one-out refit and no second extrapolator to disagree with, so sigma
@@ -429,9 +457,11 @@ def einf_with_uncertainty(rungs, sites=None, sigma_seed=None, min_post=3):
                    sigma_terms=terms, primary=primary)
         return out
 
-    out.update(ok=True, reason=f"{primary} extrapolation over {len(post)} post-collapse rungs",
+    out.update(ok=True, reason=f"{primary} extrapolation over {len(post)} post-collapse rungs; "
+                                f"sigma from {sigma_source}",
                primary=primary, E_inf=float(E_inf), E_inf_ps=per(E_inf),
-               sigma=sigma, sigma_ps=per(sigma),
+               sigma=sigma, sigma_ps=per(sigma), sigma_source=sigma_source,
+               sigma_internal=s_internal, sigma_shci=s_shci,
                sigma_terms={k: (float(v) if v is not None else None) for k, v in terms.items()},
                sigma_terms_ps={k: per(v) for k, v in terms.items()},
                extrap_distance=float(E_var_bound - E_inf),
@@ -470,6 +500,12 @@ def combine_seeds(per_seed, sites=None, min_post=3):
         "per_seed": final,
     }
     if not ok:
+        pooled["seed_robustness"] = {"n_seeds": len(per_seed), "n_extrapolated": 0,
+                                     "n_agreeing_with_best": 0, "agreeing_seeds": [],
+                                     "spread": None, "spread_ps": None,
+                                     "bound_spread": (float(max(bounds) - min(bounds))
+                                                      if len(bounds) >= 2 else None),
+                                     "check": "N/A -- no seed extrapolated"}
         pooled.update(ok=False, E_inf=None, E_inf_ps=None, sigma=None, sigma_ps=None,
                       reason="no seed produced a defensible extrapolation; "
                              "only the variational upper bound may be quoted")
@@ -485,10 +521,11 @@ def combine_seeds(per_seed, sites=None, min_post=3):
     # the dominant uncertainty term.
     best_seed = min(ok, key=lambda s: ok[s]["E_var_bound"])
     E = float(ok[best_seed]["E_inf"])
-    within = ok[best_seed].get("sigma")
-    parts = ([within] if within is not None else []) + \
-            ([sigma_seed] if sigma_seed is not None else [])
-    sig = float(np.sqrt(sum(p ** 2 for p in parts))) if parts else None
+    # sigma is the best seed's EXTRAPOLATION uncertainty only. The seed spread is a search
+    # diagnostic, not an uncertainty on this quantity (see the module note): E_var is
+    # variational, so a seed that landed higher searched worse -- it is not a second
+    # measurement of the same number.
+    sig = ok[best_seed].get("sigma")
     pooled["best_seed"] = best_seed
 
     # THE POOLED VARIATIONAL GUARD. Each seed's extrapolation respects its OWN bound, but
@@ -504,7 +541,26 @@ def combine_seeds(per_seed, sites=None, min_post=3):
                              f"{[round(x, 2) for x in E_infs]}); quote the bound")
         return pooled
 
+    # SEARCH-ROBUSTNESS CHECK, in the spirit of TrimCI's own: independent random starts
+    # should converge to the same state. We report how many did, using the quoted sigma as
+    # the yardstick (no free threshold). A failed check does NOT widen sigma -- it is a
+    # caveat on the central value, and it is stated rather than absorbed.
+    agree = [s_ for s_, v in ok.items()
+             if sig is None or abs(v["E_inf"] - E) <= sig]
+    pooled["seed_robustness"] = {
+        "n_seeds": len(per_seed), "n_extrapolated": len(ok),
+        "n_agreeing_with_best": len(agree), "agreeing_seeds": sorted(agree),
+        "spread": sigma_seed, "spread_ps": per(sigma_seed),
+        "bound_spread": (float(max(b for b in bounds) - min(bounds))
+                         if len(bounds) >= 2 else None),
+        "check": ("PASS -- all extrapolated seeds agree with the best within sigma"
+                  if len(agree) == len(ok) and len(ok) >= 2 else
+                  ("SINGLE SEED -- no robustness check possible" if len(ok) < 2 else
+                   f"FAIL -- only {len(agree)}/{len(ok)} seeds agree with the best within "
+                   f"sigma; the reported value may sit in a local minimum")),
+    }
     pooled.update(ok=True, E_inf=E, E_inf_ps=per(E), sigma=sig, sigma_ps=per(sig),
-                  reason=f"best-ladder seed {best_seed} of {len(ok)}/{len(per_seed)} "
-                         f"extrapolated; sigma = its own uncertainty (+) between-seed spread")
+                  reason=f"best (tightest-bound) seed {best_seed} of {len(ok)}/{len(per_seed)} "
+                         f"extrapolated -- the trajectory taken furthest; sigma is its "
+                         f"extrapolation uncertainty (seed spread reported separately)")
     return pooled
