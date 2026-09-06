@@ -9,8 +9,10 @@ script with a stubbed `condor_submit` and checks the emitted grids and `.sub` fi
   * the headline arm is n_b=3, L=2..5, seeds {0,1,2};
   * the paired comparison arm is n_b=2 at identical per-L sizing (audit P0-1 wants the
     n_b=2 -> 3 delta measured at matched settings);
-  * PT2 is enabled on EVERY rung (PT2CAP == MAXCORE) -- audit P0-2 needs post-collapse
-    PT2 points for a defensible extrapolation, and 290832 capped PT2 pre-collapse;
+  * PT2 reaches at least one doubling below the ladder top (PT2CAP >= MAXCORE/2) -- audit
+    P0-2 needs post-collapse PT2 points for a defensible extrapolation, and 290832 capped PT2
+    pre-collapse. The bound is one doubling rather than "every rung" because PT2 costs
+    ~650-700 B per external determinant at depth and PT2-everywhere held two L=3 shards;
   * the qis1-3 allocation pin and the campaign-per-n_b output split survive edits.
 """
 import os
@@ -63,9 +65,16 @@ def _check(rows, sub, name, fails):
         if len(r) != len(_QUEUE_VARS):
             fails.append(f"{name} row {i}: {len(r)} columns, expected {len(_QUEUE_VARS)}: {r}")
             continue
-        if r[col["PT2CAP"]] != r[col["MAXCORE"]]:
-            fails.append(f"{name} row {i}: PT2 capped below the ladder top "
-                         f"(PT2CAP={r[col['PT2CAP']]} != MAXCORE={r[col['MAXCORE']]})")
+        # PT2 must reach at least one doubling below the ladder top, so the post-collapse
+        # basin keeps >=3 PT2 rungs for the T2 extrapolation. Requiring PT2CAP == MAXCORE
+        # (the original rule) held two L=3 shards on memory: the EN-PT2 map is ~650-700 B per
+        # external determinant at depth, so PT2 at L=3's 1M rung needs ~225 GB.
+        cap, top = int(r[col["PT2CAP"]]), int(r[col["MAXCORE"]])
+        if cap < top // 2:
+            fails.append(f"{name} row {i}: PT2CAP={cap} is more than one doubling below "
+                         f"MAXCORE={top} -- too few post-collapse PT2 rungs for T2")
+        if cap > top:
+            fails.append(f"{name} row {i}: PT2CAP={cap} exceeds MAXCORE={top}")
         if not r[col["MEM"]].endswith("G"):
             fails.append(f"{name} row {i}: MEM {r[col['MEM']]!r} is not a Condor size")
     if "qis1.hep.wisc.edu" not in sub or "qis4" in sub:

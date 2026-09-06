@@ -9,7 +9,9 @@
 #
 # WHAT'S DIFFERENT from 290832 (deliberately, only two things):
 #   1. n_b=3 (N_f=8) instead of n_b=2 (N_f=4).
-#   2. PT2 ON AT EVERY RUNG (`NUQU_PT2_MAX_CORE` = max_core), not capped below the ladder top.
+#   2. PT2 ON AT (ALMOST) EVERY RUNG -- `NUQU_PT2_MAX_CORE` is the ladder top for L=2 and one
+#      doubling below it for L>=3 (see the corrected sizing note below; the original
+#      PT2-everywhere setting held two L=3 shards on memory).
 #      290832 capped PT2 at 16k–64k, which put every PT2 point in the PRE-collapse
 #      "exploration" basin — where a PT2 extrapolation demonstrably LIES (L=2 cross-check:
 #      +19 MeV/site vs the deep variational answer). Audit P0-2 wants a defensible
@@ -30,7 +32,8 @@
 #           HEADLINE baseline is itself a publishable number.
 #
 # Deeper than 290832 where it is cheap: L=3 to 1M (was 512k), L=4 to 512k (was 256k), L=5 to
-# 256k (reached 64k). `max_rung_seconds` — not max_core — is the real stop: a rung that blows the
+# 128k (reached 64k) -- L=5's old 256k target was unreachable in the rung budget anyway, and
+# capping it keeps PT2 within one doubling of the top as the grid guard requires. `max_rung_seconds` — not max_core — is the real stop: a rung that blows the
 # budget ends the ladder, and the per-rung incremental save keeps every rung already finished.
 #
 # COST NOTE. Locally measured at small core: n_b=3 costs the SAME as n_b=2 (the H term list is
@@ -65,12 +68,30 @@ ENVSTR='NUQU_DEEP_SOLVE=1 NUQU_WARM_GROW=1 NUQU_LADDER_NRUNS=1 NUQU_N_B=$(NB) NU
 # L=4/5) + headroom. Right-sized, not 2x — over-requesting fragments the pool and inflates
 # fair-share (HPC_WORKFLOW s6).
 row() { printf '%s %s %s %s %s %s %s %s\n' "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8"; }
+# CORRECTED 2026-09-06 after clusters 292477/292478. The first version set PT2CAP == MAXCORE
+# at every L on a local measurement that said the EN-PT2 map costs ~17 B per external
+# determinant. THAT MEASUREMENT WAS WRONG: it recorded peak-RSS DELTA above the solve's own
+# peak, and at the small cores probed locally the solve peak already covered the PT2 map, so
+# the delta read ~0. At depth PT2 is the DOMINANT term. Measured on the cluster:
+#
+#   shard                 n_ext        MemoryUsage    B/ext
+#   L=2 @1,024,000     43,448,765         14,649 MB     354
+#   L=2 s2 @1,024,000  48,118,175         19,532 MB     426
+#   L=4 @256,000      228,223,443        146,485 MB     673
+#   L=3 @512k + 1M PT2 attempt            131,231 MB    ---  -> HELD, over the 128G cgroup cap
+#
+# So ~650-700 B/ext at depth, and n_ext ~ 340x core at L=3, ~890x at L=4. PT2 at L=3's 1M rung
+# would need ~350M externals ~ 225 GB. The fix is NOT simply more memory (that would put only
+# ~3 shards on a 1 TB node): DECOUPLE the PT2 cap from the ladder top. T2 needs >=3 PT2 rungs
+# in the post-collapse basin, and the shards already deliver 8-10; the TOP E_var rung does not
+# need PT2 at all, and without it costs only the solve. PT2CAP is therefore one doubling below
+# MAXCORE for L>=3, which keeps every shard inside 192G.
 sizing_for_L() {   # $1=L -> "MAXCORE PT2CAP MEM CPUS MAXRUNGSEC"
   case "$1" in
-    2) echo "1024000 1024000 64G  16 14400" ;;
-    3) echo "1024000 1024000 128G 16 21600" ;;
-    4) echo "512000  512000  192G 24 21600" ;;
-    5) echo "256000  256000  192G 24 21600" ;;
+    2) echo "1024000 1024000 64G  16 14400" ;;   # measured 14-20 GB
+    3) echo "1024000 512000  192G 16 21600" ;;   # PT2 at 512k = 176M ext ~ 118 GB + solve
+    4) echo "512000  256000  192G 24 21600" ;;   # PT2 at 256k = 228M ext ~ 146 GB (measured)
+    5) echo "128000  65536   192G 24 21600" ;;   # PT2 at 64k = 157M ext ~ 106 GB + solve
     *) echo "ERROR unknown L=$1" >&2; exit 1 ;;
   esac
 }
