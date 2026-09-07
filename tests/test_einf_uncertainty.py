@@ -188,6 +188,23 @@ def main():
         fails.append(f"pooled E_inf {pm['E_inf']:.2f} exceeds the tightest bound "
                      f"{pm['E_var_bound']:.2f} and was still reported")
 
+    # --- 6b. the reported seed must be the trajectory taken FURTHEST -------------------
+    # If the tightest-bound seed cannot extrapolate, reporting a shallower seed that can
+    # substitutes a worse trajectory for the best one. Observed at L=5: seed 0 (bound
+    # 46289.1, 7 rungs to core 64,000) could not fit; seed 1 (bound 46776.5, 5 rungs to
+    # 16,000) was reported in its place.
+    deep_no_fit = _power_ladder(E_inf=1700.0, cores=(8000, 16000, 32000),
+                                collapse_at=2, drop=300.0)      # tightest bound, 1 post rung
+    shallow_fits = _power_ladder(E_inf=1900.0)                    # worse bound, fits fine
+    pj = combine_seeds({0: deep_no_fit, 1: shallow_fits}, sites=SITES)
+    if pj["ok"]:
+        fails.append(f"reported E_inf {pj['E_inf']:.1f} from a shallower seed while the "
+                     f"tightest-bound seed could not extrapolate")
+    if pj.get("best_seed") != 0:
+        fails.append(f"best_seed {pj.get('best_seed')} is not the tightest-bound seed 0")
+    if "could not extrapolate" not in (pj.get("reason") or ""):
+        fails.append(f"refused for the wrong reason: {pj.get('reason')}")
+
     # --- 7. a FIT-ONLY uncertainty is refused ----------------------------------------
     # Exactly 3 post-collapse PT2 rungs: the linear fit works, but there is no second
     # extrapolator and no leave-one-out refit, so sigma would be the fit covariance alone.

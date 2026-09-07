@@ -519,7 +519,30 @@ def combine_seeds(per_seed, sites=None, min_post=3):
     # mean 1809.25 vs tightest bound 1805.56). The best-ladder seed's estimate respects that
     # bound by construction. The disagreement between seeds is not discarded -- it becomes
     # the dominant uncertainty term.
-    best_seed = min(ok, key=lambda s: ok[s]["E_var_bound"])
+    # The reported extrapolation MUST come from the trajectory taken furthest -- the seed
+    # with the tightest variational bound over ALL seeds, not merely the best among those
+    # that happened to produce a fit. Selecting within `ok` cherry-picks whichever ladder
+    # yielded a number: seen at L=5, where seed 0 (bound 46289.1, 7 rungs to core 64,000)
+    # could not extrapolate and seed 1 (bound 46776.5, 5 rungs to core 16,000) was reported
+    # in its place -- a shallower trajectory standing in for the deepest one.
+    best_seed = min(final, key=lambda s: final[s]["E_var_bound"])
+    if best_seed not in ok:
+        alt = min(ok, key=lambda s: ok[s]["E_var_bound"])
+        pooled["seed_robustness"] = {
+            "n_seeds": len(per_seed), "n_extrapolated": len(ok),
+            "n_agreeing_with_best": 0, "agreeing_seeds": [], "spread": sigma_seed,
+            "spread_ps": per(sigma_seed),
+            "bound_spread": (float(max(bounds) - min(bounds)) if len(bounds) >= 2 else None),
+            "check": f"N/A -- the deepest trajectory (seed {best_seed}) did not extrapolate",
+        }
+        pooled.update(ok=False, E_inf=None, E_inf_ps=None, sigma=None, sigma_ps=None,
+                      best_seed=best_seed,
+                      reason=f"the tightest-bound seed ({best_seed}, bound "
+                             f"{final[best_seed]['E_var_bound']:.3f}) could not extrapolate "
+                             f"({final[best_seed]['reason']}); reporting a shallower seed "
+                             f"({alt}, bound {ok[alt]['E_var_bound']:.3f}) in its place would "
+                             f"substitute a worse trajectory for the best one. Quote the bound.")
+        return pooled
     E = float(ok[best_seed]["E_inf"])
     # sigma is the best seed's EXTRAPOLATION uncertainty only. The seed spread is a search
     # diagnostic, not an uncertainty on this quantity (see the module note): E_var is

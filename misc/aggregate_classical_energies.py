@@ -235,8 +235,11 @@ def make_table(recs, out_path):
         "|--:|--:|--:|--:|--:|--:|--:|--:|:--|--:|",
     ]
     for r in recs:
-        s0 = sorted(r["per_seed"])[0]
-        v0 = r["per_seed"][s0]
+        # show the BEST (tightest-bound) seed's ladder stats -- the one the reported
+        # E_inf comes from. Showing seed 0's alongside another seed's E_inf produced
+        # rows like "post-basin rungs = 1" next to a fitted value.
+        s0 = r.get("best_seed", sorted(r["per_seed"])[0])
+        v0 = r["per_seed"].get(s0) or r["per_seed"][sorted(r["per_seed"])[0]]
         dE = v0.get("dE_last_doubling_ps")
         pt2 = v0.get("E_var_plus_pt2_ps")
         rep = (f"**{_pm(r['E_inf_ps'], r['sigma_ps'])}**" if r["ok"]
