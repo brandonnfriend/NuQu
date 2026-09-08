@@ -26,6 +26,9 @@ What it refuses:
     mechanically impossible to repeat.
   * MISSING PROVENANCE, unless `--allow-unmanifested` is passed, which downgrades the
     record to operator-asserted and says so in the manifest.
+  * MIXED PROVENANCE -- shards spanning more than one commit, which happens when a Condor
+    job restarts after the server checkout has moved. Requires an explicit
+    `--allow-mixed-commits` acknowledgement and records the full commit set.
   * A MISLABELLED RESULT. The classical analogue of the quantum compiled/projected
     label is bound-only vs extrapolated: a record claiming an extrapolated E_infinity
     must carry a sigma, and one without a defensible extrapolation must not carry a
@@ -106,7 +109,7 @@ def _finite(x):
 
 def validate(data_dirs, expect_n_b, expect_dim=3, expect_frame="bare",
              min_rungs=4, min_pt2_post=0, allow_unmanifested=False,
-             assert_commit=None, repo=_ROOT):
+             assert_commit=None, allow_mixed_commits=False, repo=_ROOT):
     """Gate the shards and return (records, shard_info, provenance). Raises RejectedError."""
     files = []
     for d in data_dirs:
@@ -235,15 +238,32 @@ def validate(data_dirs, expect_n_b, expect_dim=3, expect_frame="bare",
             "core_ladders": {str(s): [r["core"] for r in rr] for s, rr in per_seed.items()},
         })
 
-    if len(commits) > 1:
-        raise RejectedError(f"REJECTED: shards span multiple generating commits "
-                            f"{sorted(c[:10] for c in commits)} -- an accepted result must come "
-                            f"from one.")
+    # MIXED PROVENANCE. A long campaign can span commits: a Condor job that restarts after
+    # the server checkout moved re-reads the code, so late shards carry a later commit than
+    # the launch commit. That is a real hazard and must never pass silently -- the first
+    # version of this gate reported ONE commit for a mixed campaign, hiding it.
+    mixed = bool(commits) and bool(unmanifested)
+    if len(commits) > 1 or mixed:
+        found = sorted(c[:10] for c in commits)
+        if not allow_mixed_commits:
+            raise RejectedError(
+                f"REJECTED: mixed provenance -- {len(commits)} embedded commit(s) {found} "
+                f"across {len(shard_info) - len(unmanifested)} shard(s)"
+                + (f" plus {len(unmanifested)} shard(s) with no manifest" if unmanifested else "")
+                + ". An accepted result must come from one commit, or the operator must pass "
+                  "--allow-mixed-commits AFTER checking that the differing commits do not change "
+                  "the code the shard actually runs (diff the shard entry point and everything "
+                  "it imports).")
     provenance = {
         "generating_commit": (sorted(commits)[0] if commits else assert_commit),
-        "provenance_source": ("embedded shard manifest" if commits and not unmanifested else
+        "embedded_commits": sorted(commits),
+        "asserted_commit": assert_commit,
+        "provenance_source": ("MIXED -- see embedded_commits + asserted_commit" if mixed else
+                              "embedded shard manifest" if commits else
                               "OPERATOR-ASSERTED (shards predate per-shard manifests)"),
+        "n_shards_with_manifest": len(shard_info) - len(unmanifested),
         "unmanifested_shards": unmanifested,
+        "mixed_commits_acknowledged": bool(mixed and allow_mixed_commits),
         "vertex_fix_commit": VERTEX_FIX_COMMIT, "vertex_fix_date": VERTEX_FIX_DATE,
     }
     if provenance["generating_commit"] is None:
@@ -304,6 +324,11 @@ def main():
     ap.add_argument("--outputs", nargs="*", default=[])
     ap.add_argument("--allow-unmanifested", action="store_true")
     ap.add_argument("--assert-commit", default=None)
+    ap.add_argument("--allow-mixed-commits", action="store_true",
+                    help="acknowledge that shards span more than one commit (e.g. a job "
+                         "restarted after the server checkout moved). Pass ONLY after diffing "
+                         "the shard entry point and its imports to confirm the solver is "
+                         "unchanged; the commit set is recorded in the manifest.")
     ap.add_argument("--out", default=None, help="manifest path (default: <first data dir>/accepted_data_manifest.json)")
     args = ap.parse_args()
 
@@ -311,7 +336,8 @@ def main():
         records, shard_info, prov = validate(
             args.data, args.expect_n_b, expect_dim=args.dim, expect_frame=args.frame,
             min_rungs=args.min_rungs, min_pt2_post=args.min_pt2_post,
-            allow_unmanifested=args.allow_unmanifested, assert_commit=args.assert_commit)
+            allow_unmanifested=args.allow_unmanifested, assert_commit=args.assert_commit,
+            allow_mixed_commits=args.allow_mixed_commits)
     except RejectedError as e:
         # A gate refusal is an expected outcome, not a crash -- print it plainly and exit 2
         # so a release script can distinguish "rejected" (2) from "broken" (1).

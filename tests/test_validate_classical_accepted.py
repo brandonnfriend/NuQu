@@ -6,6 +6,9 @@ reaching a figure, or a result carried without provenance or with the wrong labe
 is only worth having if its refusals actually fire, so each one is exercised against a
 synthetic shard tree built to trip exactly that check -- plus a clean tree that must pass
 and produce a complete manifest.
+
+Includes MIXED provenance -- shards spanning more than one commit, which really happened
+when Condor restarted four shards of cluster 292477 after the server checkout had moved.
 """
 import json
 import os
@@ -147,6 +150,33 @@ def main():
         # --- the PT2-depth quality gate ---------------------------------------------
         _expect_reject(lambda: validate([d], expect_n_b=3, min_pt2_post=99),
                        "post-collapse PT2", fails, "PT2-depth gate")
+
+        # --- MIXED provenance: shards spanning more than one commit -------------------
+        # Really happened: Condor restarted 4 shards of cluster 292477 after the server
+        # checkout had moved, so they carry a later commit than the 8 launched earlier. The
+        # first version of this gate reported ONE commit for that campaign, hiding the mix.
+        mixdir = _tree(tmp, "mixed", [dict(L=2, n_b=3, seed=0, commit=head),
+                                      dict(L=2, n_b=3, seed=1)])
+        _expect_reject(lambda: validate([mixdir], expect_n_b=3, allow_unmanifested=True,
+                                        assert_commit=head),
+                       "mixed provenance", fails, "mixed manifested/unmanifested")
+        try:
+            _, _, pm = validate([mixdir], expect_n_b=3, allow_unmanifested=True,
+                                assert_commit=head, allow_mixed_commits=True)
+            if not pm.get("mixed_commits_acknowledged"):
+                fails.append("acknowledged mix not flagged in the manifest")
+            if pm.get("asserted_commit") != head or head not in pm.get("embedded_commits", []):
+                fails.append(f"mixed record must carry BOTH commits: {pm}")
+            if "MIXED" not in pm.get("provenance_source", ""):
+                fails.append(f"provenance_source does not say MIXED: {pm}")
+        except RejectedError as e:
+            fails.append(f"--allow-mixed-commits still refused: {e}")
+        parent2 = subprocess.check_output(["git", "rev-parse", "HEAD~1"],
+                                          cwd=_ROOT).decode().strip()
+        twodir = _tree(tmp, "twocommits", [dict(L=2, n_b=3, seed=0, commit=head),
+                                           dict(L=2, n_b=3, seed=1, commit=parent2)])
+        _expect_reject(lambda: validate([twodir], expect_n_b=3), "mixed provenance",
+                       fails, "two embedded commits")
 
         # --- CLI exits 2 on refusal (rejected) vs 0 on pass --------------------------
         r = subprocess.run([sys.executable, "-m", "misc.validate_classical_accepted",
