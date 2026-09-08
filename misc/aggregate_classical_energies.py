@@ -122,7 +122,10 @@ def analyze(groups, meta):
         pre_fit = (fit_einf_pt2([r["E_var"] for r in pre], [r["dE_pt2"] for r in pre])
                    if len(pre) >= 3 else {"ok": False, "reason": f"{len(pre)} pre-basin PT2 rungs",
                                           "E_inf": None, "sigma": None})
-        recs.append({**m, **pooled, "key": f"nb{n_b}_L{L}",
+        best = pooled.get("best_seed", sorted(groups[key])[0])
+        ladder = {int(r["core"]): float(r["E_var"])
+                  for r in sorted(groups[key][best], key=lambda r: r["core"])}
+        recs.append({**m, **pooled, "key": f"nb{n_b}_L{L}", "ladder": ladder,
                      "collapse_core": basin["collapse_core"],
                      "collapse_drop_per_site": basin["collapse_drop_per_site"],
                      "pre_basin_pt2": {"ok": pre_fit.get("ok"), "n_pts": len(pre),
@@ -323,18 +326,39 @@ def make_table(recs, out_path):
     pairs = [(L, by[(2, L)], by[(3, L)]) for L in sorted({r["L"] for r in recs})
              if (2, L) in by and (3, L) in by]
     if pairs:
-        md += ["", "### Cutoff shift $n_b$: 2 → 3 at matched settings", "",
-               "| L | $E_\\mathrm{var}$/site $n_b$=2 | $n_b$=3 | Δ bound | "
+        md += ["", "### Cutoff shift $n_b$: 2 → 3", "",
+               "_Δ bound is taken at the **deepest core reached by BOTH arms**, not at each arm's "
+               "own deepest rung — the two cutoffs do not always get equally far, and comparing "
+               "different core depths would fold a convergence difference into the cutoff shift. "
+               "Δ extrapolated uses whole ladders, so it is flagged when the arms stopped at "
+               "different depths._", "",
+               "| L | common core | $E_\\mathrm{var}$/site $n_b$=2 | $n_b$=3 | Δ bound | "
                "$E_\\infty$/site $n_b$=2 | $n_b$=3 | Δ extrapolated |",
-               "|--:|--:|--:|--:|--:|--:|--:|"]
+               "|--:|--:|--:|--:|--:|--:|--:|--:|"]
         for L, a, b in pairs:
+            la, lb = a.get("ladder") or {}, b.get("ladder") or {}
+            common = sorted(set(la) & set(lb))
+            if common:
+                c = common[-1]
+                va, vb = la[c] / a["sites"], lb[c] / b["sites"]
+                cc, dbnd = f"{c:,}", f"{vb - va:+.2f}"
+                sa, sb = f"{va:.1f}", f"{vb:.1f}"
+            else:
+                cc, dbnd, sa, sb = "— none", "—", "—", "—"
             ea = f"{a['E_inf_ps']:.1f}" if a["ok"] else "—"
             eb = f"{b['E_inf_ps']:.1f}" if b["ok"] else "—"
-            de = (f"{b['E_inf_ps'] - a['E_inf_ps']:+.2f}"
+            depth_a = max(la) if la else None
+            depth_b = max(lb) if lb else None
+            mismatch = (depth_a != depth_b)
+            de = (f"{b['E_inf_ps'] - a['E_inf_ps']:+.2f}" + (" ⚠" if mismatch else "")
                   if (a["ok"] and b["ok"]) else "—")
-            md.append(f"| {L} | {a['E_var_bound_ps']:.1f} | {b['E_var_bound_ps']:.1f} | "
-                      f"{b['E_var_bound_ps'] - a['E_var_bound_ps']:+.2f} | "
-                      f"{ea} | {eb} | {de} |")
+            md.append(f"| {L} | {cc} | {sa} | {sb} | {dbnd} | {ea} | {eb} | {de} |")
+        if any((max(a.get("ladder") or {0: 0}) != max(b.get("ladder") or {0: 0}))
+               for _, a, b in pairs):
+            md.append("")
+            md.append("⚠ = the two arms stopped at different core depths, so that extrapolated Δ "
+                      "mixes a cutoff shift with a convergence difference. Read the Δ bound "
+                      "column (matched core) instead.")
     open(out_path, "w").write("\n".join(md) + "\n")
     print(f"[tbl] wrote {out_path}")
 
