@@ -26,7 +26,8 @@ import glob
 import json
 import math
 
-from src_PI.estimation.qpe_cost import walk_queries, WALK_QUERY_CONSTANT_HEISENBERG as PI
+from src_PI.estimation.qpe_cost import (walk_queries, WALK_QUERY_CONSTANT_HEISENBERG as PI,
+                                        qpe_phase_register_qubits_from_nwalk as _m_from_nwalk)
 from src_PI.estimation.total_t_optimizer import optimize_qpe_fraction
 
 TERM_UNC = 0.10   # +/-10% extrapolation uncertainty on n_terms(L) -> spans the neighbouring bin
@@ -40,7 +41,14 @@ def _load(d, patt):
             continue
         r = j["results"][0]
         b = r.get("QPE_Budget") or {}
+        # `q` is the WALK/block-encoding register (what the shard stores as Logical_Qubits).
+        # `m` is the QPE phase register, ceil(log2(N_walk/2)), tied to the shard's own N_walk.
+        # `q_total = q + m` is the quantity CONVENTIONS.md section 4 calls "total logical qubits";
+        # reporting `q` under that name (as the headline did until 2026-09-09) is a mislabel.
+        _nw = r.get("QPE_Walk_Queries")
         o[r["L"]] = dict(lam=r["Physical_Lambda"], walkT=r["Walk_T_Count"], q=r["Logical_Qubits"],
+                         m=(_m_from_nwalk(_nw) if _nw else None),
+                         q_total=(r["Logical_Qubits"] + _m_from_nwalk(_nw)) if _nw else None,
                          terms=r.get("Pauli_Term_Count"), eps=b.get("eps_qpe"),
                          a=(b.get("walk_T_fit") or {}).get("a"), bb=(b.get("walk_T_fit") or {}).get("b"),
                          dE=b.get("delta_E", 1.0))
@@ -97,7 +105,9 @@ def project(nb2, nb3, lam_ratio=None, dE=1.0):
             eps = nb3[L]["eps"]
             nw = walk_queries(nb3[L]["lam"], eps, PI) if eps else None
             T = nw * nb3[L]["walkT"] if nw else None
+            m = _m_from_nwalk(nw) if nw else nb3[L].get("m")
             rows[L] = dict(L=L, exact=True, lam=nb3[L]["lam"], walkT=nb3[L]["walkT"], q=nb3[L]["q"],
+                           m=m, q_total=(nb3[L]["q"] + m) if m else None,
                            T=T, Tlo=T, Thi=T, terms=nb3[L]["terms"], P=_bin(nb3[L]["terms"]))
         else:                                                # padding-model projection
             nt = n_terms_of(mp, L)
@@ -107,7 +117,13 @@ def project(nb2, nb3, lam_ratio=None, dE=1.0):
             # band: bins spanned by n_terms*(1 +/- TERM_UNC)
             Plo, Phi = _bin(nt * (1 - TERM_UNC)), _bin(nt * (1 + TERM_UNC))
             Ts = [walk_T_at_bin(mp, PP, lam3, dE)[1] for PP in sorted({Plo, P, Phi})]
-            rows[L] = dict(L=L, exact=False, lam=lam3, walkT=wT, q=nb2[L]["q"] * qr, T=T,
+            # projected: walk register by the measured n_b=2 -> n_b=3 ratio; phase register
+            # from THIS row's projected N_walk, so m never drifts from the T we report.
+            q_w = nb2[L]["q"] * qr
+            nw_p = (T / wT) if (T and wT) else None
+            m_p = _m_from_nwalk(nw_p) if nw_p else None
+            rows[L] = dict(L=L, exact=False, lam=lam3, walkT=wT, q=q_w,
+                           m=m_p, q_total=(q_w + m_p) if m_p else None, T=T,
                            Tlo=min(Ts), Thi=max(Ts), terms=nt, P=P)
     return rows, dict(mp=mp, lam_ratio=lam_ratio, qr=qr, ls46=ls46)
 

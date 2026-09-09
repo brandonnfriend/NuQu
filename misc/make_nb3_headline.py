@@ -54,19 +54,27 @@ def build(nb2, nb3):
     rows_p, meta = _pad_project(nb2, nb3)
     ls46 = meta["ls46"]                                    # [4,5,6] — smooth, bin-aligned regime
     Trs = [rows_p[L]["T"] / nb2[L]["T"] for L in ls46]
-    qrs = [nb3[L]["q"] / nb2[L]["q"] for L in ls46]
+    # ratio on the TOTAL (walk + QPE phase register), which is what we report -- see
+    # CONVENTIONS.md section 4. Until 2026-09-09 this reported the walk register alone while
+    # calling it "total logical qubits"; the omission was m (+0.2% at L=10).
+    qrs = [nb3[L]["q_total"] / nb2[L]["q_total"] for L in ls46]
+    _qrm = sum(qrs) / len(qrs)          # band is the RELATIVE ratio spread about the mean, applied
+                                        # to this row's own q_total, so qlo <= q <= qhi always holds
     lrs = [nb3[L]["lam"] / nb2[L]["lam"] for L in ls46]
     Tr, qr, lamr = st.mean(Trs), st.mean(qrs), st.mean(lrs)
     rows = {}
     for L in sorted(rows_p):
         r = rows_p[L]
         if r["exact"]:                                     # direct compiled (L=1..7)
-            rows[L] = dict(T=r["T"], q=r["q"], lam=r["lam"], exact=True,
-                           Tlo=r["T"], Thi=r["T"], qlo=r["q"], qhi=r["q"], P=r["P"], terms=r["terms"])
+            rows[L] = dict(T=r["T"], q=r["q_total"], qwalk=r["q"], m=r["m"], lam=r["lam"],
+                           exact=True, Tlo=r["T"], Thi=r["T"], qlo=r["q_total"], qhi=r["q_total"],
+                           P=r["P"], terms=r["terms"])
         else:                                              # padding-model projection (L=8..10)
-            rows[L] = dict(T=r["T"], q=r["q"], lam=r["lam"], exact=False,
+            rows[L] = dict(T=r["T"], q=r["q_total"], qwalk=r["q"], m=r["m"], lam=r["lam"],
+                           exact=False,
                            Tlo=r["Tlo"], Thi=r["Thi"],
-                           qlo=nb2[L]["q"] * min(qrs), qhi=nb2[L]["q"] * max(qrs), P=r["P"], terms=r["terms"])
+                           qlo=r["q_total"] * (min(qrs) / _qrm), qhi=r["q_total"] * (max(qrs) / _qrm),
+                           P=r["P"], terms=r["terms"])
     sc = dict(Tr=Tr, qr=qr, lamr=lamr, Trange=(min(Trs), max(Trs)), qrange=(min(qrs), max(qrs)),
               lamrange=(min(lrs), max(lrs)), fitL=ls46, model=meta["mp"])
     return rows, sc
@@ -103,7 +111,7 @@ def main():
     axT.legend(frameon=False, fontsize=8, loc="upper left", labelcolor=INK2)
     _style(axT)
     # qubits
-    axQ.plot(Ls, [nb2[L]["q"] for L in Ls], "--s", color=MUTED, lw=1.6, ms=5, mec=SURFACE, mew=1.0,
+    axQ.plot(Ls, [nb2[L]["q_total"] for L in Ls], "--s", color=MUTED, lw=1.6, ms=5, mec=SURFACE, mew=1.0,
              zorder=3, label="n_b=2 (historical low cutoff)")
     axQ.plot(ex, [rows[L]["q"] for L in ex], "-o", color=BLUE, lw=2.2, ms=7, mec=SURFACE, mew=1.2,
              zorder=5, label="n_b=3 compiled")
@@ -112,7 +120,7 @@ def main():
         axQ.errorbar(sc_, [rows[L]["q"] for L in sc_], yerr=qerr, fmt="o", color=BLUE, ms=8, mfc="none",
                      mew=1.8, capsize=4, elinewidth=1.4, zorder=5, label="n_b=3 projected")
     axQ.set_xlabel("lattice size $L$", color=INK2, fontsize=9.5)
-    axQ.set_ylabel("total logical qubits", color=INK2, fontsize=9.5)
+    axQ.set_ylabel("total logical qubits  (walk + QPE phase register)", color=INK2, fontsize=9.5)
     axQ.set_title(f"b  Logical qubits — n_b=3 is ×{sc['qr']:.2f}", color=INK, fontsize=10.3,
                   loc="left", weight="bold")
     axQ.legend(frameon=False, fontsize=8, loc="upper left", labelcolor=INK2)
@@ -138,17 +146,20 @@ def main():
           f"its ×{sc['lamr']:.2f} ratio, qubits ×{sc['qr']:.2f}. The projected T band spans the bins "
           f"n_terms×(1±10%) can occupy (widest at L=9, just under the 2²² edge). π walk constant, "
           f"ΔE=1 MeV. Large-volume cutoff adequacy is CONDITIONAL (P0-4)._\n",
-          "| L | T(n_b=2) | **T(n_b=3)** | band | ×T | qubits(n_b=3) | source |",
-          "|--:|--:|--:|--:|--:|--:|:--|"]
+          "| L | T(n_b=2) | **T(n_b=3)** | band | ×T | walk reg. | m | **total qubits(n_b=3)** | source |",
+          "|--:|--:|--:|--:|--:|--:|--:|--:|:--|"]
     for L in Ls:
         r = rows[L]
         band = "—" if r["exact"] else f"[{r['Tlo']:.1e}, {r['Thi']:.1e}]"
         md.append(f"| {L} | {nb2[L]['T']:.2e} | **{r['T']:.2e}** | {band} | {r['T']/nb2[L]['T']:.0f} | "
-                  f"**{r['q']:.0f}** | {'compiled' if r['exact'] else 'projected'} |")
+                  f"{r['qwalk']:.0f} | {r['m']} | **{r['q']:.0f}** | "
+                  f"{'compiled' if r['exact'] else 'projected'} |")
     L10 = rows[10]
     md.append(f"\n**Headline (L=10, A-independent, PROJECTED):** QPE coherent-query T ≈ **{L10['T']:.2e}** "
-              f"(band [{L10['Tlo']:.1e}, {L10['Thi']:.1e}]; n_b=2 was {nb2[10]['T']:.2e}), total logical "
-              f"qubits ≈ **{L10['q']:.0f}**. The ×{sc['Tr']:.0f} T rise = λ ×{sc['lamr']:.2f} × per-step "
+              f"(band [{L10['Tlo']:.1e}, {L10['Thi']:.1e}]; n_b=2 was {nb2[10]['T']:.2e}), "
+              f"**total logical qubits** ≈ **{L10['q']:.0f}** "
+          f"(= {L10['qwalk']:.0f} walk/block-encoding register + {L10['m']} QPE phase register; "
+          f"state prep, magic-state factories and routing EXCLUDED — see CONVENTIONS.md §4). The ×{sc['Tr']:.0f} T rise = λ ×{sc['lamr']:.2f} × per-step "
               f"walk_T ×{sc['Tr']/sc['lamr']:.1f} (smooth-regime L=4..6). NOTE: L=1..{exmax} are direct "
               f"compiled estimates; L={exmax+1}..10 are padding-model projections (walk_T quantized in "
               f"powers of two; back-tested <1.1%). Cutoff selected at L=2 (n_b=3≈n_b=4); its total-"
