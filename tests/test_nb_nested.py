@@ -197,6 +197,34 @@ _SUBMIT = os.path.join(_ROOT, "hpc", "nb_cutoff", "submit_nb_nested.sh")
 _QUEUE_VARS = ["L", "A", "SEED", "MAXCORE", "MAXRUNGSEC", "MEM", "CPUS"]
 
 
+def _run_mode(mode=""):
+    """Run the submit script in `mode` with a stubbed condor_submit; return (grids, subs)."""
+    import shutil
+    import tempfile
+    tmp = tempfile.mkdtemp(prefix="nbnestedsub_")
+    try:
+        shutil.copy(_SUBMIT, tmp)
+        shutil.copy(os.path.join(_ROOT, "hpc", "nb_cutoff", "run_nb_nested_shard.sh"), tmp)
+        binp = os.path.join(tmp, "bin")
+        os.makedirs(binp)
+        stub = os.path.join(binp, "condor_submit")
+        open(stub, "w").write("#!/bin/sh\necho fake $*\n")
+        os.chmod(stub, 0o755)
+        env = dict(os.environ, PATH=binp + os.pathsep + os.environ["PATH"])
+        cmd = ["sh", os.path.basename(_SUBMIT)] + ([mode] if mode else [])
+        p = subprocess.run(cmd, cwd=tmp, env=env, capture_output=True, text=True)
+        assert p.returncode == 0, f"submit script failed ({mode}):\n{p.stdout}\n{p.stderr}"
+        cdir = os.path.join(tmp, [d for d in os.listdir(tmp) if d.startswith("campaign_")][0])
+        grids = {f[:-4]: [ln.split() for ln in open(os.path.join(cdir, f)).read().splitlines()
+                          if ln.strip()]
+                 for f in os.listdir(cdir) if f.endswith(".txt")}
+        subs = {f[:-4]: open(os.path.join(cdir, f)).read()
+                for f in os.listdir(cdir) if f.endswith(".sub")}
+        return grids, subs
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def test_nb_nested_submit_grid():
     """The T3 A-sweep grid. A wrong column count in a Condor `queue <vars> from file` binds
     MEM to a core count and the submit either fails or runs nonsense, which is expensive to
@@ -230,6 +258,23 @@ def test_nb_nested_submit_grid():
                 fails.append(f"row {i}: {len(r)} columns, expected {len(_QUEUE_VARS)}: {r}")
         if len(rows) != 33:
             fails.append(f"{len(rows)} shards, expected 33 (18 at L=2 + 9 at L=3 + 6 at L=4)")
+        # the DEEP arm must reach the depth the L=2 baseline reaches, or it does not measure
+        # the projection it exists to measure
+        dr = _run_mode("deep")
+        deep = dr[0].get("deep", [])
+        if len(deep) != 6:
+            fails.append(f"deep arm has {len(deep)} shards, expected 6 (A in 1,4,32 x 2 seeds)")
+        for i, r in enumerate(deep):
+            if len(r) != len(_QUEUE_VARS):
+                fails.append(f"deep row {i}: {len(r)} columns, expected {len(_QUEUE_VARS)}")
+                continue
+            if int(r[col["MAXCORE"]]) < 1_024_000:
+                fails.append(f"deep row {i}: MAXCORE {r[col['MAXCORE']]} < 1,024,000, the core the "
+                             "L=2 baseline reaches -- the projection would stay unmeasured")
+            if r[col["L"]] != "2":
+                fails.append(f"deep row {i}: L={r[col['L']]}, the deep arm is L=2 only")
+        if sorted({r[col["A"]] for r in deep if len(r) == len(_QUEUE_VARS)}) != ["1", "32", "4"]:
+            fails.append("deep arm A set should be {1, 4, 32}")
         got = {(r[col["L"]], r[col["A"]]) for r in rows if len(r) == len(_QUEUE_VARS)}
         want = ({("2", a) for a in ("1", "2", "4", "8", "16", "32")}
                 | {("3", a) for a in ("1", "8", "27")} | {("4", a) for a in ("1", "8")})

@@ -78,6 +78,7 @@
 #     cd hpc/nb_cutoff
 #     sh submit_nb_nested.sh test   # 1 cheap L=2 A=8 shard — env + sign-definiteness check
 #     sh submit_nb_nested.sh        # the 33-shard A-sweep
+#     sh submit_nb_nested.sh deep   # the 6-shard deep L=2 arm to core 1,024,000
 set -eu
 MODE="${1:-run}"
 BASE="$(date +%Y%m%d-%H%M%S)-nbNested"
@@ -113,6 +114,40 @@ EOF
 # The nested shard runs TWO solves per rung (plus the legacy arm = three), so cores are held
 # one notch below the baseline campaign's and the rung budget does the real stopping.
 row() { printf '%s %s %s %s %s %s %s\n' "$1" "$2" "$3" "$4" "$5" "$6" "$7"; }
+
+# ============================ DEEP L=2 arm ==============================================
+# WHY. The headline conclusion -- "the fixed-basis cutoff shift projects ABOVE the 0.001 MeV/site
+# reference at the core the classical baseline actually reaches" -- is currently an EXTRAPOLATION
+# of a power-law fit over cores 16k..256k (L=2: A=1 core^0.46 -> 136%, A=2 core^0.55 -> 119%,
+# A=4 core^0.64 -> 103%, A=32 core^0.36 -> 123%). This arm MEASURES it instead, by running the
+# same nested comparison out to core 1,024,000 -- exactly the depth the L=2 baseline reaches.
+#
+# It is the only remaining experiment that changes a conclusion rather than adding coverage.
+#
+# GRID: A in {1, 4, 32} x seeds {0,1} = 6 shards. A=1 and A=32 are the dilute/fully-filled
+# extremes and both project above the reference; A=4 has the STEEPEST fitted exponent (0.64) and
+# the lowest projection (103%), so it is the point most likely to discriminate. Two seeds each:
+# these three points were seed-identical at 256k, but seed divergence DID appear at 2 of the 11
+# (L,A) points in the main sweep, so a second seed is cheap insurance rather than an assumption.
+#
+# --also-independent is OFF here. The nested-vs-legacy comparison is already measured in the main
+# sweep (legacy noise +-2.0e-3/site, ~2.8x the signal); repeating it would triple the cost of the
+# deepest rungs for nothing.
+#
+# COST: the main-sweep L=2 shards reached 256k in 0.8-2.4 h. Each further doubling costs ~4x, so
+# 512k ~3-4 h and 1M ~10-14 h -> ~15-20 h per shard, all six in parallel. PT2 is not computed by
+# this runner, so memory stays modest (the main sweep peaked well under 5 GB); 96G is ample.
+if [ "$MODE" = "deep" ]; then
+  G="$DIR/deep.txt"; : > "$G"
+  for S in 0 1; do
+    for A in 1 4 32; do row 2 "$A" "$S" 1048576 36000 96G 16 >> "$G"; done
+  done
+  emit_sub deep "$G" 14
+  echo "CAMPAIGN=${BASE}  DEEP L=2 arm: A in {1,4,32} x seeds{0,1} to core 1,024,000."
+  echo "  Measures the projection the P0-3 conclusion currently rests on."
+  echo "  Read delta_shared_per_site at core 1,024,000 against the 0.001 reference."
+  exit 0
+fi
 
 if [ "$MODE" = "test" ]; then
   G="$DIR/smoke.txt"; row 2 8 0 32000 7200 32G 16 > "$G"
