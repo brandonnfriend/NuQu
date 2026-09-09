@@ -234,7 +234,9 @@ def _validate_backeval(files, expect_dim, allowed_n_b, max_dropped_weight=0.05):
                                     f"n_dets {nd} (cap {max_dropped_weight:.0%}) -- E_orig would be "
                                     f"a truncated remnant, not a variational energy")
             deepest = max(deepest, nd)
-        key = (md.get("frame"), md.get("L"), md.get("A"))
+        # group by n_b too: the accepted bundle carries an n_b=4 cross-check arm, and folding it
+        # in with the n_b=3 primary made the summary list seed 0 twice for the same (frame, L, A)
+        key = (md.get("frame"), md.get("L"), md.get("A"), md.get("n_b"))
         groups[key].append((md.get("seed"), max(r["n_dets"] for r in res),
                             min(r["E_orig"] for r in res)))
         info.append({"file": os.path.relpath(f, _ROOT) if f.startswith(_ROOT) else f,
@@ -249,11 +251,15 @@ def _validate_backeval(files, expect_dim, allowed_n_b, max_dropped_weight=0.05):
             f"REJECTED: deepest ladder is {deepest} determinants, at or below the known P0-1 stall "
             f"({FRAME_P01_STALLED_NDETS}). This is the signature of the SUPERSEDED frame bundle "
             f"(conv_shards / denself_shards), whose ladders never grew. Use conv2_shards.")
-    records = [{"frame": k[0], "L": k[1], "A": k[2], "label": "efficiency_measured",
+    primary = min(k[3] for k in groups)          # the lower cutoff is the primary arm
+    records = [{"frame": k[0], "L": k[1], "A": k[2], "n_b": k[3],
+                "arm": ("primary" if k[3] == primary else f"n_b={k[3]} cross-check"),
+                "label": "efficiency_measured",
                 "seeds": sorted(s for s, _, _ in v),
                 "deepest_n_dets": max(n for _, n, _ in v),
                 "best_E_orig": min(e for _, _, e in v)}
-               for k, v in sorted(groups.items(), key=lambda kv: (str(kv[0][0]), kv[0][1], kv[0][2]))]
+               for k, v in sorted(groups.items(),
+                                  key=lambda kv: (kv[0][3], str(kv[0][0]), kv[0][1], kv[0][2]))]
     return records, info
 
 
@@ -497,6 +503,36 @@ def build_manifest(label, data_dirs, records, shard_info, provenance, expect_n_b
     }
 
 
+def aggregation_rules(min_rungs=4, min_pt2_post=0):
+    """The policy text emitted into every manifest. Exposed so a test can compare it to
+    what `combine_seeds` actually does -- these strings had gone stale once."""
+    return {
+        "basin_split": "ladder split at the largest single-doubling E_var drop; only "
+                       "POST-collapse rungs are fitted (pre-collapse PT2 extrapolation is "
+                       "unreliable -- +19 MeV/site at L=2)",
+        "extrapolators": "SHCI/PT2 intercept preferred when PT2 exists on >=3 post-collapse "
+                         "rungs; power law E_inf + a*N^-b otherwise, requiring >=4 rungs so the "
+                         "3-parameter fit keeps a degree of freedom",
+        "uncertainty": "an EXTRAPOLATION uncertainty on the best-bound seed: the LARGER of the "
+                       "SHCI convention (half the extrapolation distance, Holmes/Tubman/Umrigar "
+                       "2016) and the internal quadrature of fit + method (PT2 vs power-law "
+                       "disagreement) + stability (leave-one-out refit). The SEED SPREAD IS NOT "
+                       "IN SIGMA -- multiple random starts are a search device, and run-to-run "
+                       "agreement is reported separately as a robustness check. Covers the "
+                       "N->inf limit of this ladder ONLY -- not n_b, lattice/finite volume, EFT "
+                       "truncation, or search-basin risk",
+        "exclusions": "an extrapolation with no estimable uncertainty, or one landing above the "
+                      "deepest Ritz value, is refused -- the row becomes bound_only",
+        "seed_rule": "the tightest (lowest) E_var across seeds is the quoted bound, and that "
+                     "same best-bound seed -- the trajectory taken furthest -- supplies E_inf. If that seed cannot "
+                     "extrapolate the point is bound-only; a shallower seed is never promoted. The "
+                     "seed spread is a search-robustness DIAGNOSTIC reported alongside, never an "
+                     "error-bar term (TrimCI takes the best-performing run; it does not average "
+                     "runs)",
+        "min_rungs": min_rungs, "min_pt2_post": min_pt2_post,
+    }
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", nargs="+", required=True)
@@ -545,23 +581,7 @@ def main():
         print(f"[validate classical] FAIL\n  {e}", file=sys.stderr)
         sys.exit(2)
 
-    gates = {
-        "basin_split": "ladder split at the largest single-doubling E_var drop; only "
-                       "POST-collapse rungs are fitted (pre-collapse PT2 extrapolation is "
-                       "unreliable -- +19 MeV/site at L=2)",
-        "extrapolators": "SHCI/PT2 intercept preferred when PT2 exists on >=3 post-collapse "
-                         "rungs; power law E_inf + a*N^-b otherwise, requiring >=4 rungs so the "
-                         "3-parameter fit keeps a degree of freedom",
-        "uncertainty": "quadrature of fit, method (PT2 vs power-law disagreement), stability "
-                       "(leave-one-out refit) and seed spread; covers the N->inf limit of this "
-                       "ladder ONLY -- not n_b, lattice/finite volume, EFT truncation, or search "
-                       "basin risk",
-        "exclusions": "an extrapolation with no estimable uncertainty, or one landing above the "
-                      "deepest Ritz value, is refused -- the row becomes bound_only",
-        "seed_rule": "tightest (lowest) E_var across seeds is the quoted bound; E_inf is the mean "
-                     "over seeds that extrapolated, with the spread folded into sigma",
-        "min_rungs": args.min_rungs, "min_pt2_post": args.min_pt2_post,
-    }
+    gates = aggregation_rules(args.min_rungs, args.min_pt2_post)
     man = build_manifest(args.label, args.data, records, shard_info, prov, args.expect_n_b,
                          analysis=args.analysis, outputs=args.outputs, gates=gates)
     if len(man["files"]) != len(shard_info):
@@ -569,8 +589,13 @@ def main():
                             f"shards were validated -- key collision in the file map")
     out = args.out or os.path.join(args.data[0], "accepted_data_manifest.json")
     json.dump(man, open(out, "w"), indent=2)
-    lab = ", ".join((f"n_b{r['n_b']}/L{r['L']}" if "n_b" in r else f"L{r['L']}/A{r['A']}")
-                    + f":{r['label']}" for r in records)
+    def _tag(r):
+        if "frame" in r:            # backeval: frame AND cutoff both distinguish a group
+            return f"{r['frame']}/n_b{r['n_b']}/L{r['L']}/A{r['A']}"
+        if "n_b" in r:
+            return f"n_b{r['n_b']}/L{r['L']}"
+        return f"L{r['L']}/A{r['A']}"
+    lab = ", ".join(f"{_tag(r)}:{r['label']}" for r in records)
     print(f"[validate classical] PASS — {len(shard_info)} shards, n_b={args.expect_n_b}, "
           f"commit {(prov['generating_commit'] or '+'.join(c[:7] for c in (prov.get('asserted_commit_candidates') or ['?'])))[:40]} "
           f"({prov['provenance_source']}); {lab}")

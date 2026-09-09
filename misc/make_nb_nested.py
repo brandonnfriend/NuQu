@@ -209,14 +209,19 @@ def make_table(recs, out_path):
            "independently-selected arm swings to 2.0e-3 MeV/site with oscillating sign — **~2.8× "
            "larger than the signal it was meant to measure**, which is why that arm could not "
            "resolve this.",
-           "- **Not settled:** it has **not plateaued in core**. Every measured point sits under the "
-           "reference, but the L=2 trend projects *above* it at the core the classical baseline "
-           "actually reaches. Each measured value is therefore a **lower bound** on its own "
-           "converged value.",
-           "- **Cannot be settled this way:** the core needed to reach the boundary grows with "
-           "volume (16k–64k at L=2, 64k–256k at L=3, **not reached by 128k at L=4**). So this method "
-           "cannot certify the cutoff at L=10 **at any compute budget** — it can only bound the "
-           "effect at small L. That is a limit of the approach, not of the allocation.",
+           "- **Not settled:** the measured values **have not plateaued** over the observed core "
+           "range and therefore cannot be treated as converged; the fitted L=2 trends project "
+           "*above* the reference at the core the classical baseline actually reaches. (A "
+           "difference of two Rayleigh quotients is not proved monotone as the shared subspace "
+           "grows, so these are not mathematical lower bounds on their converged values — the "
+           "observed sequence rises, which is a weaker and sufficient statement.)",
+           "- **Not settled this way in practice:** the core needed to reach the boundary grows "
+           "with volume (16k–64k at L=2, 64k–256k at L=3, **not reached by 128k at L=4**). At "
+           "unlimited depth the method would in principle reach the boundary at any L; the point "
+           "is that the observed growth of the required core makes certification at L=10 "
+           "**computationally inaccessible with the present method and available resources**. "
+           "Note also that this observable does not *bound* the true cutoff effect — both sides "
+           "are variational energies, and their difference is not a bound.",
            "- **Filling:** no monotonic trend across A=1…32 at matched core (values scatter over 5×, "
            "with the fully-filled point among the largest).",
            ""]

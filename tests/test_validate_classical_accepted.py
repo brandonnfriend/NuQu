@@ -20,7 +20,8 @@ import tempfile
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
 
-from misc.validate_classical_accepted import RejectedError, validate  # noqa: E402
+from misc.validate_classical_accepted import (RejectedError, validate,  # noqa: E402
+                                              aggregation_rules as _agg_rules)
 
 VERTEX_FIX = "9404fac4edf20646cb9862045159667a43e095a8"
 
@@ -256,6 +257,46 @@ def main():
                   ktl_break=True)
         _expect_reject(lambda: validate([kt], expect_n_b=3, kind="backeval_shard"),
                        "Kato-Temple", fails, "E_orig below its Kato-Temple bound")
+
+        # --- the manifest's STATED POLICY must match what the code actually does -------
+        # The emitted aggregation_rules once said the central value was the mean over seeds with
+        # the spread folded into sigma. Both had ceased to be true (best-bound seed supplies the
+        # value; the spread is a separate robustness diagnostic), and nothing caught the drift
+        # because the text was never compared to behaviour. This does that comparison.
+        from classical.trimci.extrapolation import combine_seeds as _cs
+        dis = _tree(tmp, "disagree", [dict(L=2, n_b=3, seed=0, E_fci=1795.0, commit=head),
+                                      dict(L=2, n_b=3, seed=1, E_fci=1799.0, commit=head),
+                                      dict(L=2, n_b=3, seed=2, E_fci=1815.0, commit=head)])
+        recs4, _, _ = validate([dis], expect_n_b=3)
+        r4 = recs4[0]
+        per = {}
+        for f in sorted(os.listdir(dis)):
+            if f.endswith(".json") and f.startswith("bare_"):
+                j = json.load(open(os.path.join(dis, f)))
+                per[j["seed"]] = j["rungs"]
+        pooled = _cs(per, sites=r4["sites"])
+        if not pooled.get("ok"):
+            fails.append(f"policy fixture did not extrapolate: {pooled.get('reason')}")
+        else:
+            best = pooled["best_seed"]
+            # POLICY 1: the central value is the best-bound seed's, not a mean over seeds
+            if abs(r4["E_inf"] - pooled["per_seed"][best]["E_inf"]) > 1e-9:
+                fails.append("manifest E_inf is not the best-bound seed's -- stated seed_rule "
+                             "does not match combine_seeds")
+            # POLICY 2: sigma is that seed's OWN uncertainty; the spread is not folded in
+            if abs(r4["sigma"] - pooled["per_seed"][best]["sigma"]) > 1e-9:
+                fails.append("manifest sigma differs from the best seed's own -- the seed spread "
+                             "appears to be folded in, contradicting the stated uncertainty rule")
+            if r4.get("sigma_seed") is None:
+                fails.append("seed spread not reported alongside as a diagnostic")
+        # POLICY TEXT: the strings must say those two things, so they cannot go stale silently
+        rules = _agg_rules()
+        if "best-bound seed" not in rules["seed_rule"] or "never an error-bar term" not in rules["seed_rule"]:
+            fails.append(f"seed_rule text no longer states the best-bound/diagnostic policy: {rules['seed_rule']}")
+        if "SEED SPREAD IS NOT IN SIGMA" not in rules["uncertainty"]:
+            fails.append(f"uncertainty text no longer excludes the seed spread: {rules['uncertainty']}")
+        if "mean" in rules["seed_rule"].lower():
+            fails.append("seed_rule still describes a mean over seeds")
 
         # --- MIXED provenance: shards spanning more than one commit -------------------
         # Really happened: Condor restarted 4 shards of cluster 292477 after the server

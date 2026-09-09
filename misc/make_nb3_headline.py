@@ -144,7 +144,12 @@ def main():
           f"walk_T is projected by the quantization-aware model (n_terms/L³={sc['model']['c0']:.0f}"
           f"{sc['model']['c1']:+.0f}/L → padded bin → walk_T; back-tested <1.1% on L=1..{exmax}); λ keeps "
           f"its ×{sc['lamr']:.2f} ratio, qubits ×{sc['qr']:.2f}. The projected T band spans the bins "
-          f"n_terms×(1±10%) can occupy (widest at L=9, just under the 2²² edge). π walk constant, "
+          f"n_terms×(1±10%) can occupy (widest at L=9, just under the 2²² edge). **The band covers "
+          f"PADDING-BIN uncertainty ONLY** — the bins a ±10% term-count perturbation can land in. "
+          f"It is NOT a full projection/model uncertainty, and where it rounds to identical "
+          f"endpoints (L=8, L=10) that reflects both perturbed counts falling in the same bin, "
+          f"NOT an exact projection. The model's calibration residual against the compiled L=1..7 "
+          f"points is **<1.1%**, quoted separately and not included in the band. π walk constant, "
           f"ΔE=1 MeV. Large-volume cutoff adequacy is CONDITIONAL (P0-4)._\n",
           "| L | T(n_b=2) | **T(n_b=3)** | band | ×T | walk reg. | m | **total qubits(n_b=3)** | source |",
           "|--:|--:|--:|--:|--:|--:|--:|--:|:--|"]

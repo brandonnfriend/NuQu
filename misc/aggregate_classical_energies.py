@@ -227,12 +227,15 @@ def make_table(recs, out_path):
         "own right. `E_var+PT2` is Epstein–Nesbet (non-variational). $E_\\infty$ is the "
         "$N\\to\\infty$ Full-CI-within-truncation limit, ESTIMATED by extrapolation over the "
         "POST-collapse rungs, never measured._\n",
-        "**What σ covers:** the fit, the disagreement between two independent extrapolators "
-        "(PT2/SHCI vs power-law) on the same rungs, the leave-one-out refit shift, and the "
-        "seed-to-seed spread of independent solver trajectories. **What σ does NOT cover:** the "
-        "boson cutoff $n_b$, lattice spacing / finite volume, the EFT truncation, or the "
-        "possibility that the selected-CI search never found the right basin. Those are separate "
-        "budget lines and are not folded in here.\n",
+        "**What σ covers:** it is an *extrapolation* uncertainty on the **best-bound seed** — the "
+        "trajectory taken furthest, which supplies the central value — taken as the larger of the "
+        "SHCI convention (half the extrapolation distance) and the internal quadrature of fit ⊕ "
+        "method (PT2/SHCI vs power-law disagreement) ⊕ stability (leave-one-out refit). "
+        "**The seed spread is NOT in σ**: multiple random starts are a search device, so run-to-run "
+        "agreement is reported separately as a robustness check (next table but one). "
+        "**What σ does NOT cover:** the boson cutoff $n_b$, lattice spacing / finite volume, the "
+        "EFT truncation, or the possibility that the selected-CI search never found the right "
+        "basin. Those are separate budget lines and are not folded in here.\n",
         "| $n_b$ | L | sites | seeds | $E_\\mathrm{var}$/site (bound) | ΔE last doubling | "
         "$E_\\mathrm{var}$+PT2/site | **$E_\\infty$/site ± σ (reported)** | extrapolator | post-basin rungs |",
         "|--:|--:|--:|--:|--:|--:|--:|--:|:--|--:|",
