@@ -151,6 +151,61 @@ def main():
         _expect_reject(lambda: validate([d], expect_n_b=3, min_pt2_post=99),
                        "post-collapse PT2", fails, "PT2-depth gate")
 
+        # --- NESTED cutoff shards: a different observable, different failure modes ----
+        def _nested(path, L, A, seed, commit, max_occ=7, delta=1e-3, bnd=5, seeded=100):
+            rungs = []
+            for i, c in enumerate((1000, 2000, 4000)):
+                at_end = (i == 2)
+                rungs.append({"core": c, "E_lo": 1000.0 - i,
+                              "delta_shared": delta if at_end else 0.0,
+                              "delta_shared_per_site": (delta if at_end else 0.0) / (L ** 3),
+                              "delta_nested": 0.0, "delta_nested_per_site": 0.0,
+                              "lo_max_occ": max_occ if at_end else 4,
+                              "lo_n_boundary_dets": (bnd if at_end else 0),
+                              "lo_boundary_weight": 1e-5 if at_end else 0.0,
+                              "n_hi_only_seeded": seeded, "n_hi_only_kept": 0,
+                              "hi_only_weight": 0.0, "wall_s": 1.0})
+            json.dump({"kind": "nb_nested_shard", "L": L, "dim": 3, "A": A, "sites": L ** 3,
+                       "seed": seed, "n_b_lo": 3, "n_b_hi": 4, "N_f_lo": 8, "N_f_hi": 16,
+                       "rungs": rungs, "done": True, "wall_s": 5.0,
+                       "manifest": {"git_commit": commit, "git_dirty": False,
+                                    "hostname": "qis1", "timestamp_utc": "2026-09-09T00:00:00+00:00"}},
+                      open(path, "w"))
+
+        nd = os.path.join(tmp, "nested"); os.makedirs(nd)
+        for sd in (0, 1):
+            _nested(os.path.join(nd, f"nested_L2d3_A1_s{sd}.json"), 2, 1, sd, head)
+        # a point whose ladder never reached the boundary -> must be labelled no_measurement
+        _nested(os.path.join(nd, "nested_L4d3_A1_s0.json"), 4, 1, 0, head,
+                max_occ=6, delta=0.0, bnd=0)
+        try:
+            recs, info, _ = validate([nd], expect_n_b=3, n_b_hi=4, kind="nb_nested_shard")
+            labs = {(r["L"], r["A"]): r["label"] for r in recs}
+            if labs.get((2, 1)) != "measured" or labs.get((4, 1)) != "no_measurement":
+                fails.append(f"nested labels wrong: {labs} -- a ladder that never reached the "
+                             "boundary must be no_measurement, never a zero shift")
+            if len(info) != 3:
+                fails.append(f"nested hashed {len(info)} shards, expected 3")
+        except RejectedError as e:
+            fails.append(f"clean nested tree rejected: {e}")
+        _expect_reject(lambda: validate([nd], expect_n_b=2, n_b_hi=3, kind="nb_nested_shard"),
+                       "cutoffs", fails, "nested wrong cutoff pair")
+        # negative delta_shared is physically impossible on an identical determinant set
+        badn = os.path.join(tmp, "nested_bad"); os.makedirs(badn)
+        _nested(os.path.join(badn, "nested_L2d3_A1_s0.json"), 2, 1, 0, head, delta=-5.0)
+        _expect_reject(lambda: validate([badn], expect_n_b=3, n_b_hi=4, kind="nb_nested_shard"),
+                       "< 0", fails, "negative delta_shared")
+        # a nonzero shift with no boundary population breaks the mis-scoring mechanism
+        badm = os.path.join(tmp, "nested_mech"); os.makedirs(badm)
+        _nested(os.path.join(badm, "nested_L2d3_A1_s0.json"), 2, 1, 0, head, bnd=0)
+        _expect_reject(lambda: validate([badm], expect_n_b=3, n_b_hi=4, kind="nb_nested_shard"),
+                       "no boundary population", fails, "shift without boundary population")
+        # a shard that never showed the search the high-cutoff states
+        badz = os.path.join(tmp, "nested_blind"); os.makedirs(badz)
+        _nested(os.path.join(badz, "nested_L2d3_A1_s0.json"), 2, 1, 0, head, seeded=0)
+        _expect_reject(lambda: validate([badz], expect_n_b=3, n_b_hi=4, kind="nb_nested_shard"),
+                       "never looked", fails, "no high-only states seeded")
+
         # --- MIXED provenance: shards spanning more than one commit -------------------
         # Really happened: Condor restarted 4 shards of cluster 292477 after the server
         # checkout had moved, so they carry a later commit than the 8 launched earlier. The

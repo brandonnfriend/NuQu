@@ -107,9 +107,80 @@ def _finite(x):
     return x is not None and isinstance(x, (int, float)) and math.isfinite(x)
 
 
+def _validate_nested(files, expect_dim, n_b_lo, n_b_hi):
+    """Per-shard invariants for the NESTED cutoff shards (`misc/run_nb_nested_shard.py`).
+
+    Different observable, different failure modes. The ones that matter:
+      * `delta_shared >= 0` -- raising the cutoff cannot LOWER the energy on an identical
+        determinant set; a negative value means the two Hamiltonians disagree the wrong way.
+      * `delta_shared == 0` exactly when the core carries no boundary population, and nonzero
+        only when it does. That equivalence IS the mechanism, so breaking it invalidates the
+        measurement rather than merely widening it.
+      * the search must have been SHOWN the high-cutoff-only states (`n_hi_only_seeded > 0`),
+        otherwise a zero shift means "never looked".
+      * a point whose ladder never reached the boundary is labelled `no_measurement`, never
+        "zero shift" -- the L=4 case, and the single easiest way to misreport this dataset.
+    """
+    groups, info = defaultdict(dict), []
+    for f in files:
+        tag = os.path.basename(f)
+        j = json.load(open(f))
+        if j.get("n_b_lo") != n_b_lo or j.get("n_b_hi") != n_b_hi:
+            raise RejectedError(f"REJECTED {tag}: cutoffs ({j.get('n_b_lo')}, {j.get('n_b_hi')}) "
+                                f"!= expected ({n_b_lo}, {n_b_hi})")
+        if j.get("dim") != expect_dim:
+            raise RejectedError(f"REJECTED {tag}: dim={j.get('dim')}, expected {expect_dim}")
+        rungs = sorted(j.get("rungs", []), key=lambda r: r["core"])
+        if not rungs:
+            raise RejectedError(f"REJECTED {tag}: no rungs")
+        for r in rungs:
+            for k in ("core", "E_lo", "delta_shared", "lo_boundary_weight", "lo_max_occ"):
+                if r.get(k) is None or (isinstance(r[k], float) and not math.isfinite(r[k])):
+                    raise RejectedError(f"REJECTED {tag}: rung {r.get('core')} missing/nonfinite {k}")
+            if r["delta_shared"] < -1e-9 * max(1.0, abs(r["E_lo"])):
+                raise RejectedError(f"REJECTED {tag}: delta_shared={r['delta_shared']:.3e} < 0 at "
+                                    f"core {r['core']} -- raising the cutoff cannot lower the "
+                                    f"energy on an identical determinant set")
+            at_bnd = r["lo_n_boundary_dets"] > 0
+            nonzero = abs(r["delta_shared"]) > 1e-12 * max(1.0, abs(r["E_lo"]))
+            if nonzero and not at_bnd:
+                raise RejectedError(f"REJECTED {tag}: nonzero delta_shared at core {r['core']} with "
+                                    f"no boundary population -- breaks the mis-scoring mechanism")
+            if (r.get("n_hi_only_seeded") or 0) <= 0:
+                raise RejectedError(f"REJECTED {tag}: core {r['core']} seeded no high-cutoff-only "
+                                    f"determinants -- a zero shift there would mean 'never looked'")
+        groups[(j["L"], j["A"])][j["seed"]] = rungs
+        info.append({"file": os.path.relpath(f, _ROOT) if f.startswith(_ROOT) else f,
+                     "sha256": _sha256(f), "L": j["L"], "A": j["A"], "seed": j["seed"],
+                     "sites": j["sites"], "n_b_lo": n_b_lo, "n_b_hi": n_b_hi,
+                     "done": bool(j.get("done")), "n_rungs": len(rungs),
+                     "cores": [r["core"] for r in rungs], "wall_s": j.get("wall_s"),
+                     "git_commit": (j.get("manifest") or {}).get("git_commit"),
+                     "host": (j.get("manifest") or {}).get("hostname")})
+    records = []
+    for (L, A), seeds in sorted(groups.items()):
+        best = min(seeds, key=lambda s_: seeds[s_][-1]["E_lo"])   # trajectory taken furthest
+        last = seeds[best][-1]
+        reached = last["lo_max_occ"] >= (2 ** n_b_lo - 1)
+        label = "measured" if reached else "no_measurement"
+        if not reached and abs(last["delta_shared"]) > 0:
+            raise RejectedError(f"REJECTED (L={L}, A={A}): labelled no_measurement but carries a "
+                                f"nonzero shift {last['delta_shared']}")
+        records.append({"L": L, "A": A, "label": label,
+                        "seeds": sorted(seeds), "best_seed": best,
+                        "deepest_core": last["core"], "max_occ": last["lo_max_occ"],
+                        "boundary_reached": reached,
+                        "delta_shared_per_site": (last["delta_shared_per_site"] if reached else None),
+                        "boundary_weight": last["lo_boundary_weight"],
+                        "seed_spread": (max(seeds[s_][-1]["delta_shared_per_site"] for s_ in seeds)
+                                        - min(seeds[s_][-1]["delta_shared_per_site"] for s_ in seeds))})
+    return records, info
+
+
 def validate(data_dirs, expect_n_b, expect_dim=3, expect_frame="bare",
              min_rungs=4, min_pt2_post=0, allow_unmanifested=False,
-             assert_commit=None, allow_mixed_commits=False, repo=_ROOT):
+             assert_commit=None, allow_mixed_commits=False, kind="frame_shard",
+             n_b_hi=None, repo=_ROOT):
     """Gate the shards and return (records, shard_info, provenance). Raises RejectedError."""
     files = []
     for d in data_dirs:
@@ -119,9 +190,10 @@ def validate(data_dirs, expect_n_b, expect_dim=3, expect_frame="bare",
                 f"REJECTED {d}: matches retired pre-vertex-fix campaign token {hit[0]!r}. "
                 f"All pre-{VERTEX_FIX_DATE} data is inadmissible (vertex bug, fixed "
                 f"{VERTEX_FIX_COMMIT[:7]}) and must never feed an accepted result.")
-        found = sorted(glob.glob(f"{d}/bare_*.json"))
+        pat = "nested_*.json" if kind == "nb_nested_shard" else "bare_*.json"
+        found = sorted(glob.glob(f"{d}/{pat}"))
         if not found:
-            raise RejectedError(f"REJECTED {d}: no bare_*.json shards found")
+            raise RejectedError(f"REJECTED {d}: no {pat} shards found")
         files += found
 
     groups, shard_info, commits, unmanifested = defaultdict(dict), [], set(), []
@@ -156,6 +228,12 @@ def validate(data_dirs, expect_n_b, expect_dim=3, expect_frame="bare",
                     f"--allow-unmanifested --assert-commit <sha>, which records the "
                     f"provenance as OPERATOR-ASSERTED rather than embedded.")
             unmanifested.append(tag)
+
+        # Physics checks below are FRAME-SHARD specific (E_var ladders). The nested
+        # cutoff shards carry a different observable and are validated by
+        # `_validate_nested` after this loop; only provenance is common.
+        if kind != "frame_shard":
+            continue
 
         # --- cutoff gate (the P0-1 defect, made unrepeatable) -----------------------
         n_b, N_f = j.get("n_b"), j.get("N_f")
@@ -205,13 +283,16 @@ def validate(data_dirs, expect_n_b, expect_dim=3, expect_frame="bare",
             "solver": ((man.get("extra") or {}).get("solver") if man else None),
         })
 
-    if len(config) > 1:
+    if kind == "frame_shard" and len(config) > 1:
         raise RejectedError(f"REJECTED: shards disagree on (filling, ladder_mode, boson_init_mean): "
                             f"{ {str(k): v for k, v in config.items()} }")
 
+    if kind == "nb_nested_shard":
+        records, shard_info = _validate_nested(files, expect_dim, expect_n_b, n_b_hi or expect_n_b + 1)
+
     # --- derived records + the bound-only / extrapolated LABEL gate ------------------
-    records = []
-    for (n_b, L), per_seed in sorted(groups.items()):
+    records = records if kind == "nb_nested_shard" else []
+    for (n_b, L), per_seed in (sorted(groups.items()) if kind == "frame_shard" else []):
         sites = next(s["sites"] for s in shard_info if (s["n_b"], s["L"]) == (n_b, L))
         pooled = combine_seeds(per_seed, sites=sites)
         label = "extrapolated" if pooled["ok"] else "bound_only"
@@ -300,8 +381,12 @@ def build_manifest(label, data_dirs, records, shard_info, provenance, expect_n_b
                     "frame, filling, ladder mode, boson init and the cutoff.",
             "shards": shard_info,
         },
-        "seed_and_core_ladders": {f"n_b={r['n_b']},L={r['L']}": r["core_ladders"]
-                                  for r in records},
+        "seed_and_core_ladders": {
+            (f"n_b={r['n_b']},L={r['L']}" if "n_b" in r else f"L={r['L']},A={r['A']}"):
+                r.get("core_ladders", {"seeds": r.get("seeds"),
+                                       "best_seed": r.get("best_seed"),
+                                       "deepest_core": r.get("deepest_core")})
+            for r in records},
         "aggregation_rules": gates or {},
         "results": records,
         "analysis_scripts": hashed(analysis),
@@ -324,6 +409,12 @@ def main():
     ap.add_argument("--outputs", nargs="*", default=[])
     ap.add_argument("--allow-unmanifested", action="store_true")
     ap.add_argument("--assert-commit", default=None)
+    ap.add_argument("--kind", default="frame_shard",
+                    choices=["frame_shard", "nb_nested_shard"],
+                    help="frame_shard = bare_*.json E_var ladders; nb_nested_shard = "
+                         "nested_*.json fixed-basis cutoff shards")
+    ap.add_argument("--n-b-hi", type=int, default=None,
+                    help="nb_nested_shard only: the HIGH cutoff (--expect-n-b is the low one)")
     ap.add_argument("--allow-mixed-commits", action="store_true",
                     help="acknowledge that shards span more than one commit (e.g. a job "
                          "restarted after the server checkout moved). Pass ONLY after diffing "
@@ -337,7 +428,8 @@ def main():
             args.data, args.expect_n_b, expect_dim=args.dim, expect_frame=args.frame,
             min_rungs=args.min_rungs, min_pt2_post=args.min_pt2_post,
             allow_unmanifested=args.allow_unmanifested, assert_commit=args.assert_commit,
-            allow_mixed_commits=args.allow_mixed_commits)
+            allow_mixed_commits=args.allow_mixed_commits, kind=args.kind,
+            n_b_hi=args.n_b_hi)
     except RejectedError as e:
         # A gate refusal is an expected outcome, not a crash -- print it plainly and exit 2
         # so a release script can distinguish "rejected" (2) from "broken" (1).
@@ -365,7 +457,8 @@ def main():
                          analysis=args.analysis, outputs=args.outputs, gates=gates)
     out = args.out or os.path.join(args.data[0], "accepted_data_manifest.json")
     json.dump(man, open(out, "w"), indent=2)
-    lab = ", ".join(f"n_b{r['n_b']}/L{r['L']}:{r['label']}" for r in records)
+    lab = ", ".join((f"n_b{r['n_b']}/L{r['L']}" if "n_b" in r else f"L{r['L']}/A{r['A']}")
+                    + f":{r['label']}" for r in records)
     print(f"[validate classical] PASS — {len(shard_info)} shards, n_b={args.expect_n_b}, "
           f"commit {prov['generating_commit'][:10]} ({prov['provenance_source']}); {lab}")
     print(f"[manifest] wrote {out}")
