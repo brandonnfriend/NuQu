@@ -17,7 +17,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from misc.make_nb3_headline import build
 from misc.nb3_padding_model import fit_model, walk_T_at_bin, _bin
-from src_PI.estimation.qpe_cost import walk_queries, WALK_QUERY_CONSTANT_HEISENBERG as PI
+from src_PI.estimation.qpe_cost import (walk_queries, WALK_QUERY_CONSTANT_HEISENBERG as PI,
+                                        qpe_phase_register_qubits_from_nwalk as _m_from_nwalk)
 from src_PI.estimation.total_t_optimizer import optimize_qpe_fraction
 
 BP, M, K = 6.0206, 6.0, 15.0          # b/P constant; a/P = M·log2(P)+K  (the padding law)
@@ -26,13 +27,22 @@ DE = 1.0
 
 
 def _row(terms, lam, q):
+    """A stand-in for one `nb3_padding_model._load` record.
+
+    Must mirror that schema, including the phase register: `q` is the WALK/block-encoding
+    register and `q_total = q + m` is what the headline reports as "total logical qubits"
+    (CONVENTIONS.md section 4). Omitting q_total here would let the fixture drift from the
+    loader and hide a real break -- which is exactly what happened when the headline switched
+    to the total on 2026-09-09."""
     P = _bin(terms)
     b = BP * P
     a = (M * math.log2(P) + K) * P
     opt = optimize_qpe_fraction(a, b, lam, DE)
-    T = walk_queries(lam, opt["eps_qpe"], PI) * opt["walk_T"]
-    return dict(lam=lam, walkT=opt["walk_T"], q=q, terms=terms, eps=opt["eps_qpe"],
-                a=a, bb=b, dE=DE, T=T)
+    n_walk = walk_queries(lam, opt["eps_qpe"], PI)
+    T = n_walk * opt["walk_T"]
+    m = _m_from_nwalk(n_walk)
+    return dict(lam=lam, walkT=opt["walk_T"], q=q, m=m, q_total=q + m, terms=terms,
+                eps=opt["eps_qpe"], a=a, bb=b, dE=DE, T=T)
 
 
 NB2 = {L: _row(CPS2 * L ** 3, 1.0 * L, 10 * L) for L in range(1, 11)}          # L=1..10 compiled
@@ -48,9 +58,27 @@ def test_exact_vs_projected_classification():
 def test_display_ratios_from_smooth_regime():
     rows, sc = build(NB2, NB3)
     assert abs(sc["lamr"] - 3.75) < 1e-9                              # λ ratio exact by construction
-    assert abs(sc["qr"] - 1.3) < 1e-9                                 # 13L / 10L
+    # The qubit ratio is on the REPORTED total (walk + QPE phase register), not the walk
+    # register alone. The walk registers are 13L vs 10L = exactly 1.3; adding m (which differs
+    # by only a couple of qubits between the cutoffs) shifts the total ratio slightly off 1.3.
+    # Pinning it at exactly 1.3 would silently re-assert the walk-only convention.
+    walk_ratio = sum(NB3[L]["q"] / NB2[L]["q"] for L in (4, 5, 6)) / 3
+    assert abs(walk_ratio - 1.3) < 1e-9                               # 13L / 10L, walk register
+    assert abs(sc["qr"] - 1.3) < 0.05 and sc["qr"] != walk_ratio      # total: near it, not it
     assert sc["fitL"] == [4, 5, 6]                                    # L=7 excluded from the fit
     assert 25 < sc["Tr"] < 45                                         # smooth-regime total-T ratio
+
+
+def test_reported_qubits_include_the_phase_register():
+    """The headline reports walk + m. Until 2026-09-09 it reported the walk register while
+    calling it "total logical qubits"; this pins the fix so it cannot regress."""
+    rows, _ = build(NB2, NB3)
+    for L in (4, 7, 10):
+        r = rows[L]
+        assert r["m"] and r["m"] > 0, f"L={L}: no phase register recorded"
+        assert abs(r["q"] - (r["qwalk"] + r["m"])) < 1e-9, f"L={L}: reported q != walk + m"
+        assert r["q"] > r["qwalk"], f"L={L}: reported qubits not above the walk register"
+        assert r["qlo"] <= r["q"] <= r["qhi"], f"L={L}: band does not bracket the value"
 
 
 def test_projected_is_positive_and_banded():

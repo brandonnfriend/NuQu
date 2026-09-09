@@ -177,10 +177,90 @@ def _validate_nested(files, expect_dim, n_b_lo, n_b_hi):
     return records, info
 
 
+# The P0-1 solver defect that produced the SUPERSEDED frame bundle: `max_rounds` was sized off
+# a default rather than the requested core, so every ladder stalled at this determinant count.
+# `conv_shards`/`denself_shards` all cap here; the accepted `conv2_shards` reach 64,000.
+FRAME_P01_STALLED_NDETS = 3482
+
+
+def _validate_backeval(files, expect_dim, allowed_n_b, max_dropped_weight=0.05):
+    """Per-shard invariants for the FRAME back-evaluation shards (`misc/run_backeval_benchmark.py`).
+
+    The frame claim is a determinant-EFFICIENCY threshold measured against actual `n_dets`, so the
+    failure modes are about the ladder and the map-back, not about extrapolation:
+
+      * `n_dets <= core` -- you cannot select more determinants than the core budget;
+      * the ladder must actually GROW. The superseded bundle stalled at
+        FRAME_P01_STALLED_NDETS determinants because `max_rounds` was sized off a default instead
+        of the requested core; a dataset whose deepest ladder sits at that value is the known-bad
+        one and is refused by name;
+      * `E_orig >= kato_temple_lower` where the bracket exists -- the back-evaluated variational
+        energy must sit inside its own bound;
+      * the map-back must not be cap-dominated. `denself_shards` dropped 34-43% of the weight,
+        which makes `E_orig` a truncated remnant rather than a variational energy.
+    """
+    groups, info = defaultdict(list), []
+    deepest = 0
+    for f in files:
+        tag = os.path.basename(f)
+        j = json.load(open(f))
+        md = j.get("metadata") or {}
+        if md.get("dim") != expect_dim:
+            raise RejectedError(f"REJECTED {tag}: dim={md.get('dim')}, expected {expect_dim}")
+        if md.get("n_b") not in allowed_n_b:
+            raise RejectedError(f"REJECTED {tag}: n_b={md.get('n_b')} not in the DECLARED set "
+                                f"{sorted(allowed_n_b)}. The accepted frame bundle carries an "
+                                f"n_b=4 cross-check arm by design, but it must be declared with "
+                                f"--allow-n-b, never discovered silently.")
+        res = j.get("results") or []
+        if not res:
+            raise RejectedError(f"REJECTED {tag}: no results")
+        for r in res:
+            nd, core = r.get("n_dets"), r.get("core")
+            if nd is None or core is None:
+                raise RejectedError(f"REJECTED {tag}: rung missing n_dets/core")
+            if nd > core:
+                raise RejectedError(f"REJECTED {tag}: n_dets {nd} exceeds core {core}")
+            eo = r.get("E_orig")
+            if eo is None or not math.isfinite(eo):
+                raise RejectedError(f"REJECTED {tag}: non-finite E_orig at n_dets {nd}")
+            ktl = r.get("kato_temple_lower")
+            if ktl is not None and math.isfinite(ktl) and eo < ktl - 1e-9:
+                raise RejectedError(f"REJECTED {tag}: E_orig {eo:.6f} below its Kato-Temple lower "
+                                    f"bound {ktl:.6f} at n_dets {nd}")
+            dw = r.get("back_dropped_weight")
+            if dw is not None and dw > max_dropped_weight:
+                raise RejectedError(f"REJECTED {tag}: map-back dropped {dw:.1%} of the weight at "
+                                    f"n_dets {nd} (cap {max_dropped_weight:.0%}) -- E_orig would be "
+                                    f"a truncated remnant, not a variational energy")
+            deepest = max(deepest, nd)
+        key = (md.get("frame"), md.get("L"), md.get("A"))
+        groups[key].append((md.get("seed"), max(r["n_dets"] for r in res),
+                            min(r["E_orig"] for r in res)))
+        info.append({"file": os.path.relpath(f, _ROOT) if f.startswith(_ROOT) else f,
+                     "sha256": _sha256(f), "L": md.get("L"), "A": md.get("A"),
+                     "frame": md.get("frame"), "seed": md.get("seed"), "n_b": md.get("n_b"),
+                     "N_f": md.get("N_f"), "done": bool(j.get("done")), "n_rungs": len(res),
+                     "n_dets": [r["n_dets"] for r in res],
+                     "git_commit": (md.get("manifest") or {}).get("git_commit"),
+                     "host": (md.get("manifest") or {}).get("hostname")})
+    if deepest <= FRAME_P01_STALLED_NDETS:
+        raise RejectedError(
+            f"REJECTED: deepest ladder is {deepest} determinants, at or below the known P0-1 stall "
+            f"({FRAME_P01_STALLED_NDETS}). This is the signature of the SUPERSEDED frame bundle "
+            f"(conv_shards / denself_shards), whose ladders never grew. Use conv2_shards.")
+    records = [{"frame": k[0], "L": k[1], "A": k[2], "label": "efficiency_measured",
+                "seeds": sorted(s for s, _, _ in v),
+                "deepest_n_dets": max(n for _, n, _ in v),
+                "best_E_orig": min(e for _, _, e in v)}
+               for k, v in sorted(groups.items(), key=lambda kv: (str(kv[0][0]), kv[0][1], kv[0][2]))]
+    return records, info
+
+
 def validate(data_dirs, expect_n_b, expect_dim=3, expect_frame="bare",
              min_rungs=4, min_pt2_post=0, allow_unmanifested=False,
              assert_commit=None, allow_mixed_commits=False, kind="frame_shard",
-             n_b_hi=None, repo=_ROOT):
+             n_b_hi=None, allow_n_b=None, repo=_ROOT):
     """Gate the shards and return (records, shard_info, provenance). Raises RejectedError."""
     files = []
     for d in data_dirs:
@@ -190,7 +270,8 @@ def validate(data_dirs, expect_n_b, expect_dim=3, expect_frame="bare",
                 f"REJECTED {d}: matches retired pre-vertex-fix campaign token {hit[0]!r}. "
                 f"All pre-{VERTEX_FIX_DATE} data is inadmissible (vertex bug, fixed "
                 f"{VERTEX_FIX_COMMIT[:7]}) and must never feed an accepted result.")
-        pat = "nested_*.json" if kind == "nb_nested_shard" else "bare_*.json"
+        pat = {"nb_nested_shard": "nested_*.json",
+               "backeval_shard": "backeval_*.json"}.get(kind, "bare_*.json")
         found = sorted(glob.glob(f"{d}/{pat}"))
         if not found:
             raise RejectedError(f"REJECTED {d}: no {pat} shards found")
@@ -201,7 +282,7 @@ def validate(data_dirs, expect_n_b, expect_dim=3, expect_frame="bare",
     for f in files:
         tag = os.path.basename(f)
         j = json.load(open(f))
-        man = j.get("manifest") or {}
+        man = j.get("manifest") or (j.get("metadata") or {}).get("manifest") or {}
         commit = man.get("git_commit")
 
         # --- provenance + vertex-fix gate ------------------------------------------
@@ -289,9 +370,12 @@ def validate(data_dirs, expect_n_b, expect_dim=3, expect_frame="bare",
 
     if kind == "nb_nested_shard":
         records, shard_info = _validate_nested(files, expect_dim, expect_n_b, n_b_hi or expect_n_b + 1)
+    elif kind == "backeval_shard":
+        records, shard_info = _validate_backeval(
+            files, expect_dim, {expect_n_b} | set(allow_n_b or ()))
 
     # --- derived records + the bound-only / extrapolated LABEL gate ------------------
-    records = records if kind == "nb_nested_shard" else []
+    records = records if kind in ("nb_nested_shard", "backeval_shard") else []
     for (n_b, L), per_seed in (sorted(groups.items()) if kind == "frame_shard" else []):
         sites = next(s["sites"] for s in shard_info if (s["n_b"], s["L"]) == (n_b, L))
         pooled = combine_seeds(per_seed, sites=sites)
@@ -335,10 +419,18 @@ def validate(data_dirs, expect_n_b, expect_dim=3, expect_frame="bare",
                   "--allow-mixed-commits AFTER checking that the differing commits do not change "
                   "the code the shard actually runs (diff the shard entry point and everything "
                   "it imports).")
+    # `assert_commit` may be a LIST for legacy data whose exact launch commit cannot be pinned
+    # per shard: we can still establish that every CANDIDATE launcher is post-vertex-fix, which
+    # is the admissibility question. Recording the candidate set is honest; picking one of them
+    # arbitrarily and calling it "the" generating commit is not.
+    asserted = ([assert_commit] if isinstance(assert_commit, str)
+                else list(assert_commit or []))
     provenance = {
-        "generating_commit": (sorted(commits)[0] if commits else assert_commit),
+        "generating_commit": (sorted(commits)[0] if commits else
+                              (asserted[0] if len(asserted) == 1 else None)),
         "embedded_commits": sorted(commits),
-        "asserted_commit": assert_commit,
+        "asserted_commit": (asserted[0] if len(asserted) == 1 else None),
+        "asserted_commit_candidates": (asserted if len(asserted) > 1 else None),
         "provenance_source": ("MIXED -- see embedded_commits + asserted_commit" if mixed else
                               "embedded shard manifest" if commits else
                               "OPERATOR-ASSERTED (shards predate per-shard manifests)"),
@@ -347,15 +439,22 @@ def validate(data_dirs, expect_n_b, expect_dim=3, expect_frame="bare",
         "mixed_commits_acknowledged": bool(mixed and allow_mixed_commits),
         "vertex_fix_commit": VERTEX_FIX_COMMIT, "vertex_fix_date": VERTEX_FIX_DATE,
     }
-    if provenance["generating_commit"] is None:
+    if not commits and not asserted:
         raise RejectedError("REJECTED: no generating commit -- pass --assert-commit for "
                             "unmanifested shards.")
     if unmanifested:
-        post = _is_post_vertex_fix(provenance["generating_commit"], repo=repo)
-        if post is not True:
-            raise RejectedError(
-                f"REJECTED: asserted commit {provenance['generating_commit'][:10]} is not a "
-                f"descendant of the vertex fix {VERTEX_FIX_COMMIT[:7]} (or is unknown here).")
+        # EVERY candidate must clear the vertex fix, not just the first one.
+        for c in asserted:
+            post = _is_post_vertex_fix(c, repo=repo)
+            if post is not True:
+                raise RejectedError(
+                    f"REJECTED: asserted commit {c[:10]} is not a descendant of the vertex fix "
+                    f"{VERTEX_FIX_COMMIT[:7]} (or is unknown here).")
+        if len(asserted) > 1:
+            provenance["provenance_source"] = (
+                "OPERATOR-ASSERTED (shards carry none; the exact launch commit cannot be pinned "
+                "per shard, so the CANDIDATE launcher commits are recorded -- all verified "
+                "post-vertex-fix)")
     return records, shard_info, provenance
 
 
@@ -391,7 +490,10 @@ def build_manifest(label, data_dirs, records, shard_info, provenance, expect_n_b
         "results": records,
         "analysis_scripts": hashed(analysis),
         "outputs": hashed(outputs),
-        "files": {os.path.basename(s["file"]): s["sha256"] for s in shard_info},
+        # keyed by RELATIVE PATH, not basename: a dataset assembled from more than one
+        # directory (e.g. nb_volscaling + nb_volscaling_deep) has same-named shards in each,
+        # and a basename key silently dropped them -- 12 hashed where 18 were validated.
+        "files": {s["file"]: s["sha256"] for s in shard_info},
     }
 
 
@@ -408,11 +510,18 @@ def main():
     ap.add_argument("--analysis", nargs="*", default=[])
     ap.add_argument("--outputs", nargs="*", default=[])
     ap.add_argument("--allow-unmanifested", action="store_true")
-    ap.add_argument("--assert-commit", default=None)
+    ap.add_argument("--assert-commit", nargs="+", default=None,
+                    help="commit(s) to assert for unmanifested shards. Several may be given when "
+                         "the exact launcher cannot be pinned per shard; ALL are checked against "
+                         "the vertex fix and the candidate set is recorded.")
     ap.add_argument("--kind", default="frame_shard",
-                    choices=["frame_shard", "nb_nested_shard"],
+                    choices=["frame_shard", "nb_nested_shard", "backeval_shard"],
                     help="frame_shard = bare_*.json E_var ladders; nb_nested_shard = "
                          "nested_*.json fixed-basis cutoff shards")
+    ap.add_argument("--allow-n-b", type=int, nargs="+", default=None,
+                    help="backeval_shard only: ADDITIONAL cutoffs present in the bundle by design "
+                         "(the frame bundle carries an n_b=4 cross-check arm). Declared, never "
+                         "discovered silently; frame_shard stays strictly single-cutoff.")
     ap.add_argument("--n-b-hi", type=int, default=None,
                     help="nb_nested_shard only: the HIGH cutoff (--expect-n-b is the low one)")
     ap.add_argument("--allow-mixed-commits", action="store_true",
@@ -429,7 +538,7 @@ def main():
             min_rungs=args.min_rungs, min_pt2_post=args.min_pt2_post,
             allow_unmanifested=args.allow_unmanifested, assert_commit=args.assert_commit,
             allow_mixed_commits=args.allow_mixed_commits, kind=args.kind,
-            n_b_hi=args.n_b_hi)
+            n_b_hi=args.n_b_hi, allow_n_b=args.allow_n_b)
     except RejectedError as e:
         # A gate refusal is an expected outcome, not a crash -- print it plainly and exit 2
         # so a release script can distinguish "rejected" (2) from "broken" (1).
@@ -455,12 +564,16 @@ def main():
     }
     man = build_manifest(args.label, args.data, records, shard_info, prov, args.expect_n_b,
                          analysis=args.analysis, outputs=args.outputs, gates=gates)
+    if len(man["files"]) != len(shard_info):
+        raise RejectedError(f"manifest hashed {len(man['files'])} files but {len(shard_info)} "
+                            f"shards were validated -- key collision in the file map")
     out = args.out or os.path.join(args.data[0], "accepted_data_manifest.json")
     json.dump(man, open(out, "w"), indent=2)
     lab = ", ".join((f"n_b{r['n_b']}/L{r['L']}" if "n_b" in r else f"L{r['L']}/A{r['A']}")
                     + f":{r['label']}" for r in records)
     print(f"[validate classical] PASS — {len(shard_info)} shards, n_b={args.expect_n_b}, "
-          f"commit {prov['generating_commit'][:10]} ({prov['provenance_source']}); {lab}")
+          f"commit {(prov['generating_commit'] or '+'.join(c[:7] for c in (prov.get('asserted_commit_candidates') or ['?'])))[:40]} "
+          f"({prov['provenance_source']}); {lab}")
     print(f"[manifest] wrote {out}")
 
 

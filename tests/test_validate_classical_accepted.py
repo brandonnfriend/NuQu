@@ -206,6 +206,57 @@ def main():
         _expect_reject(lambda: validate([badz], expect_n_b=3, n_b_hi=4, kind="nb_nested_shard"),
                        "never looked", fails, "no high-only states seeded")
 
+        # --- BACKEVAL (frame) shards: the P0-1 stall must stay unrepeatable -----------
+        def _backeval(path, L, A, n_b, seed, commit, n_dets_ladder=(250, 1000, 4000, 16000, 64000),
+                      dropped=None, ktl_break=False):
+            res = []
+            for nd in n_dets_ladder:
+                r = {"core": nd, "n_dets": nd, "E_frame": 2000.0 - nd / 1e4,
+                     "E_orig": 2000.0 - nd / 1e4, "reached_target": True, "growth_ok": True,
+                     "converged": True, "solve_s": 1.0, "residual": 1.0, "eps_leak": 0.0,
+                     "kato_temple_lower": (2500.0 if ktl_break else 1000.0)}
+                if dropped is not None:
+                    r["back_dropped_weight"] = dropped
+                res.append(r)
+            json.dump({"done": True, "results": res,
+                       "metadata": {"L": L, "dim": 3, "A": A, "n_b": n_b, "N_f": 2 ** n_b,
+                                    "frame": "bare", "seed": seed,
+                                    "manifest": {"git_commit": commit, "git_dirty": False,
+                                                 "hostname": "qis2",
+                                                 "timestamp_utc": "2026-09-09T00:00:00+00:00"}}},
+                      open(path, "w"))
+
+        bd = os.path.join(tmp, "backeval"); os.makedirs(bd)
+        _backeval(os.path.join(bd, "backeval_bare_L2d3nb3_A1_s0.json"), 2, 1, 3, 0, head)
+        _backeval(os.path.join(bd, "backeval_bare_L2d3nb4_A1_s0.json"), 2, 1, 4, 0, head)
+        try:
+            recs, info, _ = validate([bd], expect_n_b=3, allow_n_b=[4], kind="backeval_shard")
+            if len(info) != 2:
+                fails.append(f"backeval hashed {len(info)} shards, expected 2")
+        except RejectedError as e:
+            fails.append(f"clean backeval tree rejected: {e}")
+        # the n_b=4 cross-check arm must be DECLARED, never discovered silently
+        _expect_reject(lambda: validate([bd], expect_n_b=3, kind="backeval_shard"),
+                       "DECLARED set", fails, "undeclared cross-check cutoff")
+        # THE key gate: the superseded bundle's ladders all stalled at 3,482 determinants
+        st = os.path.join(tmp, "stalled"); os.makedirs(st)
+        _backeval(os.path.join(st, "backeval_bare_L2d3nb3_A1_s0.json"), 2, 1, 3, 0, head,
+                  n_dets_ladder=(250, 1000, 3482))
+        _expect_reject(lambda: validate([st], expect_n_b=3, kind="backeval_shard"),
+                       "P0-1 stall", fails, "P0-1-stalled ladder")
+        # a cap-dominated map-back makes E_orig a truncated remnant
+        cap = os.path.join(tmp, "capped"); os.makedirs(cap)
+        _backeval(os.path.join(cap, "backeval_bare_L2d3nb3_A1_s0.json"), 2, 1, 3, 0, head,
+                  dropped=0.40)
+        _expect_reject(lambda: validate([cap], expect_n_b=3, kind="backeval_shard"),
+                       "dropped", fails, "cap-dominated map-back")
+        # E_orig must sit inside its own Kato-Temple bracket
+        kt = os.path.join(tmp, "ktbreak"); os.makedirs(kt)
+        _backeval(os.path.join(kt, "backeval_bare_L2d3nb3_A1_s0.json"), 2, 1, 3, 0, head,
+                  ktl_break=True)
+        _expect_reject(lambda: validate([kt], expect_n_b=3, kind="backeval_shard"),
+                       "Kato-Temple", fails, "E_orig below its Kato-Temple bound")
+
         # --- MIXED provenance: shards spanning more than one commit -------------------
         # Really happened: Condor restarted 4 shards of cluster 292477 after the server
         # checkout had moved, so they carry a later commit than the 8 launched earlier. The
@@ -232,6 +283,38 @@ def main():
                                            dict(L=2, n_b=3, seed=1, commit=parent2)])
         _expect_reject(lambda: validate([twodir], expect_n_b=3), "mixed provenance",
                        fails, "two embedded commits")
+
+        # --- an ASSERTED commit must itself be verified ------------------------------
+        # It was not: the gate only ever checked the EMBEDDED commit, so a mixed dataset would
+        # accept any --assert-commit value, including one that does not exist. A fabricated SHA
+        # sat in two live manifests until this check was added.
+        _expect_reject(lambda: validate([mixdir], expect_n_b=3, allow_unmanifested=True,
+                                        allow_mixed_commits=True, assert_commit="0" * 40),
+                       "not a descendant", fails, "unverifiable asserted commit")
+        # several CANDIDATE commits are allowed for legacy data, but every one is checked
+        _p2 = subprocess.check_output(["git", "rev-parse", "HEAD~1"],
+                                      cwd=_ROOT).decode().strip()
+        try:
+            _, _, pc = validate([nom], expect_n_b=3, allow_unmanifested=True,
+                                assert_commit=[head, _p2])
+            if not pc.get("asserted_commit_candidates"):
+                fails.append("candidate commit set not recorded")
+        except RejectedError as e:
+            fails.append(f"multi-candidate assertion rejected: {e}")
+        _expect_reject(lambda: validate([nom], expect_n_b=3, allow_unmanifested=True,
+                                        assert_commit=[head, "0" * 40]),
+                       "not a descendant", fails, "one bad candidate among several")
+
+        # --- the manifest file map must not collide -----------------------------------
+        # It was keyed by BASENAME, so a dataset assembled from two directories with
+        # same-named shards silently hashed fewer files than it validated (12 of 18).
+        d2 = _tree(tmp, "samenames", [dict(L=2, n_b=3, seed=0, commit=head)])
+        _, info2, _ = validate([d, d2], expect_n_b=3)
+        from misc.validate_classical_accepted import build_manifest as _bm
+        man2 = _bm("x", [d, d2], [], info2, {"generating_commit": head}, 3)
+        if len(man2["files"]) != len(info2):
+            fails.append(f"manifest hashed {len(man2['files'])} of {len(info2)} shards "
+                         "-- file-map key collision")
 
         # --- CLI exits 2 on refusal (rejected) vs 0 on pass --------------------------
         r = subprocess.run([sys.executable, "-m", "misc.validate_classical_accepted",
