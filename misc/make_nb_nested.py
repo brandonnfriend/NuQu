@@ -84,16 +84,31 @@ def load(dirs):
     return out
 
 
-def growth_projection(rec, to_core=BASELINE_CORE):
+def growth_projection(rec, to_core=BASELINE_CORE, max_core=None):
     """Power-law fit of delta_shared vs core over the NONZERO rungs, projected to `to_core`.
-    Returns (exponent, projected value) or (None, None) with <3 nonzero points."""
-    pts = [(c, v) for c, v in zip(rec["cores"], rec["ds"]) if v > 0]
+
+    `max_core` restricts the fit window, which is how the shallow-range fit is reproduced once
+    deeper rungs exist. That comparison matters: the fits over cores <=262,144 OVER-projected the
+    measured value at 1,024,000 by 25-30%, because the growth FLATTENS with depth (exponent
+    0.46 -> 0.32 at A=1). A power law fitted shallow is therefore an upper estimate, not a
+    neutral extrapolation.
+
+    Returns (exponent, value at `to_core`) or (None, None) with <3 usable points."""
+    pts = [(c, v) for c, v in zip(rec["cores"], rec["ds"])
+           if v > 0 and (max_core is None or c <= max_core)]
     if len(pts) < 3:
         return None, None
     c = np.array([p[0] for p in pts], float)
     v = np.array([p[1] for p in pts], float)
     b = float(np.polyfit(np.log(c), np.log(v), 1)[0])
     return b, float(v[-1] * (to_core / c[-1]) ** b)
+
+
+def measured_at(rec, core=BASELINE_CORE):
+    """delta_shared/site actually MEASURED at `core`, or None if the ladder never got there."""
+    if core in rec["cores"]:
+        return rec["ds"][rec["cores"].index(core)]
+    return None
 
 
 def make_figure(recs, out_base):
@@ -190,18 +205,25 @@ def make_table(recs, out_path):
           "_Reference line 0.001 MeV/site = 1 MeV / 1000 sites: a conservative uniform per-site "
           "slice of the L=10 GSEE target, **not** a derived budget. Values are from the "
           "best-bound seed — a worse search understates the shift._\n",
-          "| L | A | seeds | best seed | deepest core | boundary reached? | "
-          "$\\Delta_\\mathrm{shared}$/site | % of reference | growth | projected @1,024,000 |",
-          "|--:|--:|--:|--:|--:|:--|--:|--:|--:|--:|"]
+          "| L | A | seeds | deepest core | boundary reached? | "
+          "$\\Delta_\\mathrm{shared}$/site | % of ref | growth | **@1,024,000** | shallow-fit "
+          "projection |",
+          "|--:|--:|--:|--:|:--|--:|--:|--:|--:|--:|"]
     for (L, A), r in sorted(recs.items()):
-        b, proj = growth_projection(r)
+        b, _ = growth_projection(r)
+        _, shallow = growth_projection(r, max_core=262144)
+        meas = measured_at(r)
         reach = "yes" if r["reached"] else f"**NO** (max occ {r['max_occ']})"
         ds = f"{r['ds_top']:.2e}" if r["reached"] else "— (no measurement)"
         pct = f"{r['ds_top'] / TARGET * 100:.1f}%" if r["reached"] else "—"
         gr = f"core^{b:.2f}" if b is not None else "—"
-        pr = (f"**{proj:.2e}** ({proj / TARGET * 100:.0f}%)" if proj is not None else "—")
-        md.append(f"| {L} | {A} | {r['n_seeds']} | {r['best_seed']} | {r['top_core']:,} | {reach} | "
-                  f"{ds} | {pct} | {gr} | {pr} |")
+        at = (f"**{meas:.2e}** ({meas / TARGET * 100:.0f}%) *measured*" if meas is not None
+              else (f"{shallow:.2e} ({shallow / TARGET * 100:.0f}%) *fitted*"
+                    if shallow is not None else "—"))
+        sh = (f"{shallow:.2e} ({shallow / TARGET * 100:.0f}%)"
+              if (shallow is not None and meas is not None) else "—")
+        md.append(f"| {L} | {A} | {r['n_seeds']} | {r['top_core']:,} | {reach} | "
+                  f"{ds} | {pct} | {gr} | {at} | {sh} |")
     md += ["", "### What this does and does not settle", "",
            "- **Settled:** the shift is real and cleanly resolved. It is *exactly* zero on every rung "
            "with no boundary population and turns on the moment the core reaches occupation "
@@ -209,6 +231,14 @@ def make_table(recs, out_path):
            "independently-selected arm swings to 2.0e-3 MeV/site with oscillating sign — **~2.8× "
            "larger than the signal it was meant to measure**, which is why that arm could not "
            "resolve this.",
+           "- **Measured at the baseline's own depth (cluster 293917, 2026-09-12).** The three "
+           "deep L=2 points reach **73–102% of the reference** at core 1,024,000 (A=4 73%, A=32 "
+           "89%, A=1 102%), so only the *dilute* point crosses it, and marginally. The shallow "
+           "power-law fits had projected 103–136% — they **over-projected by 25–30%**, because the "
+           "growth FLATTENS with depth (exponent 0.46→0.32 at A=1, 0.64→0.41 at A=4, 0.36→0.15 at "
+           "A=32 across the 256k boundary). A shallow fit is therefore an upper estimate here, not "
+           "a neutral extrapolation; the remaining *fitted* rows in the table should be read that "
+           "way.",
            "- **Not settled:** the measured values **have not plateaued** over the observed core "
            "range and therefore cannot be treated as converged; the fitted L=2 trends project "
            "*above* the reference at the core the classical baseline actually reaches. (A "
