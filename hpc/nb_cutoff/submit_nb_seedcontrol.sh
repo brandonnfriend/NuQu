@@ -28,6 +28,15 @@
 # accelerator, not an imposed answer. (E_var is a valid Ritz upper bound under EITHER
 # init, so what is at stake is a search-basin risk, not correctness of the bound.)
 #
+# REQUEST_DISK IS A REAL ALLOCATION CONSTRAINT HERE, not boilerplate. qis1 and qis3
+# advertise only ~3.1 GB and ~2.0 GB of free EXECUTE-DIR disk (qis2 has ~1 TB), so a
+# 10G request makes two of our three machines permanently unmatchable -- every job
+# serialises onto qis2 while 96- and 95-CPU nodes sit Unclaimed. Measured usage for this
+# executable (self-provisioned uv env + the mixed_ci C++ build) is ~1.9 GB, so 2.5 GB is
+# peak + ~30% headroom and fits qis1. Check with:
+#   condor_status -constraint 'regexp("qis[123]", Machine)' -af Name Cpus Disk
+#   condor_history <cluster> -af DiskUsage
+#
 # Run from $REPO/hpc/nb_cutoff/ ON THE PINNED SUBMIT NODE (ssh hep-submit):
 #   cd /nfs_scratch/bfriend3/NuQu/NuQu && git fetch origin -q \
 #       && git checkout remediation/vertex-fix && git reset --hard origin/remediation/vertex-fix
@@ -58,7 +67,7 @@ transfer_output_files   = ""
 ${QIS}
 request_cpus            = 16
 request_memory          = \$(MEM)
-request_disk            = 10G
+request_disk            = 2560M   # see the note below -- 10G locks out qis1/qis3
 JobPrio                 = 20
 Output                  = ${DIR}/logs/\$(STUDY).out
 Error                   = ${DIR}/logs/\$(STUDY).err

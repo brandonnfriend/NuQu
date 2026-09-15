@@ -120,6 +120,46 @@ Learned the hard way; don't repeat the detours.
 
 ---
 
+## 6b. Disk sizing — the constraint that silently strands jobs (2026-09-15)
+
+`request_disk` is **not** boilerplate on this pool. The three qis nodes have wildly
+different free EXECUTE-DIR disk:
+
+| node | free CPUs (idle) | free execute disk |
+|---|--:|--:|
+| qis1 | 96 | **~3.1 GB** |
+| qis2 | 0 (busy) | ~1 TB |
+| qis3 | 95 | **~2.0 GB** |
+
+A `request_disk = 8G`/`10G` therefore makes **qis1 and qis3 permanently unmatchable**, and
+every job funnels onto qis2 — which is why a campaign can sit fully idle while two
+96-core machines show `Unclaimed`. This is invisible in `condor_q` (jobs just stay Idle);
+the tell is in `condor_q -better-analyze`, where the `TARGET.Disk >= RequestDisk` row
+collapses the match count:
+
+```
+[4]  Machine == qis1||qis2||qis3   -> 3 slots
+[19] TARGET.Disk >= RequestDisk    -> 702 matched, 336 rejected
+[20] [4] && [19]                   -> 1 slot          <-- disk, not cpus/memory
+```
+
+**Right-size from measurement, same as memory (§6):**
+```sh
+condor_status -constraint 'regexp("qis[123]", Machine)' -af Name Cpus Memory Disk
+condor_history <cluster> -af DiskUsage MemoryUsage
+```
+Measured peaks: **nb_cutoff / selected-CI shards ~1.9 GB** (self-provisioned uv env + the
+mixed_ci C++ build) → request ~2.5 GB and they reach qis1. **block2-DMRG shards ~4.8 GB**
+(block2 + the full pip MKL runtime) → these genuinely do *not* fit qis1/qis3 and are
+qis2-only; that is a real constraint, not a misconfiguration, so size the campaign
+expecting qis2 serialisation.
+
+Fixing a stranded job in flight: `condor_qedit <cluster> RequestDisk <KB>` (and
+`JobPrio <n>` to put it ahead of your own idle shards). Both are reversible and
+scientifically neutral — the fork ensemble is bit-identical regardless of core count (§5).
+
+---
+
 ## 7. Monitoring — gotchas
 
 - **SSH drops during a `sleep` inside a poll** (idle disconnect). Two robust patterns:
