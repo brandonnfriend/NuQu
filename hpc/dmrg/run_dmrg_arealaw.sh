@@ -1,7 +1,12 @@
 #!/bin/sh
-# Condor executable for ONE block2-DMRG isospectrality-reference shard.
-# args: $1=L  $2=A  $3=campaign  $4=N_f  $5=bond_dims(csv)  $6=n_sweeps_per  $7=cpus
-#       $8=max_chi_seconds  $9=dim (default 3 -- keeps the original isospectrality submit working)
+# Condor executable for ONE block2-DMRG AREA-LAW shard (post-vertex-fix campaign).
+# args: $1=L  $2=dim  $3=A  $4=N_f  $5=bond_dims(PLUS-separated)  $6=campaign
+#       $7=n_sweeps_per  $8=cpus  $9=max_chi_seconds
+#
+# Bond dims arrive '+'-separated because Condor splits `queue ... from file` on commas
+# (HPC_WORKFLOW section 10); normalised back to ',' here.
+# N_f=1 is the PION-FREE control: one boson level = vacuum only, so the boson sector
+# contributes nothing to the local dimension and the run isolates the fermion cost.
 #
 # Self-provisions per-sandbox (a shared NFS uv dir corrupts under concurrency), pip-
 # installs block2 + the mkl runtime (no C++ build -- unlike the frame shard), then runs
@@ -13,8 +18,8 @@
 # the cores (OpenMP/MKL), so threads are set to $cpus here, not pinned to 1. cpus is
 # passed EXPLICITLY (arg $7) because Condor doesn't reliably export _CONDOR_REQUEST_CPUS.
 set -u
-L="$1"; A="$2"; CAMPAIGN="$3"; N_F="${4:-4}"; BOND_DIMS="${5:-100,200,400,800}"
-NSWEEPS="${6:-6}"; cpus="${7:-${_CONDOR_REQUEST_CPUS:-4}}"; MAXCHISEC="${8:-}"; DIM="${9:-3}"
+L="$1"; DIM="$2"; A="$3"; N_F="$4"; BOND_DIMS="$(echo "$5" | tr '+' ',')"
+CAMPAIGN="$6"; NSWEEPS="${7:-6}"; cpus="${8:-${_CONDOR_REQUEST_CPUS:-4}}"; MAXCHISEC="${9:-}"
 REPO=/nfs_scratch/bfriend3/NuQu/NuQu
 SANDBOX="$(pwd)"
 [ -r "$REPO/hpc/dmrg/run_dmrg_shard.py" ] || { echo "ERROR: cannot read repo at $REPO" >&2; exit 1; }

@@ -132,8 +132,19 @@ def run_dmrg(L, dim, A, N_f=2, n_b=1, bond_dims=(20, 40, 80, 160, 320),
             smax = float(np.max(bd))
         except Exception:
             smax = None
+        # Discarded weight = the TRUNCATION ERROR actually incurred at this chi. The
+        # last entry is the final (noise-free) sweep, so it is the converged value.
+        # This is what makes "chi needed for a FIXED truncation error" a measurement
+        # rather than a proxy; block2 does not surface it through driver.dmrg().
+        try:
+            dws = list(driver._dmrg.discarded_weights)
+            dw = float(dws[-1]) if dws else None
+            dw_min = float(min(dws)) if dws else None
+        except Exception:
+            dw = dw_min = None
         rung = {'chi': chi, 'E': float(np.real(e)) + float(np.real(const)),
-                'S_max_bond': smax, 'wall_s': dt}
+                'S_max_bond': smax, 'discarded_weight': dw,
+                'discarded_weight_min': dw_min, 'wall_s': dt}
         out.append(rung)
         if on_chi is not None:
             on_chi(rung)
