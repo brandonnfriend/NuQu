@@ -67,7 +67,8 @@ def build_eft_hamiltonian(L, dim, n_b, pi_max, params, config):
 
     # Static Nucleon Sector (basis-independent; lives on nucleon qubits).
     H_static_f = Static_Nucleon_Hamiltonian(
-        params['h'], params['C'], params['CI'], L, dim, n_b
+        params['h'], params['C'], params['CI'], L, dim, n_b,
+        wick_ordered=getattr(config, 'wick_ordered_contacts', True),
     )
 
     if _use_native_fock_path(config):
@@ -92,6 +93,7 @@ def build_eft_hamiltonian(L, dim, n_b, pi_max, params, config):
             'pion_basis': config.pion_basis,
             'block_encoder': config.block_encoder,
             'L': L, 'dim': dim, 'n_b': n_b, 'num_sites': num_sites,
+            'wick_ordered_contacts': getattr(config, 'wick_ordered_contacts', True),
         }
         bundle = HamiltonianBundle(
             [sub_h], walk_mode=config.walk_mode, metadata=metadata
@@ -114,6 +116,7 @@ def build_eft_hamiltonian(L, dim, n_b, pi_max, params, config):
         'dim': dim,
         'n_b': n_b,
         'num_sites': num_sites,
+        'wick_ordered_contacts': getattr(config, 'wick_ordered_contacts', True),
     }
     bundle = HamiltonianBundle(
         sub_hamiltonians,

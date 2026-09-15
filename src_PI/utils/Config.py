@@ -22,6 +22,12 @@ Currently supported axes:
                  boson register size n_q is set. Drives the Fock basis directly
                  and the NS amplitude register indirectly; ignored by the
                  amplitude 'energy_bound' path (Lemma 5 sets its own n_b).
+- wick_ordered_contacts: True (default) builds Watson's normal-ordered contact
+                 terms, `(C/2)Σ:ρ²:` and `(C_I²/2)ΣΣ_I:ρ_I²:` (Eqs. 54/55).
+                 False reproduces the pre-2026-09-14 un-prescribed `ρ²` /
+                 `Σ_I ρ_I²`, which carry a spurious `c·N̂` nucleon
+                 self-interaction (`c = −23.3725` MeV); kept as a comparison
+                 switch so legacy published data stays regenerable.
 - block_encoder: 'pauli_lcu' (default — current pyLIQTR path),
                  'sparse' (BCK sparse-oracle, task 26),
                  or 'lobe' (Ladder-Operator Block-Encoding, task 28).
@@ -92,6 +98,12 @@ class Config:
     # 'split_sum' is the older invalid two-walk sum. Only consulted for the amplitude split
     # (≥2 sub-walks); the single-walk Fock/PauliLCU anchor is byte-identical under either.
     walk_composition: str = 'combined_lcu'
+    # Contact-term ordering. True (default) = Watson's Wick-ordered `:ρ²:` /
+    # `:Σ_I ρ_I²:` (Eqs. 54/55). False = the legacy un-prescribed form, which
+    # differs by the c-number `c·N̂` (`c = C/2 + 3C_I²/2 = −23.3725` MeV) — a
+    # nucleon self-interaction. Kept as a switch so every pre-2026-09-14 number
+    # stays bit-reproducible; see StaticTerms.contact_self_energy_shift.
+    wick_ordered_contacts: bool = True
 
     # Free-form extras: anything the user wants to remember about the run
     # but that doesn't drive code dispatch. Saved to JSON alongside the
@@ -131,6 +143,12 @@ class Config:
             raise ValueError(
                 f"walk_composition must be one of {_VALID_WALK_COMPOSITIONS}, "
                 f"got {self.walk_composition!r}"
+            )
+
+        if not isinstance(self.wick_ordered_contacts, bool):
+            raise ValueError(
+                f"wick_ordered_contacts must be a bool, "
+                f"got {self.wick_ordered_contacts!r}"
             )
 
     def to_dict(self):
