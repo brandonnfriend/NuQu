@@ -19,6 +19,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
+from misc.apply_wick_correction import annotate as _wick_annotate  # noqa: E402
 
 BLUE, ORANGE, CRIT, GREEN = "#2a78d6", "#eb6834", "#d03b3b", "#3a9b6a"
 INK, INK2, MUTED, GRID, AXIS, SURFACE = "#0b0b0b", "#52514e", "#898781", "#e1e0d9", "#c3c2b7", "#fcfcfb"
@@ -102,6 +103,7 @@ def make_figure(recs, out_base):
                  x=0.01, ha="left")
     fig.tight_layout(rect=(0, 0, 1, 0.96))
     for ext in ("pdf", "png"):
+        _wick_annotate(fig, kind="invariant")
         fig.savefig(f"{out_base}.{ext}", dpi=200, bbox_inches="tight", facecolor=SURFACE)
     print(f"[fig] wrote {out_base}.pdf / .png")
 

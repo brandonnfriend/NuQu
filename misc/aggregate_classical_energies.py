@@ -52,6 +52,8 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 from classical.trimci.extrapolation import (combine_seeds, fit_einf_pt2,  # noqa: E402
                                             split_at_collapse)
+from misc.apply_wick_correction import (  # noqa: E402
+    DEFAULT_CONVENTION, add_convention_arg, annotate, apply_to_rungs, figure_note)
 
 BLUE, ORANGE, CRIT, GREEN = "#2a78d6", "#eb6834", "#d03b3b", "#3a9b6a"
 PURP, TEAL = "#7b5cd6", "#2f8f8a"
@@ -75,11 +77,15 @@ def _style(ax):
     ax.grid(True, color=GRID, lw=0.8, alpha=1.0); ax.set_axisbelow(True)
 
 
-def load(dirs, require_post_fix=True):
+def load(dirs, require_post_fix=True, convention=DEFAULT_CONVENTION):
     """Collect shards into {(n_b, L): {seed: rungs}} plus a per-group metadata record.
 
     Keeps the DEEPEST ladder when the same (n_b, L, seed) appears in more than one
-    directory (a resubmit supersedes the run it recovered)."""
+    directory (a resubmit supersedes the run it recovered).
+
+    Shards are stored in the LEGACY contact convention; `convention='wick'` (default)
+    shifts every absolute energy by `+23.3725*A` MeV before any analysis. `dE_pt2`,
+    sigma and every difference are exactly invariant (CONVENTIONS.md section 10)."""
     groups, meta = defaultdict(dict), {}
     depth, skipped = {}, []
     for d in dirs:
@@ -92,6 +98,7 @@ def load(dirs, require_post_fix=True):
             rungs = [r for r in j.get("rungs", []) if r.get("E_var") is not None]
             if not rungs:
                 continue
+            apply_to_rungs(rungs, j["A"], convention)
             key, seed = (int(j["n_b"]), int(j["L"])), int(j["seed"])
             top = max(r["core"] for r in rungs)
             if depth.get((key, seed), -1) >= top:
@@ -136,7 +143,7 @@ def analyze(groups, meta):
     return recs
 
 
-def make_figure(recs, out_base):
+def make_figure(recs, out_base, convention=DEFAULT_CONVENTION):
     fig, (axA, axB) = plt.subplots(1, 2, figsize=(12.4, 4.7))
     fig.patch.set_facecolor(SURFACE)
 
@@ -208,6 +215,7 @@ def make_figure(recs, out_base):
                  fontsize=11.2, color=INK, y=1.02, x=0.01, ha="left")
     fig.tight_layout(rect=(0, 0, 1, 0.96))
     for ext in ("pdf", "png"):
+        annotate(fig, convention, kind="energy")
         fig.savefig(f"{out_base}.{ext}", dpi=200, bbox_inches="tight", facecolor=SURFACE)
     print(f"[fig] wrote {out_base}.pdf / .png")
 
@@ -218,9 +226,17 @@ def _pm(x, s):
     return f"{x:,.1f}" + (f" ± {s:,.1f}" if s is not None else " (no σ)")
 
 
-def make_table(recs, out_path):
+def make_table(recs, out_path, convention=DEFAULT_CONVENTION):
     md = [
         "# Classical energy aggregate — variational bound and extrapolated $E_\\infty$ ± σ\n",
+        (f"> **CONTACT-TERM CONVENTION: Wick-ordered (Watson Eqs. 54/55)** — absolute energies "
+         f"are the as-run shard values `+23.3725·A` MeV (filling 1.0 ⇒ **+23.3725 MeV/site**). "
+         f"σ, `ΔE_PT2`, the seed-agreement verdicts, the collapse cores and every Δ column are "
+         f"EXACTLY unchanged (`CONVENTIONS.md` §10). As-run: `--convention legacy`.\n"
+         if convention == "wick" else
+         f"> **CONTACT-TERM CONVENTION: LEGACY (as run)** — carries a spurious `−23.3725·A` MeV "
+         f"nucleon self-interaction; corrected values need `--convention wick`.\n"),
+
         "_dim=3, filling 1.0. **The reported result at every L is the extrapolated $E_\\infty$ with "
         "its error bar** — not a 'converged' value. `E_var` is a rigorous Ritz UPPER BOUND for the "
         "truncated (L, n_b, frame) Hamiltonian at that core, and stays quotable as a bound in its "
@@ -373,13 +389,18 @@ def main():
     ap.add_argument("--out-dir", required=True)
     ap.add_argument("--allow-pre-vertex-fix", action="store_true",
                     help="NOT for release: lift the pre-2026-08-18 data refusal")
+    add_convention_arg(ap)
     args = ap.parse_args()
     os.makedirs(args.out_dir, exist_ok=True)
-    groups, meta = load(args.data, require_post_fix=not args.allow_pre_vertex_fix)
+    groups, meta = load(args.data, require_post_fix=not args.allow_pre_vertex_fix,
+                        convention=args.convention)
     assert groups, "no bare_*.json found"
+    print(f"[conv] {figure_note(args.convention)}")
     recs = analyze(groups, meta)
-    make_figure(recs, f"{args.out_dir}/classical_energy_aggregate")
-    make_table(recs, f"{args.out_dir}/classical_energy_aggregate.md")
+    for r in recs:
+        r["contact_convention"] = args.convention
+    make_figure(recs, f"{args.out_dir}/classical_energy_aggregate", args.convention)
+    make_table(recs, f"{args.out_dir}/classical_energy_aggregate.md", args.convention)
     json.dump(recs, open(f"{args.out_dir}/classical_energy_aggregate.json", "w"), indent=2)
     print(f"[json] wrote {args.out_dir}/classical_energy_aggregate.json")
     print("[done] " + " | ".join(

@@ -34,10 +34,16 @@ from src_PI.estimation.qpe_cost import (                                     # n
     walk_queries, WALK_QUERY_CONSTANT_HEISENBERG, WALK_QUERY_CONSTANT_BABBUSH_UB)
 
 
+from misc.apply_wick_correction import (  # noqa: E402
+    DEFAULT_CONVENTION, add_convention_arg, annotate, correct_lambda, figure_note)
+
+CONVENTION = [DEFAULT_CONVENTION]   # set by main()
 def _qubit_total_T_pi(r):
     """Compiled qubitization coherent-query T with the ADOPTED π constant: N_walk = π·λ/ε_qpe
     (from the shard's own λ / ε_qpe) × walk_T — not the raw √2·π QPE_Total_T_Count."""
     lam, walkT = r["Physical_Lambda"], r["Walk_T_Count"]
+    if CONVENTION[0] != 'legacy':          # CONVENTIONS.md section 10 (exact, n_b-independent)
+        lam = correct_lambda(lam, r["L"])
     eps = (r.get("QPE_Budget") or {}).get("eps_qpe")
     if eps:
         return walk_queries(lam, eps, constant=WALK_QUERY_CONSTANT_HEISENBERG) * walkT
@@ -107,6 +113,7 @@ def make_figure(q, out_base):
                  "(NOT a convergence curve)", fontsize=11.5, color=INK, y=1.02, x=0.01, ha="left")
     fig.tight_layout(rect=(0, 0, 1, 0.96))
     for ext in ("pdf", "png"):
+        annotate(fig, CONVENTION[0], kind="lambda")
         fig.savefig(f"{out_base}.{ext}", dpi=200, bbox_inches="tight", facecolor=SURFACE)
     print(f"[fig] wrote {out_base}.pdf / .png")
 
@@ -165,7 +172,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--anchor", default="data/quantum/2026-08-21/vertexfix_r3_290826")
     ap.add_argument("--out-dir", default="data/quantum/2026-08-24/trotter_comparison")
+    add_convention_arg(ap)
     args = ap.parse_args()
+    CONVENTION[0] = args.convention
+    print("[conv] " + figure_note(args.convention, "lambda"))
     os.makedirs(args.out_dir, exist_ok=True)
     q = load_qubit_by_nb(args.anchor)
     make_figure(q, f"{args.out_dir}/trotter_tiered")

@@ -17,6 +17,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from misc.make_nb3_headline import load as load_q, build
+from misc.apply_wick_correction import (
+    add_convention_arg, annotate, figure_note)
 from src_PI.trotter_theory.trotter_exact import qpe_cost
 
 BLUE, ORANGE, CRIT, GREEN, MUTED = "#2a78d6", "#eb6834", "#d03b3b", "#3a9b6a", "#898781"
@@ -60,10 +62,12 @@ def main():
     ap.add_argument("--nb2", default="data/quantum/2026-08-21/vertexfix_r3_290826")
     ap.add_argument("--nb3", default="data/quantum/nb3_anchor")
     ap.add_argument("--out-dir", default="data/quantum/2026-08-24/trotter_comparison")
+    add_convention_arg(ap)
     args = ap.parse_args()
+    print("[conv] " + figure_note(args.convention, "lambda"))
     os.makedirs(args.out_dir, exist_ok=True)
-    nb2 = load_q(args.nb2, "*fock_pauli*nb2*.json")
-    nb3 = load_q(args.nb3, "*fock_pauli_nb3*.json")
+    nb2 = load_q(args.nb2, "*fock_pauli*nb2*.json", args.convention)
+    nb3 = load_q(args.nb3, "*fock_pauli_nb3*.json", args.convention)
     rows, sc = build(nb2, nb3)
 
     Q3, Q2 = qubit_T(rows, nb2, 3), qubit_T(rows, nb2, 2)
@@ -112,6 +116,7 @@ def main():
                  % (xc2 or 0, xc3 or 0), fontsize=10.6, color=INK, y=1.02, x=0.01, ha="left")
     fig.tight_layout(rect=(0, 0, 1, 0.96))
     for e in ("pdf", "png"):
+        annotate(fig, args.convention, kind="lambda")
         fig.savefig(f"{args.out_dir}/trotter_comparison_nb3.{e}", dpi=200, bbox_inches="tight",
                     facecolor=SURFACE)
     print(f"[fig] wrote {args.out_dir}/trotter_comparison_nb3.pdf / .png")

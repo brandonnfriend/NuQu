@@ -38,6 +38,8 @@ from src_PI.estimation.qpe_cost import (            # noqa: E402
     walk_queries,
 )
 
+from misc.apply_wick_correction import (  # noqa: E402
+    DEFAULT_CONVENTION, add_convention_arg, annotate, correct_lambda, figure_note)
 # Headline adopts the Heisenberg constant π (N_walk = π·λ/ε_qpe); the raw shards
 # carry the Babbush upper bound √2·π. Reporting recomputes N_walk / coherent-T /
 # QPE-phase-register from the shard's own λ and ε_qpe with π — a documented ×1/√2
@@ -45,6 +47,7 @@ from src_PI.estimation.qpe_cost import (            # noqa: E402
 N_WALK_CONSTANT = WALK_QUERY_CONSTANT_HEISENBERG
 
 # --- dataviz reference palette (light; slots 1,2 pass all-pairs) + ink tokens ------------- #
+CONVENTION = [DEFAULT_CONVENTION]   # set by main(); read by make_figure
 BLUE, ORANGE, CRIT = "#2a78d6", "#eb6834", "#d03b3b"
 INK, INK2, MUTED, GRID, AXIS = "#0b0b0b", "#52514e", "#898781", "#e1e0d9", "#c3c2b7"
 SURFACE = "#fcfcfb"
@@ -58,7 +61,7 @@ def _sha256(path):
     return h.hexdigest()
 
 
-def load(data_dir):
+def load(data_dir, convention=DEFAULT_CONVENTION):
     """Return (anchor, sweep, allrecs). `allrecs` is EVERY done record (incl. the determinism
     repeat) with the provenance/validation fields; anchor/sweep are the plotted subsets."""
     anchor, sweep, allrecs = [], [], []
@@ -71,6 +74,16 @@ def load(data_dir):
         man = (j.get("metadata") or {}).get("manifest") or {}
         fit = b.get("walk_T_fit") or {}
         lam, walkT = r["Physical_Lambda"], r["Walk_T_Count"]
+        # Contact-term convention (CONVENTIONS.md section 10). Shards are stored LEGACY;
+        # 'wick' applies the exact closed form lambda -= 46.745*L^3 and rescales the raw
+        # N_walk / total-T by the same factor, so the shard's own arithmetic (and the
+        # validator's raw-vs-pi ratio check) stays exactly coherent. walk_T is left at the
+        # stored value: it moves only through circuit_precision = eps_be/(2*lambda), a ~0.01%
+        # logarithmic effect, far below anything this figure resolves.
+        _scale = 1.0
+        if convention != 'legacy':
+            _lam_c = correct_lambda(lam, r["L"])
+            _scale, lam = _lam_c / lam, _lam_c
         eps_qpe = b.get("eps_qpe")
         # Headline reporting: recompute N_walk / coherent-T with the ADOPTED π constant
         # from the shard's own λ, ε_qpe (a documented ×1/√2 tightening of the raw √2·π
@@ -82,8 +95,8 @@ def load(data_dir):
         qtot = total_logical_qubits(r["Logical_Qubits"], m_qpe) if m_qpe else None
         rec = dict(L=r["L"], n_b=r["n_b"], lam=lam, q=r["Logical_Qubits"],
                    # raw shard values (√2·π) — kept for the data-integrity validator:
-                   nwalk_raw=r["QPE_Walk_Queries"], walkT=walkT,
-                   qpeT_raw=r["QPE_Total_T_Count"], eps_qpe=eps_qpe,
+                   nwalk_raw=r["QPE_Walk_Queries"] * _scale, walkT=walkT,
+                   qpeT_raw=r["QPE_Total_T_Count"] * _scale, eps_qpe=eps_qpe,
                    # adopted-headline values (π):
                    nwalk=nwalk_hl, qpeT=qpeT_hl, m=m_qpe, qtot=qtot,
                    clean=b.get("prune_within_budget", None),
@@ -245,6 +258,7 @@ def make_figure(anchor, sweep, out_base):
                  fontsize=12.5, color=INK, y=1.02, x=0.01, ha="left")
     fig.tight_layout(rect=(0, 0, 1, 0.97))
     for ext in ("pdf", "png"):
+        annotate(fig, CONVENTION[0], kind="lambda")
         fig.savefig(f"{out_base}.{ext}", dpi=200, bbox_inches="tight", facecolor=SURFACE)
     print(f"[fig] wrote {out_base}.pdf / .png")
 
@@ -380,9 +394,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", default="data/quantum/2026-08-21/vertexfix_r3_290826")
     ap.add_argument("--out-dir", default="data/quantum/2026-08-21/headline")
+    add_convention_arg(ap)
     args = ap.parse_args()
+    CONVENTION[0] = args.convention
+    print("[conv] " + figure_note(args.convention, "lambda"))
     os.makedirs(args.out_dir, exist_ok=True)
-    anchor, sweep, allrecs = load(args.data)
+    anchor, sweep, allrecs = load(args.data, args.convention)
     print(f"[load] anchor n_b=2: L={[r['L'] for r in anchor]}; sweep points: {len(sweep)}; "
           f"all records: {len(allrecs)}")
     commit = validate(anchor, sweep, allrecs)          # refuses to proceed on a defective dataset

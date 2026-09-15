@@ -12,7 +12,12 @@ Checks:
   * a short ladder is reported as a bound with NO invented central value;
   * the paired n_b=2 -> 3 cutoff-shift table appears when both cutoffs are present;
   * pre-vertex-fix directories are REFUSED by default (retired data must never reach a
-    figure) and only an explicit opt-in flag lifts it.
+    figure) and only an explicit opt-in flag lifts it;
+  * the contact-term convention axis (2026-09-14 Wick fix) shifts absolute energies by EXACTLY
+    `+23.3725*A` MeV and leaves sigma untouched.
+
+The planted-E_inf checks run with `--convention legacy` so the planted values round-trip
+unshifted; the shift itself is checked separately against the closed form.
 """
 import json
 import os
@@ -42,11 +47,46 @@ def _shard(path, L, n_b, seed, E_fci, dps, sites=None, c=0.45):
               open(path, "w"))
 
 
-def _run(data_dirs, out_dir, extra=()):
+def _run(data_dirs, out_dir, extra=(), convention="legacy"):
+    """Default `legacy` so the PLANTED energies come back unshifted; the Wick shift is a
+    separate, explicit check below (`_check_convention_shift`)."""
     cmd = [sys.executable, "-m", "misc.aggregate_classical_energies",
-           "--data", *data_dirs, "--out-dir", out_dir, *extra]
+           "--data", *data_dirs, "--out-dir", out_dir, "--convention", convention, *extra]
     p = subprocess.run(cmd, cwd=_ROOT, capture_output=True, text=True)
     return p
+
+
+def _check_convention_shift(live, tmp, fails):
+    """`--convention wick` must move every absolute energy by exactly `+23.3725*A` MeV and
+    leave sigma, the seed spread and the last-doubling diagnostic untouched."""
+    from src_PI.hamiltonians.core.EFTParameters import get_physical_parameters
+    p = get_physical_parameters()
+    c = p["C"] / 2.0 + 3.0 * p["CI"] / 2.0                      # -23.3725 MeV
+    legacy = _run([live], os.path.join(tmp, "conv_legacy"), convention="legacy")
+    wick = _run([live], os.path.join(tmp, "conv_wick"), convention="wick")
+    if legacy.returncode or wick.returncode:
+        fails.append("convention run failed")
+        return
+    lo = {(r["n_b"], r["L"]): r for r in
+          json.load(open(os.path.join(tmp, "conv_legacy", "classical_energy_aggregate.json")))}
+    wi = {(r["n_b"], r["L"]): r for r in
+          json.load(open(os.path.join(tmp, "conv_wick", "classical_energy_aggregate.json")))}
+    if set(lo) != set(wi):
+        fails.append("convention changed the grouping")
+        return
+    for k in lo:
+        a, b = lo[k], wi[k]
+        expect = -c * a["A"]                                     # +23.3725 * A
+        for field in ("E_var_bound", "E_inf"):
+            if a.get(field) is None or b.get(field) is None:
+                continue
+            got = b[field] - a[field]
+            if abs(got - expect) > 1e-6:
+                fails.append(f"{k}: {field} shifted {got:.6f}, expected {expect:.6f}")
+        if a.get("sigma") is not None and abs((b.get("sigma") or 0) - a["sigma"]) > 1e-9:
+            fails.append(f"{k}: sigma moved under the convention change ({a['sigma']} -> {b.get('sigma')})")
+        if b.get("contact_convention") != "wick":
+            fails.append(f"{k}: record does not record its convention")
 
 
 def main():
@@ -135,6 +175,8 @@ def main():
                 fails.append(f"retired shard leaked: (n_b=3,L=2) E_inf = "
                              f"{None if r2 is None else r2.get('E_inf')}, "
                              f"expected ~{planted[(3, 2)]}")
+        _check_convention_shift(live, tmp, fails)
+
         p3 = _run([retired], os.path.join(tmp, "out3"), extra=("--allow-pre-vertex-fix",))
         if p3.returncode != 0:
             fails.append("--allow-pre-vertex-fix should still run (explicit, non-release opt-in)")
@@ -148,7 +190,8 @@ def main():
         sys.exit(1)
     print("test_aggregate_classical_energies: PASS  (3-seed pooling recovers the planted "
           "E_inf with a sigma; short ladder stays bound-only; cutoff-shift + error-budget "
-          "tables emitted; pre-vertex-fix data refused)")
+          "tables emitted; pre-vertex-fix data refused; Wick convention shifts by exactly "
+          "+23.3725*A with sigma unchanged)")
 
 
 def test_aggregate_classical_energies():

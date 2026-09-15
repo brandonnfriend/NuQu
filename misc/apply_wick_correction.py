@@ -41,6 +41,78 @@ DLAMBDA_PER_SITE = abs(PARAMS['C'] + 3.0 * PARAMS['CI'])     # 46.745 MeV
 
 
 # --------------------------------------------------------------------------- #
+#  Convention plumbing shared by every figure script
+# --------------------------------------------------------------------------- #
+
+CONVENTIONS = ('wick', 'legacy')
+DEFAULT_CONVENTION = 'wick'
+
+_NOTE_SHIFT = ("contact terms: Wick-ordered (Watson Eqs. 54/55) — "
+               "energies +{shift:.4f}*A MeV vs the as-run legacy build")
+_NOTE_LEGACY = ("contact terms: LEGACY un-Wick-ordered (as run) — carries a "
+                "-{shift:.4f}*A MeV nucleon self-interaction")
+_NOTE_LAMBDA = ("contact terms: Wick-ordered (Watson Eqs. 54/55) — "
+                "lambda -{dl:.3f}*L^3 MeV vs the as-run legacy build")
+_NOTE_INVARIANT = ("contact-term convention: EXACTLY INVARIANT under the 2026-09-14 "
+                   "Wick fix (differences at matched A)")
+
+
+def add_convention_arg(parser):
+    """Standard `--convention {wick,legacy}` flag for a figure script."""
+    parser.add_argument('--convention', choices=CONVENTIONS, default=DEFAULT_CONVENTION,
+                        help="contact-term ordering. 'wick' (default) = Watson Eqs. 54/55; "
+                             "'legacy' = the as-run pre-2026-09-14 build (a c*N_hat "
+                             "self-interaction, c = -23.3725 MeV). See CONVENTIONS.md section 10.")
+    return parser
+
+
+def rung_shift(A, convention=DEFAULT_CONVENTION):
+    """MeV to ADD to a fixed-A absolute energy to move it into `convention`.
+
+    Shards are stored in the legacy convention, so 'legacy' is a no-op.
+    """
+    if convention == 'legacy':
+        return 0.0
+    if convention == 'wick':
+        return -C_SELF * A                       # +23.3725 * A
+    raise ValueError(f"convention must be one of {CONVENTIONS}, got {convention!r}")
+
+
+def apply_to_rungs(rungs, A, convention=DEFAULT_CONVENTION):
+    """Shift a ladder's absolute energies in place. `dE_pt2` is NOT shifted —
+    it is a difference and is exactly invariant (E_var and H_aa move together)."""
+    d = rung_shift(A, convention)
+    if d == 0.0:
+        return rungs
+    for r in rungs:
+        for k in ('E_var', 'E_pt2'):
+            if r.get(k) is not None:
+                r[k] = r[k] + d
+    return rungs
+
+
+def figure_note(convention=DEFAULT_CONVENTION, kind='energy'):
+    """One-line provenance string to stamp on a figure.
+
+    kind: 'energy' (classical absolute energies), 'lambda' (quantum lambda/T),
+          'invariant' (nothing on the figure changes).
+    """
+    if kind == 'invariant':
+        return _NOTE_INVARIANT
+    if convention == 'legacy':
+        return _NOTE_LEGACY.format(shift=abs(C_SELF))
+    if kind == 'lambda':
+        return _NOTE_LAMBDA.format(dl=DLAMBDA_PER_SITE)
+    return _NOTE_SHIFT.format(shift=abs(C_SELF))
+
+
+def annotate(fig, convention=DEFAULT_CONVENTION, kind='energy', color='#898781'):
+    """Stamp the convention flag along the bottom of a matplotlib figure."""
+    fig.text(0.005, 0.005, figure_note(convention, kind), fontsize=6.5,
+             color=color, ha='left', va='bottom')
+
+
+# --------------------------------------------------------------------------- #
 #  Classical
 # --------------------------------------------------------------------------- #
 
@@ -69,6 +141,41 @@ def recost(lam, fit_a, fit_b, delta_E=1.0):
     out = optimize_qpe_fraction(fit_a, fit_b, lam, delta_E=delta_E)
     out['m'] = qpe_phase_register_qubits_from_nwalk(out['walk_queries'])
     return out
+
+
+def correct_quantum_record(r, L, convention=DEFAULT_CONVENTION, dim=3):
+    """Move one loaded shard record into `convention`, IN PLACE.
+
+    Corrects `lam` by the exact closed form and then RE-RUNS the same total-T optimizer
+    the shards themselves used, so `eps`, `walkT`, `T` and `m` all stay mutually
+    consistent (walk_T moves only through circuit_precision = eps_be/(2*lambda), i.e.
+    logarithmically -- about 0.01%). `q`/`q_total`/`terms` are untouched: the Pauli term
+    count and every register width are exactly invariant.
+
+    Expects the `nb3_padding_model._load` schema: lam, walkT, q, q_total, m, terms,
+    eps, a, bb, dE (+ optional T). Records missing the walk_T fit are only lambda-shifted.
+    """
+    if convention == 'legacy' or r.get('lam') is None:
+        return r
+    r['lam'] = correct_lambda(r['lam'], L, dim)
+    a, b = r.get('a'), r.get('bb', r.get('b'))
+    if a is None or b is None:
+        return r
+    out = recost(r['lam'], a, b, r.get('dE', 1.0))
+    r['eps'] = out['eps_qpe']
+    r['walkT'] = out['walk_T']
+    r['T'] = out['total_T']
+    r['m'] = out['m']
+    if r.get('q') is not None:
+        r['q_total'] = r['q'] + out['m']
+    return r
+
+
+def correct_quantum_records(recs, convention=DEFAULT_CONVENTION, dim=3):
+    """`{L: record}` -> same dict, moved into `convention` in place."""
+    for L, r in recs.items():
+        correct_quantum_record(r, L, convention, dim)
+    return recs
 
 
 def _shards(pattern):

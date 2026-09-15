@@ -37,6 +37,7 @@ import statistics as st
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from misc.apply_wick_correction import annotate as _wick_annotate  # noqa: E402
 
 BLUE, ORANGE, GREEN, CRIT, MUTED = "#2a78d6", "#eb6834", "#3a9b6a", "#d03b3b", "#898781"
 INK, INK2, GRID, AXIS, SURFACE = "#0b0b0b", "#52514e", "#e1e0d9", "#c3c2b7", "#fcfcfb"
@@ -201,6 +202,7 @@ def main():
                  "core-incompleteness at L≥3" % verdict, fontsize=10.3, color=INK, y=1.02, x=0.01, ha="left")
     fig.tight_layout(rect=(0, 0, 1, 0.96))
     for e in ("pdf", "png"):
+        _wick_annotate(fig, kind="invariant")
         fig.savefig(f"{args.out_dir}/nb_volscaling.{e}", dpi=200, bbox_inches="tight", facecolor=SURFACE)
     print(f"[fig] wrote {args.out_dir}/nb_volscaling.pdf / .png")
 

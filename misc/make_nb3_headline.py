@@ -18,15 +18,23 @@ import numpy as np
 
 from src_PI.estimation.qpe_cost import walk_queries, WALK_QUERY_CONSTANT_HEISENBERG as PI
 from misc.nb3_padding_model import _load as _pad_load, project as _pad_project
+from misc.apply_wick_correction import (
+    DEFAULT_CONVENTION, add_convention_arg, annotate, correct_quantum_records, figure_note)
 
 BLUE, ORANGE, CRIT, GREEN, MUTED = "#2a78d6", "#eb6834", "#d03b3b", "#3a9b6a", "#898781"
 INK, INK2, GRID, AXIS, SURFACE = "#0b0b0b", "#52514e", "#e1e0d9", "#c3c2b7", "#fcfcfb"
 
 
-def load(d, patt):
+def load(d, patt, convention=DEFAULT_CONVENTION):
     """Full per-L schema (lam, walkT, q, terms, eps, a, b) + the composed QPE T. Shared by the
-    headline, the padding projection, and the Trotter comparison."""
+    headline, the padding projection, and the Trotter comparison.
+
+    Shards are stored in the LEGACY contact convention; `convention='wick'` (default) applies
+    `lambda -= 46.745*L^3` and re-runs the shards' own total-T optimizer so eps/walk_T/T/m stay
+    consistent. Term counts and register widths are exactly invariant (CONVENTIONS.md section 10).
+    """
     o = _pad_load(d, patt)
+    correct_quantum_records(o, convention)
     for r in o.values():
         nwalk = walk_queries(r["lam"], r["eps"], PI) if r.get("eps") else None
         r["T"] = (nwalk * r["walkT"]) if nwalk else None
@@ -85,9 +93,11 @@ def main():
     ap.add_argument("--nb2", default="data/quantum/2026-08-21/vertexfix_r3_290826")
     ap.add_argument("--nb3", default="data/quantum/nb3_anchor")
     ap.add_argument("--out-dir", default="data/quantum/nb3_anchor")
+    add_convention_arg(ap)
     args = ap.parse_args()
-    nb2 = load(args.nb2, "*fock_pauli*nb2*.json")
-    nb3 = load(args.nb3, "*fock_pauli_nb3*.json")
+    print(f"[conv] {figure_note(args.convention, 'lambda')}")
+    nb2 = load(args.nb2, "*fock_pauli*nb2*.json", args.convention)
+    nb3 = load(args.nb3, "*fock_pauli_nb3*.json", args.convention)
     assert nb3, "no n_b=3 anchor data"
     rows, sc = build(nb2, nb3)
     Ls = sorted(rows)
@@ -130,6 +140,7 @@ def main():
                  y=1.02, x=0.01, ha="left")
     fig.tight_layout(rect=(0, 0, 1, 0.96))
     for e in ("pdf", "png"):
+        annotate(fig, args.convention, kind="lambda")
         fig.savefig(f"{args.out_dir}/nb3_headline.{e}", dpi=200, bbox_inches="tight", facecolor=SURFACE)
     print(f"[fig] wrote {args.out_dir}/nb3_headline.pdf / .png")
 

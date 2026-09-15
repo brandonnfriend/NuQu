@@ -39,14 +39,21 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 from classical.trimci.extrapolation import combine_seeds  # noqa: E402
+from misc.apply_wick_correction import (  # noqa: E402
+    DEFAULT_CONVENTION, add_convention_arg, annotate, apply_to_rungs, figure_note)
 
 BLUE, ORANGE, CRIT, GREEN = "#2a78d6", "#eb6834", "#d03b3b", "#3a9b6a"
 INK, INK2, MUTED, GRID, AXIS, SURFACE = "#0b0b0b", "#52514e", "#898781", "#e1e0d9", "#c3c2b7", "#fcfcfb"
 _PRE_FIX_DIRS = ("2026-08-13", "2026-08-14", "2026-08-15", "2026-08-16", "2026-08-17")
 
 
-def load(dirs, allow_pre_fix=False):
-    """{(n_b, L): record} — pooled over seeds, deepest ladder wins a duplicate."""
+def load(dirs, allow_pre_fix=False, convention=DEFAULT_CONVENTION):
+    """{(n_b, L): record} — pooled over seeds, deepest ladder wins a duplicate.
+
+    Shards are stored in the LEGACY contact convention; `convention='wick'` (default)
+    shifts every absolute energy by `+23.3725*A` MeV before any extrapolation, so sigma,
+    dE_pt2 and the seed-agreement verdicts come out unchanged (CONVENTIONS.md section 10).
+    """
     groups, meta, depth = defaultdict(dict), {}, {}
     for d in dirs:
         if not allow_pre_fix and any(t in d for t in _PRE_FIX_DIRS):
@@ -58,6 +65,7 @@ def load(dirs, allow_pre_fix=False):
                            key=lambda r: r["core"])
             if not rungs:
                 continue
+            apply_to_rungs(rungs, j["A"], convention)
             key, seed = (int(j["n_b"]), int(j["L"])), int(j["seed"])
             top = rungs[-1]["core"]
             if depth.get((key, seed), -1) >= top:
@@ -95,7 +103,7 @@ def _style(ax):
     ax.grid(True, color=GRID, lw=0.8, alpha=1.0); ax.set_axisbelow(True)
 
 
-def make_figure(recs, out_base):
+def make_figure(recs, out_base, convention=DEFAULT_CONVENTION):
     fig, (axA, axB) = plt.subplots(1, 2, figsize=(11.8, 4.5))
     fig.patch.set_facecolor(SURFACE)
     n_b_main = max({r["n_b"] for r in recs})            # plot the selected cutoff
@@ -149,13 +157,23 @@ def make_figure(recs, out_base):
                  "extrapolated $E_\\infty$ with its uncertainty",
                  fontsize=11.3, color=INK, y=1.02, x=0.01, ha="left")
     fig.tight_layout(rect=(0, 0, 1, 0.96))
+    annotate(fig, convention, kind="energy")
     for ext in ("pdf", "png"):
         fig.savefig(f"{out_base}.{ext}", dpi=200, bbox_inches="tight", facecolor=SURFACE)
     print(f"[fig] wrote {out_base}.pdf / .png")
 
 
-def make_table(recs, out_path):
+def make_table(recs, out_path, convention=DEFAULT_CONVENTION):
+    tag = ("**CONTACT-TERM CONVENTION: Wick-ordered (Watson Eqs. 54/55).** Absolute energies are "
+           "the as-run shard values `+23.3725·A` MeV — at filling 1.0 a uniform **+23.3725 MeV/site**. "
+           "σ, the last-doubling diagnostic and the seed-agreement verdicts are EXACTLY unchanged "
+           "(`CONVENTIONS.md` §10). Regenerate the as-run numbers with `--convention legacy`."
+           if convention == "wick" else
+           "**CONTACT-TERM CONVENTION: LEGACY (as run, pre-2026-09-14).** These energies carry a "
+           "spurious `−23.3725·A` MeV nucleon self-interaction; the corrected convention is "
+           "`--convention wick` (`CONVENTIONS.md` §10).")
     md = ["# Classical bare-frame TrimCI baseline — variational bound and extrapolated $E_\\infty$\n",
+          f"> {tag}\n",
           "_dim=3, filling 1.0. `E_var` is a rigorous VARIATIONAL upper bound (Ritz) on the ground "
           "state of the truncated $(L, n_b,$ frame$)$ Hamiltonian at that core — true whether or not "
           "the ladder converged. **The reported energy at every L is the extrapolated $E_\\infty$ with "
@@ -192,12 +210,15 @@ def main():
     ap.add_argument("--out-dir", required=True)
     ap.add_argument("--allow-pre-vertex-fix", action="store_true",
                     help="NOT for release: lift the pre-2026-08-18 data refusal")
+    add_convention_arg(ap)
     args = ap.parse_args()
     os.makedirs(args.out_dir, exist_ok=True)
-    recs = load(args.data, allow_pre_fix=args.allow_pre_vertex_fix)
+    recs = load(args.data, allow_pre_fix=args.allow_pre_vertex_fix,
+                convention=args.convention)
     assert recs, "no bare_*.json found"
-    make_figure(recs, f"{args.out_dir}/classical_baseline")
-    make_table(recs, f"{args.out_dir}/classical_baseline_table.md")
+    print(f"[conv] {figure_note(args.convention)}")
+    make_figure(recs, f"{args.out_dir}/classical_baseline", args.convention)
+    make_table(recs, f"{args.out_dir}/classical_baseline_table.md", args.convention)
     print("[done] " + " | ".join(
         f"nb{r['n_b']}/L{r['L']}: bound {r['E_var_bound']:,.0f} ({r['E_var_bound_ps']:.1f}/site)"
         + (f", E_inf {r['E_inf_ps']:.1f}±{(r['sigma_ps'] or 0):.1f}/site" if r["ok"] else ", bound only")
