@@ -86,7 +86,7 @@ transfer_output_files   = ""
 ${QIS}
 request_cpus            = \$(CPUS)
 request_memory          = \$(MEM)
-request_disk            = 2560M   # see the note below -- 10G locks out qis1/qis3
+request_disk            = 2560M
 JobPrio                 = 20
 Output                  = ${DIR}/logs/\$(STUDY).out
 Error                   = ${DIR}/logs/\$(STUDY).err
