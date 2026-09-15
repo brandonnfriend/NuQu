@@ -413,8 +413,15 @@ def validate(data_dirs, expect_n_b, expect_dim=3, expect_frame="bare",
     # the server checkout moved re-reads the code, so late shards carry a later commit than
     # the launch commit. That is a real hazard and must never pass silently -- the first
     # version of this gate reported ONE commit for a mixed campaign, hiding it.
-    mixed = bool(commits) and bool(unmanifested)
-    if len(commits) > 1 or mixed:
+    # Two ways a dataset can be mixed, and BOTH must set the acknowledgement flag: shards
+    # carrying MORE THAN ONE embedded commit, and manifested shards sitting beside
+    # unmanifested ones (embedded + operator-asserted). The flag used to be computed from the
+    # second case only, so a multi-commit dataset accepted under --allow-mixed-commits was
+    # still written out with `mixed_commits_acknowledged: false` -- the manifest contradicted
+    # itself, which is what the 2026-09-14 checklist (item 3) caught in the deep nested record.
+    multi_commit = len(commits) > 1
+    mixed = multi_commit or (bool(commits) and bool(unmanifested))
+    if mixed:
         found = sorted(c[:10] for c in commits)
         if not allow_mixed_commits:
             raise RejectedError(
@@ -432,14 +439,20 @@ def validate(data_dirs, expect_n_b, expect_dim=3, expect_frame="bare",
     asserted = ([assert_commit] if isinstance(assert_commit, str)
                 else list(assert_commit or []))
     provenance = {
-        "generating_commit": (sorted(commits)[0] if commits else
-                              (asserted[0] if len(asserted) == 1 else None)),
+        # For the same reason: with more than one embedded commit there is no single
+        # generating commit, and naming one of them would hide the mix. The field goes
+        # None and `embedded_commits` carries the whole set.
+        "generating_commit": (sorted(commits)[0] if len(commits) == 1 else
+                              (None if commits else
+                               (asserted[0] if len(asserted) == 1 else None))),
         "embedded_commits": sorted(commits),
         "asserted_commit": (asserted[0] if len(asserted) == 1 else None),
         "asserted_commit_candidates": (asserted if len(asserted) > 1 else None),
-        "provenance_source": ("MIXED -- see embedded_commits + asserted_commit" if mixed else
-                              "embedded shard manifest" if commits else
-                              "OPERATOR-ASSERTED (shards predate per-shard manifests)"),
+        "provenance_source": (
+            ("MIXED -- see embedded_commits" + (" + asserted_commit" if unmanifested else ""))
+            if mixed else
+            "embedded shard manifest" if commits else
+            "OPERATOR-ASSERTED (shards predate per-shard manifests)"),
         "n_shards_with_manifest": len(shard_info) - len(unmanifested),
         "unmanifested_shards": unmanifested,
         "mixed_commits_acknowledged": bool(mixed and allow_mixed_commits),
@@ -596,8 +609,9 @@ def main():
             return f"n_b{r['n_b']}/L{r['L']}"
         return f"L{r['L']}/A{r['A']}"
     lab = ", ".join(f"{_tag(r)}:{r['label']}" for r in records)
+    _fallback = (prov.get("embedded_commits") or prov.get("asserted_commit_candidates") or ["?"])
     print(f"[validate classical] PASS — {len(shard_info)} shards, n_b={args.expect_n_b}, "
-          f"commit {(prov['generating_commit'] or '+'.join(c[:7] for c in (prov.get('asserted_commit_candidates') or ['?'])))[:40]} "
+          f"commit {(prov['generating_commit'] or '+'.join(c[:7] for c in _fallback))[:40]} "
           f"({prov['provenance_source']}); {lab}")
     print(f"[manifest] wrote {out}")
 

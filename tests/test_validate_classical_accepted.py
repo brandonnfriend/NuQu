@@ -8,7 +8,10 @@ synthetic shard tree built to trip exactly that check -- plus a clean tree that 
 and produce a complete manifest.
 
 Includes MIXED provenance -- shards spanning more than one commit, which really happened
-when Condor restarted four shards of cluster 292477 after the server checkout had moved.
+when Condor restarted four shards of cluster 292477 after the server checkout had moved,
+and again when the deep nested arm (293917) was combined with the original sweep (292485).
+Both shapes of mix -- two embedded commits, and embedded beside unmanifested -- must refuse
+without `--allow-mixed-commits` and must be RECORDED as acknowledged with it.
 """
 import json
 import os
@@ -324,6 +327,50 @@ def main():
                                            dict(L=2, n_b=3, seed=1, commit=parent2)])
         _expect_reject(lambda: validate([twodir], expect_n_b=3), "mixed provenance",
                        fails, "two embedded commits")
+        # ... and the SAME dataset accepted under the acknowledgement must SAY it is mixed.
+        # It did not: `mixed_commits_acknowledged` was computed from the embedded+unmanifested
+        # case alone, so the deep nested manifest (2049447 + 93de7f5, both embedded, no
+        # unmanifested shard) shipped with `false` while carrying two commits -- a manifest
+        # contradicting itself, found by the 2026-09-14 checklist (item 3).
+        try:
+            _, _, p2c = validate([twodir], expect_n_b=3, allow_mixed_commits=True)
+            if not p2c.get("mixed_commits_acknowledged"):
+                fails.append("two EMBEDDED commits accepted under --allow-mixed-commits but "
+                             "mixed_commits_acknowledged is false -- the manifest would deny "
+                             "its own mixed provenance")
+            if sorted(p2c.get("embedded_commits", [])) != sorted([head, parent2]):
+                fails.append(f"both embedded commits must be retained: {p2c.get('embedded_commits')}")
+            if "MIXED" not in p2c.get("provenance_source", ""):
+                fails.append(f"provenance_source does not say MIXED for a two-commit dataset: "
+                             f"{p2c.get('provenance_source')}")
+            if p2c.get("generating_commit") is not None:
+                fails.append("a two-commit dataset must not name a single generating_commit -- "
+                             f"got {p2c.get('generating_commit')}")
+        except RejectedError as e:
+            fails.append(f"two embedded commits still refused under --allow-mixed-commits: {e}")
+        # the flag must stay FALSE for a clean single-commit dataset, acknowledgement or not
+        try:
+            _, _, p1c = validate([d], expect_n_b=3, allow_mixed_commits=True)
+            if p1c.get("mixed_commits_acknowledged"):
+                fails.append("single-commit dataset flagged as mixed just because "
+                             "--allow-mixed-commits was passed")
+        except RejectedError as e:
+            fails.append(f"clean tree rejected under --allow-mixed-commits: {e}")
+        # and the acknowledgement must survive into the WRITTEN manifest, not just the call
+        rmix = subprocess.run([sys.executable, "-m", "misc.validate_classical_accepted",
+                               "--data", twodir, "--expect-n-b", "3", "--label", "twocommits",
+                               "--allow-mixed-commits",
+                               "--out", os.path.join(tmp, "mixed.json")],
+                              cwd=_ROOT, capture_output=True, text=True)
+        if rmix.returncode != 0:
+            fails.append(f"CLI --allow-mixed-commits exited {rmix.returncode}:\n{rmix.stderr}")
+        else:
+            mman = json.load(open(os.path.join(tmp, "mixed.json")))["provenance"]
+            if not mman.get("mixed_commits_acknowledged"):
+                fails.append("written manifest records mixed_commits_acknowledged: false for a "
+                             "two-commit dataset")
+            if len(mman.get("embedded_commits", [])) != 2:
+                fails.append(f"written manifest lost an embedded commit: {mman}")
 
         # --- an ASSERTED commit must itself be verified ------------------------------
         # It was not: the gate only ever checked the EMBEDDED commit, so a mixed dataset would
@@ -388,7 +435,9 @@ def main():
     print("test_validate_classical_accepted: PASS  (clean tree passes with a complete "
           "manifest; wrong cutoff, retired path, pre-fix commit, unknown commit, missing "
           "provenance, non-variational and short ladders, mixed config and the PT2-depth "
-          "gate all refuse; CLI exits 2 on refusal)")
+          "gate all refuse; multi-commit provenance refuses without the acknowledgement and, "
+          "with it, is recorded as mixed in both the call and the written manifest; CLI exits "
+          "2 on refusal)")
 
 
 def test_validate_classical_accepted():

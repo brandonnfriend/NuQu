@@ -152,4 +152,25 @@ The Λ audit at L=2, dim=3, A=2 measured **c_Π · Π_max² = 73.25%** of Λ and
   with filling and L**: dE_vs_bare = **−125 → −237 MeV** (L2, f0.5→f1.0), **−610 MeV** (L3, f0.5); COO alone
   also grows with filling; LF alone marginal. The two headline frames (`gaussian`, `gaussian+lf`) were the OOM
   victims and are in the re-run.
+- **Release-package tooling (2026-09-14, `codex_audit/claude_remediation_checklist_2026-09-14.md`).**
+  Two new `misc/` tools plus a gate fix, all on the reproducibility side (no physics changed).
+  (1) **`misc/verify_accepted_manifests.py`** — re-hashes every artifact of every accepted manifest
+  *now*, not at acceptance time. That gap is how the 33-shard nested manifest went stale for five
+  days after the deep arm overwrote a script and a PDF it certified. Also cross-checks that a
+  manifest carrying mixed provenance says so; skips `SUPERSEDED_*` by design; resolves
+  basename-keyed (quantum) manifests **by digest**, since the same shard names live under
+  `vertexfix_r2_290818` and `vertexfix_r3_290826` with different contents. Clean run 2026-09-14:
+  151 artifacts, 8 manifests, 0 failures. (2) **`misc/diff_import_closure.py`** — walks a shard
+  entry point's first-party import closure (relative imports included) and classifies each
+  cross-commit difference as cosmetic (docstring/comment) or executable, so a
+  `--allow-mixed-commits` acknowledgement is a check rather than an assertion.
+  (3) **Gate fix in `misc/validate_classical_accepted.py`:** `mixed_commits_acknowledged` was
+  computed from the embedded-plus-unmanifested case only, so a dataset with **two embedded
+  commits** could be accepted under `--allow-mixed-commits` and still be written out denying the
+  mix; `generating_commit` also named one of the two. Both fixed, regression-tested
+  (`tests/test_validate_classical_accepted.py`, `tests/test_release_manifest_tools.py`).
+  Results-tree side: the accepted N7 record is now the **combined 39-shard** manifest under
+  `data/classical/2026-09-12/nb_nested_deep_293917/` (the 33-shard one is superseded and renamed),
+  and `results/` has exactly one current audit response (`AUDIT_RESPONSE_2026-09-05.md`), with the
+  older two moved to `results/historical/`.
 - Current uncommitted changes — verify with `git diff` before assuming.
