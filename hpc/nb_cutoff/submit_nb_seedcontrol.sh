@@ -42,18 +42,37 @@
 #       && git checkout remediation/vertex-fix && git reset --hard origin/remediation/vertex-fix
 #   cd hpc/nb_cutoff
 #   sh submit_nb_seedcontrol.sh test   # 1 shard, prior arm only -- validates the env path
-#   sh submit_nb_seedcontrol.sh        # both arms
+#   sh submit_nb_seedcontrol.sh        # both arms at L=2, n_runs=16
+#   sh submit_nb_seedcontrol.sh grid   # multi-L x breadth campaign (14 shards)
 set -eu
 MODE="${1:-run}"
 CAMPAIGN="seedctl-$(date +%Y%m%d-%H%M%S)"
 DIR="campaign_${CAMPAIGN}"; mkdir -p "$DIR/logs"
 QIS='requirements = (Machine == "qis1.hep.wisc.edu") || (Machine == "qis2.hep.wisc.edu") || (Machine == "qis3.hep.wisc.edu")'
 
+# MODE=grid: the multi-L + ensemble-BREADTH campaign. Breadth is a first-class axis, not a
+# knob: the 2026-09-15 L=2 run showed the n_runs=16 prior arm sitting ~11.8 MeV ABOVE what
+# n_runs=48 reaches at N_f=8 -- and above a bound the uniform N_f=4 run already proves
+# (E_0(N_f=8) <= E_var(N_f=4), since the N_f=4 space is a SUBSPACE of N_f=8 and the term
+# list is N_f-independent). So the reported "n_b=3 == n_b=4 to 0.001 MeV" was CORRELATED
+# SEARCH ERROR, not convergence. <N> moved only 0.04038 -> 0.04010 across that same change,
+# i.e. the occupation is robust while the energy was not -- which is why both observables
+# must be read separately.
 SH="$DIR/shards.txt"; : > "$SH"
 if [ "$MODE" = "test" ]; then
-  printf 'Dprior 48G\n' > "$SH"
+  printf 'Dprior 48G 16\n' > "$SH"
+elif [ "$MODE" = "grid" ]; then
+  # STUDY MEM CPUS -- L=2 cheap enough for a deep breadth ladder; L=3/4 get the
+  # decision-relevant 16-vs-64 contrast.
+  for R in 16 64 256; do
+    printf 'Dctl_prior_L2_r%s 32G 24\nDctl_uniform_L2_r%s 32G 24\n' "$R" "$R" >> "$SH"
+  done
+  for R in 16 64; do
+    printf 'Dctl_prior_L3_r%s 64G 24\nDctl_uniform_L3_r%s 64G 24\n' "$R" "$R" >> "$SH"
+    printf 'Dctl_prior_L4_r%s 96G 24\nDctl_uniform_L4_r%s 96G 24\n' "$R" "$R" >> "$SH"
+  done
 else
-  printf 'Dprior 48G\nDuniform 48G\n' > "$SH"
+  printf 'Dprior 48G 16\nDuniform 48G 16\n' > "$SH"
 fi
 NJOBS=$(wc -l < "$SH")
 
@@ -65,14 +84,14 @@ when_to_transfer_output = ON_EXIT
 transfer_input_files    = run_nb_shard.sh
 transfer_output_files   = ""
 ${QIS}
-request_cpus            = 16
+request_cpus            = \$(CPUS)
 request_memory          = \$(MEM)
 request_disk            = 2560M   # see the note below -- 10G locks out qis1/qis3
 JobPrio                 = 20
 Output                  = ${DIR}/logs/\$(STUDY).out
 Error                   = ${DIR}/logs/\$(STUDY).err
 Log                     = ${DIR}/logs/campaign.log
-queue STUDY,MEM from ${SH}
+queue STUDY,MEM,CPUS from ${SH}
 EOF
 condor_submit "$DIR/campaign.sub"
 echo "CAMPAIGN=${CAMPAIGN}  jobs=${NJOBS}  mode=${MODE}  shard_dir=${DIR}/shards"

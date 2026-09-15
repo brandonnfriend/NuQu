@@ -34,18 +34,54 @@ E_TOL_MEV = 1.0          # energy agreement target: the project's GSEE accuracy
 N_REL_TOL = 0.10         # occupation agreement: 10% relative on <N>/mode
 
 
-def load_arms(data_dirs):
-    arms = {}
+def load_groups(data_dirs):
+    """{(L, n_runs): {arm: record}} — one matched comparison per (L, ensemble breadth)."""
+    groups = {}
     for d in data_dirs:
-        for f in sorted(glob.glob(os.path.join(d, "studyD*_L2d3A1_*init.json"))):
+        for f in sorted(glob.glob(os.path.join(d, "studyD*init.json"))):
             j = json.load(open(f))
             arm = j.get("seed_control_arm")
             if arm is None:                       # tolerate the retired pre-fix naming
                 arm = "uniform" if "uniforminit" in f else "prior"
-            arms[arm] = {"rows": {r["N_f"]: r for r in j["rows"]},
-                         "cfg": j.get("seed_control_cfg"), "path": f,
-                         "n_runs": j.get("n_runs"), "core": j.get("core")}
-    return arms
+            cfg = j.get("seed_control_cfg") or {}
+            key = (cfg.get("L", j.get("L")), cfg.get("n_runs", j.get("n_runs")))
+            groups.setdefault(key, {})[arm] = {
+                "rows": {r["N_f"]: r for r in j["rows"]},
+                "cfg": cfg or None, "path": f}
+    return groups
+
+
+def load_arms(data_dirs):
+    """Back-compat single-group loader (first group found)."""
+    g = load_groups(data_dirs)
+    return next(iter(g.values())) if g else {}
+
+
+# --- the check that caught the n_b=3 under-convergence -----------------------
+
+def subspace_violations(rows_by_nf):
+    """Rows where E(N_f) EXCEEDS the best bound proved at a SMALLER N_f.
+
+    The N_f=k Fock space is a SUBSPACE of N_f=k' for k<k' (truncate each mode to k vs
+    k' levels), and the term list is N_f-independent (the cutoff only enters at
+    apply-time). So any N_f=k trial state is a valid N_f=k' trial state with the SAME
+    Rayleigh quotient, giving E_0(N_f=k') <= E_var(N_f=k). A larger-N_f solve that lands
+    ABOVE a smaller-N_f one is therefore UNDER-CONVERGED by at least that much -- a
+    rigorous, self-contained detector that needs no reference calculation.
+
+    This is what exposed the L=2 n_b=3 result: E(N_f=8)=2437.74 sat 9.27 MeV above the
+    E(N_f=4)=2428.47 bound, so its 0.001 MeV agreement with N_f=16 was correlated search
+    error, not convergence.
+    """
+    out, best = [], None
+    for nf in sorted(rows_by_nf):
+        e = rows_by_nf[nf]["E_var"]
+        if best is not None and e > best[1] + 1e-9:
+            out.append(dict(N_f=nf, E=e, bound_from_N_f=best[0], bound=best[1],
+                            excess=e - best[1]))
+        if best is None or e < best[1]:
+            best = (nf, e)
+    return out
 
 
 def settings_match(arms):
@@ -98,6 +134,54 @@ def verdict(rows):
             "bound). Raise n_runs / core before reading this as seeding bias.")
 
 
+def pooled_best(arms):
+    """Best (lowest) E_var per N_f across BOTH arms — they bound the SAME operator, so the
+    tightest bound at each N_f is whichever arm found it. Pooling is what exposes a
+    CROSS-ARM subspace violation: at L=2 the prior arm's N_f=8 sat 9.27 MeV above the
+    uniform arm's N_f=4 bound, which no within-arm check can see."""
+    out = {}
+    for a in arms.values():
+        for nf, r in a["rows"].items():
+            if nf not in out or r["E_var"] < out[nf]["E_var"]:
+                out[nf] = r
+    return out
+
+
+def report_group(key, arms, fails):
+    L, nr = key
+    hdr = f"=== L={L}, n_runs={nr} " + "=" * 30
+    print(f"\n{hdr}")
+    ok, why = settings_match(arms)
+    print(f"[match] {'OK' if ok else 'REFUSED'} — {why}")
+    if not ok:
+        fails.append((key, "unmatched", why))
+        return None
+    rows = compare(arms)
+    print(f"{'N_f':>4} {'n_b':>4} {'E_prior':>12} {'E_uniform':>12} {'dE':>10} "
+          f"{'<N>_pri':>9} {'<N>_uni':>9} {'dN_rel':>9}")
+    print("-" * 78)
+    for r in rows:
+        dn = "—" if r["dN_rel"] is None else f"{r['dN_rel']:8.3%}"
+        print(f"{r['N_f']:>4} {r['n_b']:>4} {r['E_prior']:12.4f} {r['E_uniform']:12.4f} "
+              f"{r['dE']:+10.4f} {r['N_prior']:9.5f} {r['N_uniform']:9.5f} {dn:>9}")
+    for arm in ("prior", "uniform"):
+        v = subspace_violations(arms[arm]["rows"])
+        if v:
+            print(f"  [under-converged] {arm}: " + "; ".join(
+                f"N_f={x['N_f']} is {x['excess']:.3f} MeV above the N_f={x['bound_from_N_f']} bound"
+                for x in v))
+    xv = subspace_violations(pooled_best(arms))
+    if xv:
+        print("  [CROSS-ARM under-convergence] " + "; ".join(
+            f"N_f={x['N_f']} is {x['excess']:.3f} MeV above the N_f={x['bound_from_N_f']} bound "
+            "proved by the other arm" for x in xv))
+    v, why2 = verdict(rows)
+    print(f"  VERDICT: {v} — {why2}")
+    return dict(key=key, rows=rows, verdict=v, why=why2,
+                cross_arm=xv,
+                per_arm={a: subspace_violations(arms[a]["rows"]) for a in arms})
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -105,38 +189,46 @@ def main():
     ap.add_argument("--out", default=None, help="optional markdown output path")
     args = ap.parse_args()
 
-    arms = load_arms(args.data)
-    ok, why = settings_match(arms)
-    print(f"[arms] {', '.join(sorted(arms))}")
-    print(f"[match] {'OK' if ok else 'REFUSED'} — {why}")
-    if not ok:
-        raise SystemExit("cannot issue a verdict on unmatched arms")
+    groups = load_groups(args.data)
+    assert groups, "no studyD*init.json shards found"
+    print(f"[groups] {len(groups)}: {sorted(groups)}")
+    fails, results = [], []
+    for key in sorted(groups, key=lambda k: (k[0] or 0, k[1] or 0)):
+        arms = groups[key]
+        if len(arms) < 2:
+            print(f"\n=== L={key[0]}, n_runs={key[1]} === only {sorted(arms)} — skipped")
+            continue
+        r = report_group(key, arms, fails)
+        if r:
+            results.append(r)
 
-    rows = compare(arms)
-    print(f"\n{'N_f':>4} {'n_b':>4} {'E_prior':>12} {'E_uniform':>12} {'dE':>9} "
-          f"{'<N>_prior':>10} {'<N>_unif':>10} {'dN_rel':>8}")
-    print("-" * 82)
-    for r in rows:
-        dn = "—" if r["dN_rel"] is None else f"{r['dN_rel']:8.3%}"
-        print(f"{r['N_f']:>4} {r['n_b']:>4} {r['E_prior']:12.4f} {r['E_uniform']:12.4f} "
-              f"{r['dE']:+9.4f} {r['N_prior']:10.5f} {r['N_uniform']:10.5f} {dn}")
-    v, why2 = verdict(rows)
-    print(f"\nVERDICT: {v}\n  {why2}")
-
-    if args.out:
-        md = [f"# Seed control (F-009) — uniform vs near-vacuum initialization\n",
-              f"_Matched arms, {why}. Differ ONLY in `boson_init_mean`. "
-              f"`E_var` is a valid Ritz upper bound under either init, so a mismatch is a "
-              f"search-basin result, not a broken bound._\n",
-              "| $N_f$ | $n_b$ | $E_\\mathrm{var}$ prior | $E_\\mathrm{var}$ uniform | ΔE | "
-              "⟨N⟩ prior | ⟨N⟩ uniform | Δ⟨N⟩ rel |", "|--:|--:|--:|--:|--:|--:|--:|--:|"]
-        for r in rows:
-            dn = "—" if r["dN_rel"] is None else f"{r['dN_rel']:.2%}"
-            md.append(f"| {r['N_f']} | {r['n_b']} | {r['E_prior']:.4f} | {r['E_uniform']:.4f} "
-                      f"| {r['dE']:+.4f} | {r['N_prior']:.5f} | {r['N_uniform']:.5f} | {dn} |")
-        md.append(f"\n**VERDICT: {v}** — {why2}\n")
+    if args.out and results:
+        md = ["# Seed control (F-009) — uniform vs near-vacuum initialization\n",
+              "_Matched arms per (L, n_runs): identical settings except `boson_init_mean`. "
+              "`E_var` is a valid Ritz upper bound under EITHER init, so a mismatch is a "
+              "search-basin result, not a broken bound._\n",
+              "_**Subspace check.** The N_f=k space is a SUBSPACE of N_f=k'>k and the term "
+              "list is N_f-independent, so E_0(N_f=k') <= E_var(N_f=k). A larger-N_f solve "
+              "sitting ABOVE a smaller-N_f bound is under-converged by at least that much — "
+              "pooled across arms, since both bound the same operator._\n"]
+        for r in results:
+            L, nr = r["key"]
+            md += [f"\n## L={L}, n_runs={nr}\n",
+                   "| $N_f$ | $n_b$ | $E$ prior | $E$ uniform | ΔE | ⟨N⟩ prior | ⟨N⟩ uniform | Δ⟨N⟩ |",
+                   "|--:|--:|--:|--:|--:|--:|--:|--:|"]
+            for x in r["rows"]:
+                dn = "—" if x["dN_rel"] is None else f"{x['dN_rel']:.2%}"
+                md.append(f"| {x['N_f']} | {x['n_b']} | {x['E_prior']:.4f} | "
+                          f"{x['E_uniform']:.4f} | {x['dE']:+.4f} | {x['N_prior']:.5f} | "
+                          f"{x['N_uniform']:.5f} | {dn} |")
+            if r["cross_arm"]:
+                md.append("\n**Cross-arm under-convergence:** " + "; ".join(
+                    f"`N_f={x['N_f']}` is {x['excess']:.3f} MeV above the "
+                    f"`N_f={x['bound_from_N_f']}` bound proved by the other arm"
+                    for x in r["cross_arm"]) + ".\n")
+            md.append(f"\n**VERDICT: {r['verdict']}** — {r['why']}\n")
         open(args.out, "w").write("\n".join(md) + "\n")
-        print(f"[tbl] wrote {args.out}")
+        print(f"\n[tbl] wrote {args.out}")
 
 
 if __name__ == "__main__":

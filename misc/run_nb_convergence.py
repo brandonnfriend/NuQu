@@ -276,31 +276,44 @@ def study_Ddilute_cheap(core=1000, n_runs=2):
 # If the uniform arm reproduces the prior arm on both, the prior is a convergence
 # accelerator, not an imposed answer. Note E_var is a valid Ritz upper bound under
 # EITHER initialization, so what is at stake is a search-basin risk, not correctness.
-_SEEDCTL = dict(L=2, dim=3, A=1, N_f_list=(2, 4, 8, 16), core=4000, n_runs=16,
-                seed=0, pt2=False)
+_SEEDCTL = dict(dim=3, A=1, N_f_list=(2, 4, 8, 16), seed=0, pt2=False)
+
+# Per-L default core. Held modest on purpose: the control is a MATCHED comparison
+# WITHIN each L (prior vs uniform at identical settings), so it does not need the
+# baseline's production depth — it needs the two arms to differ only in the init.
+_SEEDCTL_CORE = {2: 4000, 3: 8000, 4: 16000}
+
+
+def _seedctl(arm, L=2, n_runs=16, core=None, **kw):
+    """One seed-control arm at (L, n_runs). `arm` in {'prior','uniform'}.
+
+    The 2026-09-15 L=2 run exposed why the ENSEMBLE BREADTH axis matters as much as the
+    init: at n_runs=16 the uniform arm found the near-vacuum basin at N_f=2,4 (agreeing
+    with the prior on <N> to <0.5%) but was hopelessly trapped at N_f=8,16 (<N> 0.95 and
+    4.14 against a true ~0.04, with 66% of the weight at the cutoff boundary). A trapped
+    arm says nothing about seeding bias, so the deep rungs were uninformative at exactly
+    the cutoff the project ships (n_b=3). Sweeping n_runs is what turns them informative.
+    """
+    core = core or _SEEDCTL_CORE.get(L, 4000)
+    cfg = {**_SEEDCTL, "L": L, "core": core, "n_runs": n_runs, **kw}
+    out = nb_convergence_sweep(boson_init_mean=(0.5 if arm == "prior" else None), **cfg)
+    out["seed_control_arm"] = arm
+    out["seed_control_cfg"] = {k: (list(v) if isinstance(v, tuple) else v)
+                               for k, v in cfg.items()}
+    tag = "vacuuminit" if arm == "prior" else "uniforminit"
+    _save(out, f"studyD{arm}_L{L}d3A1_r{n_runs}_{tag}")
+    return out
 
 
 def study_Dprior(**kw):
     """Seed control, PRIOR arm: near-vacuum init (mean 0.5) — matched to study_Duniform."""
-    cfg = {**_SEEDCTL, **kw}
-    out = nb_convergence_sweep(boson_init_mean=0.5, **cfg)
-    out["seed_control_arm"] = "prior"
-    out["seed_control_cfg"] = {k: (list(v) if isinstance(v, tuple) else v)
-                               for k, v in cfg.items()}
-    _save(out, "studyDprior_L2d3A1_vacuuminit")
-    return out
+    return _seedctl("prior", **kw)
 
 
 def study_Duniform(**kw):
     """Seed control, UNIFORM arm: NO prior — uniform occupation over [0, N_f), no vacuum
     anchor, so the search must FIND the near-vacuum ground state rather than start there."""
-    cfg = {**_SEEDCTL, **kw}
-    out = nb_convergence_sweep(boson_init_mean=None, **cfg)
-    out["seed_control_arm"] = "uniform"
-    out["seed_control_cfg"] = {k: (list(v) if isinstance(v, tuple) else v)
-                               for k, v in cfg.items()}
-    _save(out, "studyDuniform_L2d3A1_uniforminit")
-    return out
+    return _seedctl("uniform", **kw)
 
 
 def study_hist(L=2, A=8, dim=3, core=None, n_runs=2):
@@ -484,6 +497,15 @@ def main():
         study_Dprior()
     if which in ("Duniform", "seedctl"):
         study_Duniform()
+    if which.startswith("Dctl_"):
+        # Dctl_<prior|uniform>_L<L>_r<n_runs>   e.g. Dctl_uniform_L3_r64
+        import re
+        m = re.match(r"Dctl_(prior|uniform)_L(\d+)_r(\d+)$", which)
+        if not m:
+            raise SystemExit(f"bad seed-control spec {which!r}; "
+                             "expected Dctl_<prior|uniform>_L<L>_r<n_runs>")
+        arm, L, nr = m.group(1), int(m.group(2)), int(m.group(3))
+        _seedctl(arm, L=L, n_runs=nr)
     if which.startswith("hist_"):
         import re
         m = re.match(r"hist_L(\d+)A(\d+)", which)      # hist_L2A8 / hist_L2A32 / hist_L3A27
