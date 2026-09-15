@@ -249,6 +249,60 @@ def study_Ddilute_cheap(core=1000, n_runs=2):
     return out
 
 
+# ---------------------------------------------------------------------------
+#  Seed control (F-009) — is the low-occupation prior a circular argument?
+# ---------------------------------------------------------------------------
+# Every admissible occupation measurement (studyB*/studyC*/studyHist*) seeds the core
+# near vacuum (truncated-geometric, mean 0.5). If that prior were doing the work, we
+# would be planting the low-occupation answer we then report. The original control
+# (study_D) removed the prior, but its data is PRE-VERTEX-FIX and retired, so the
+# control is currently unevidenced.
+#
+# WHAT MAKES THIS PAIR DECISIVE, where a single uniform run would not be:
+#   * MATCHED ARMS. Both arms are identical except `boson_init_mean`, so any
+#     difference is attributable to the initialization alone. (Re-running only the
+#     uniform arm against the existing n_runs=3 prior data would confound the init
+#     with the ensemble breadth.)
+#   * ENSEMBLE BREADTH n_runs=16. The block2 cross-check showed selected CI is
+#     basin-trapped at n_runs<=6 and escapes at n_runs>=16. With too few runs a
+#     uniform-init arm that fails to reach the prior arm is UNINTERPRETABLE — it
+#     could be a search failure rather than evidence of seeding bias. 16 makes a
+#     negative result mean something.
+#   * DEPTH TO N_f=16. Any seeding bias would act hardest where the prior most
+#     disagrees with the available space, i.e. at the LARGEST cutoff. Capping at
+#     N_f=8 would let the control pass trivially.
+#
+# Read the pair on BOTH observables the original control named: E_var and <N>/mode.
+# If the uniform arm reproduces the prior arm on both, the prior is a convergence
+# accelerator, not an imposed answer. Note E_var is a valid Ritz upper bound under
+# EITHER initialization, so what is at stake is a search-basin risk, not correctness.
+_SEEDCTL = dict(L=2, dim=3, A=1, N_f_list=(2, 4, 8, 16), core=4000, n_runs=16,
+                seed=0, pt2=False)
+
+
+def study_Dprior(**kw):
+    """Seed control, PRIOR arm: near-vacuum init (mean 0.5) — matched to study_Duniform."""
+    cfg = {**_SEEDCTL, **kw}
+    out = nb_convergence_sweep(boson_init_mean=0.5, **cfg)
+    out["seed_control_arm"] = "prior"
+    out["seed_control_cfg"] = {k: (list(v) if isinstance(v, tuple) else v)
+                               for k, v in cfg.items()}
+    _save(out, "studyDprior_L2d3A1_vacuuminit")
+    return out
+
+
+def study_Duniform(**kw):
+    """Seed control, UNIFORM arm: NO prior — uniform occupation over [0, N_f), no vacuum
+    anchor, so the search must FIND the near-vacuum ground state rather than start there."""
+    cfg = {**_SEEDCTL, **kw}
+    out = nb_convergence_sweep(boson_init_mean=None, **cfg)
+    out["seed_control_arm"] = "uniform"
+    out["seed_control_cfg"] = {k: (list(v) if isinstance(v, tuple) else v)
+                               for k, v in cfg.items()}
+    _save(out, "studyDuniform_L2d3A1_uniforminit")
+    return out
+
+
 def study_hist(L=2, A=8, dim=3, core=None, n_runs=2):
     """DEEP-reference occupation histogram (validation): sweep N_f=(2,4,8,16) — i.e. up to n_b=4,
     two levels deeper than the n_b=2 cut — with PT2 off, so the per-level population p(n) on the
@@ -425,6 +479,11 @@ def main():
         study_Cdense_cheap()
     if which in ("Ddilute_cheap", "cheap"):
         study_Ddilute_cheap()
+    # seed control (F-009): run BOTH arms so the comparison stays matched
+    if which in ("Dprior", "seedctl"):
+        study_Dprior()
+    if which in ("Duniform", "seedctl"):
+        study_Duniform()
     if which.startswith("hist_"):
         import re
         m = re.match(r"hist_L(\d+)A(\d+)", which)      # hist_L2A8 / hist_L2A32 / hist_L3A27

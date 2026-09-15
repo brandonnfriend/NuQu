@@ -9,6 +9,7 @@ This file is the assistant's standing context for the NuQu project. Keep it shor
 
 ### Scope and boundaries
 - **Stay inside the project root** (the directory containing this `CLAUDE.md`). Do not create or modify files outside it.
+- **`paper/` is read-only.** The manuscript is the user's own writing. Read it freely — to answer questions, debug a LaTeX build, or check what a section claims — but never create, edit, rename, move, or delete anything inside `paper/`, including new `.tex` files, `ref.bib`, and build artifacts. Draft replacement text in `docs/` or the scratchpad and tell the user what to paste in. A `PreToolUse` hook (`.claude/hooks/protect-paper.py`) enforces this and will hard-block the write; the block is the rule working, not a bug to route around. `paper/` is gitignored, so there is no history to recover from if you overwrite something.
 - **`human_knowledge/` is read-only.** Files inside `human_knowledge/` are written by the user to record their own understanding, intuition, and direction. Read them freely for context, but never edit, rewrite, rename, delete, or create files inside that folder. If you think something there is wrong or stale, raise it in conversation instead of editing.
 - **Don't push to remote.** The user reviews changes locally and pushes themselves. Never `git push` without an explicit request.
 - Work on a feature branch. Don't commit to `main` directly.
