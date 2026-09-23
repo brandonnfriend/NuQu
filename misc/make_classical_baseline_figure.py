@@ -40,7 +40,8 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 from classical.trimci.extrapolation import combine_seeds  # noqa: E402
 from misc.apply_wick_correction import (  # noqa: E402
-    DEFAULT_CONVENTION, add_convention_arg, annotate, apply_to_rungs, figure_note)
+    DEFAULT_CONVENTION, add_convention_arg, annotate, apply_to_rungs, figure_note,
+    shard_convention)
 
 BLUE, ORANGE, CRIT, GREEN = "#2a78d6", "#eb6834", "#d03b3b", "#3a9b6a"
 INK, INK2, MUTED, GRID, AXIS, SURFACE = "#0b0b0b", "#52514e", "#898781", "#e1e0d9", "#c3c2b7", "#fcfcfb"
@@ -50,9 +51,10 @@ _PRE_FIX_DIRS = ("2026-08-13", "2026-08-14", "2026-08-15", "2026-08-16", "2026-0
 def load(dirs, allow_pre_fix=False, convention=DEFAULT_CONVENTION):
     """{(n_b, L): record} — pooled over seeds, deepest ladder wins a duplicate.
 
-    Shards are stored in the LEGACY contact convention; `convention='wick'` (default)
-    shifts every absolute energy by `+23.3725*A` MeV before any extrapolation, so sigma,
-    dE_pt2 and the seed-agreement verdicts come out unchanged (CONVENTIONS.md section 10).
+    Each shard is moved from the convention it was run in (legacy unless tagged, see
+    `shard_convention`) into `convention`; 'wick' (default) is `+23.3725*A` MeV above
+    legacy, so sigma, dE_pt2 and the seed-agreement verdicts come out unchanged
+    (CONVENTIONS.md section 10).
     """
     groups, meta, depth = defaultdict(dict), {}, {}
     for d in dirs:
@@ -65,8 +67,11 @@ def load(dirs, allow_pre_fix=False, convention=DEFAULT_CONVENTION):
                            key=lambda r: r["core"])
             if not rungs:
                 continue
-            apply_to_rungs(rungs, j["A"], convention)
+            apply_to_rungs(rungs, j["A"], convention, native=shard_convention(j))
             key, seed = (int(j["n_b"]), int(j["L"])), int(j["seed"])
+            if key in meta and int(meta[key]["A"]) != int(j["A"]):
+                raise ValueError(f"(n_b, L)={key} mixes A={meta[key]['A']} and A={j['A']} "
+                                 f"({f}); this figure is one nucleon number per (n_b, L)")
             top = rungs[-1]["core"]
             if depth.get((key, seed), -1) >= top:
                 continue

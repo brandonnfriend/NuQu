@@ -177,7 +177,9 @@ def build_from_eft(L, dim, n_b, params=None, transform="bare", frame_params=None
     mh = bundle.sub_hamiltonians[0].operator
     H = from_mixed_hamiltonian(mh, n_b, N_f=N_f)
     H.meta.update({"L": L, "dim": dim, "num_sites": num_sites,
-                   "q_count": q_count})
+                   "q_count": q_count,
+                   "contact_convention": ("wick" if cfg.wick_ordered_contacts
+                                          else "legacy")})
 
     if transform in (None, "bare"):
         return H

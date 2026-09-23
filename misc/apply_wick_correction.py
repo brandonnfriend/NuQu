@@ -66,11 +66,8 @@ def add_convention_arg(parser):
     return parser
 
 
-def rung_shift(A, convention=DEFAULT_CONVENTION):
-    """MeV to ADD to a fixed-A absolute energy to move it into `convention`.
-
-    Shards are stored in the legacy convention, so 'legacy' is a no-op.
-    """
+def _offset(A, convention):
+    """Absolute energy of `convention` relative to the legacy build, at fixed A."""
     if convention == 'legacy':
         return 0.0
     if convention == 'wick':
@@ -78,10 +75,32 @@ def rung_shift(A, convention=DEFAULT_CONVENTION):
     raise ValueError(f"convention must be one of {CONVENTIONS}, got {convention!r}")
 
 
-def apply_to_rungs(rungs, A, convention=DEFAULT_CONVENTION):
+def shard_convention(shard):
+    """The contact convention a classical shard was RUN in.
+
+    Shards written before 2026-09-23 carry no tag. Every one of them predates the
+    2026-09-14 fix (or, for the nested shards, stores only invariant differences), so
+    an untagged shard is 'legacy'. `misc.run_frame_shard` tags every shard it writes
+    since then with `contact_convention`, because it now builds the Wick-ordered H
+    and shifting such a shard again would double-count the +23.3725*A.
+    """
+    c = shard.get("contact_convention", 'legacy')
+    if c not in CONVENTIONS:
+        raise ValueError(f"unknown contact_convention {c!r} in shard")
+    return c
+
+
+def rung_shift(A, convention=DEFAULT_CONVENTION, native='legacy'):
+    """MeV to ADD to a fixed-A absolute energy run in `native` to move it into
+    `convention`. Untagged shards are legacy, so the default `native` keeps the
+    historical behaviour."""
+    return _offset(A, convention) - _offset(A, native)
+
+
+def apply_to_rungs(rungs, A, convention=DEFAULT_CONVENTION, native='legacy'):
     """Shift a ladder's absolute energies in place. `dE_pt2` is NOT shifted —
     it is a difference and is exactly invariant (E_var and H_aa move together)."""
-    d = rung_shift(A, convention)
+    d = rung_shift(A, convention, native)
     if d == 0.0:
         return rungs
     for r in rungs:

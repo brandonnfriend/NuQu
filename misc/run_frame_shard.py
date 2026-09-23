@@ -197,6 +197,10 @@ def main():
         "kind": "frame_shard", "L": args.L, "dim": args.dim, "A": A,
         "filling": args.filling, "frame": args.frame, "seed": args.seed,
         "n_b": args.n_b, "N_f": Hbare.N_f, "sites": sites,
+        # the contact ordering the H was actually built with. Loaders read it
+        # (apply_wick_correction.shard_convention) so a Wick-built shard is not shifted
+        # by +23.3725*A a second time; untagged (older) shards are legacy.
+        "contact_convention": Hbare.meta["contact_convention"],
         "n_terms": len(Hbare.terms), "ladder_mode": args.ladder_mode,
         "phase0_runs": args.phase0_runs, "ladder_n_runs": args.ladder_n_runs,
         "boson_init_mean": ("none" if bim is None else bim),
@@ -217,7 +221,8 @@ def main():
             "argv": sys.argv[1:],
             "physical": {"L": args.L, "dim": args.dim, "n_b": args.n_b, "N_f": Hbare.N_f,
                          "A": A, "filling": args.filling, "sites": sites,
-                         "n_terms": len(Hbare.terms), "frame": args.frame},
+                         "n_terms": len(Hbare.terms), "frame": args.frame,
+                         "contact_convention": Hbare.meta["contact_convention"]},
             "solver": {"ladder_mode": args.ladder_mode, "ladder_start": args.ladder_start,
                        "n_rungs": args.n_rungs, "max_core": args.max_core,
                        "warm_grow": bool(args.warm_grow), "seed": args.seed,

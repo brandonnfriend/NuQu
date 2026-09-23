@@ -53,7 +53,8 @@ if _ROOT not in sys.path:
 from classical.trimci.extrapolation import (combine_seeds, fit_einf_pt2,  # noqa: E402
                                             split_at_collapse)
 from misc.apply_wick_correction import (  # noqa: E402
-    DEFAULT_CONVENTION, add_convention_arg, annotate, apply_to_rungs, figure_note)
+    DEFAULT_CONVENTION, add_convention_arg, annotate, apply_to_rungs, figure_note,
+    shard_convention)
 
 BLUE, ORANGE, CRIT, GREEN = "#2a78d6", "#eb6834", "#d03b3b", "#3a9b6a"
 PURP, TEAL = "#7b5cd6", "#2f8f8a"
@@ -77,15 +78,19 @@ def _style(ax):
     ax.grid(True, color=GRID, lw=0.8, alpha=1.0); ax.set_axisbelow(True)
 
 
-def load(dirs, require_post_fix=True, convention=DEFAULT_CONVENTION):
+def load(dirs, require_post_fix=True, convention=DEFAULT_CONVENTION, A=None):
     """Collect shards into {(n_b, L): {seed: rungs}} plus a per-group metadata record.
 
     Keeps the DEEPEST ladder when the same (n_b, L, seed) appears in more than one
     directory (a resubmit supersedes the run it recovered).
 
-    Shards are stored in the LEGACY contact convention; `convention='wick'` (default)
-    shifts every absolute energy by `+23.3725*A` MeV before any analysis. `dE_pt2`,
-    sigma and every difference are exactly invariant (CONVENTIONS.md section 10)."""
+    `A` keeps only shards at that nucleon number. Groups are keyed by (n_b, L), so a
+    directory holding several A (the explicit-A sweep) MUST be loaded one A at a time;
+    mixing them would pool different Hamiltonians as if they were seeds, so it raises.
+
+    Every shard is moved from the convention it was RUN in (`shard_convention`: legacy
+    unless tagged) into `convention`; 'wick' (default) is `+23.3725*A` MeV above legacy.
+    `dE_pt2`, sigma and every difference are exactly invariant (CONVENTIONS.md s10)."""
     groups, meta = defaultdict(dict), {}
     depth, skipped = {}, []
     for d in dirs:
@@ -95,11 +100,16 @@ def load(dirs, require_post_fix=True, convention=DEFAULT_CONVENTION):
             continue
         for f in sorted(glob.glob(f"{d}/bare_*.json")):
             j = json.load(open(f))
+            if A is not None and int(j["A"]) != int(A):
+                continue
             rungs = [r for r in j.get("rungs", []) if r.get("E_var") is not None]
             if not rungs:
                 continue
-            apply_to_rungs(rungs, j["A"], convention)
+            apply_to_rungs(rungs, j["A"], convention, native=shard_convention(j))
             key, seed = (int(j["n_b"]), int(j["L"])), int(j["seed"])
+            if key in meta and int(meta[key]["A"]) != int(j["A"]):
+                raise ValueError(f"(n_b, L)={key} holds shards at A={meta[key]['A']} and "
+                                 f"A={j['A']} ({f}); pass A= to load one nucleon number")
             top = max(r["core"] for r in rungs)
             if depth.get((key, seed), -1) >= top:
                 continue
