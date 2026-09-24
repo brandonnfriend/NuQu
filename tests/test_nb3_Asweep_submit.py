@@ -3,8 +3,10 @@
 Runs the submit script with a stubbed `condor_submit` and checks the emitted grid/.sub:
   * every row has exactly the 10 columns the `queue` line names;
   * the grid is A=2..10 x L=2..5 x seeds{0,1,2} minus the reused L=2 A=8 cell (105 shards);
-  * per-L solver settings (MAXCORE, PT2CAP, CPUS, MAXRUNGSEC) match the 292477 baseline, so
-    the new points and the reused L=2 A=8 point come from one pipeline;
+  * per-L solver settings (MAXCORE, PT2CAP, MAXRUNGSEC) match the 292477 baseline, so
+    the new points and the reused L=2 A=8 point come from one pipeline; CPUS is 4 (measured
+    ~1.5 cores busy; only the SpMV threads);
+  * the Phase-0 seed stride is set (independent seeds), and JobPrio is seed-major then L;
   * explicit A (`filling none`), n_b=3, the qis1-3 pin and the small disk request survive;
   * the env overrides trim the grid, and `test` submits exactly one shard.
 """
@@ -17,9 +19,9 @@ import tempfile
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _SCRIPT = os.path.join(_ROOT, "hpc", "detsvsL", "submit_nb3_Asweep.sh")
 _VARS = ["NB", "L", "A", "SEED", "MAXCORE", "PT2CAP", "MEM", "CPUS", "MAXRUNGSEC", "PRIO"]
-# 292477 (submit_nb3_baseline.sh) per-L: MAXCORE PT2CAP CPUS MAXRUNGSEC
-_BASELINE = {"2": ("1024000", "1024000", "16", "14400"), "3": ("1024000", "512000", "16", "21600"),
-             "4": ("512000", "256000", "24", "21600"), "5": ("128000", "65536", "24", "21600")}
+# 292477 (submit_nb3_baseline.sh) per-L: MAXCORE PT2CAP MAXRUNGSEC
+_BASELINE = {"2": ("1024000", "1024000", "14400"), "3": ("1024000", "512000", "21600"),
+             "4": ("512000", "256000", "21600"), "5": ("128000", "65536", "21600")}
 
 
 def _run(mode, env_extra=None):
@@ -60,6 +62,8 @@ def _check_sub(sub, fails, name):
         fails.append(f"{name}: qis1-3 pin missing/incorrect")
     if "request_disk            = 2560M" not in sub:
         fails.append(f"{name}: request_disk not the 2560M that fits qis1/qis3")
+    if "NUQU_PHASE0_SEED_STRIDE=1000" not in sub:
+        fails.append(f"{name}: Phase-0 seed stride missing (seeds would share inits)")
     if " bare $(A) none " not in sub:
         fails.append(f"{name}: not an explicit-A bare run (filling must be 'none')")
     if "-nb$(NB)" not in sub or "NUQU_N_B=$(NB)" not in sub:
@@ -87,16 +91,20 @@ def test_asweep_grid():
     if {r[c["NB"]] for r in rows} != {"3"}:
         fails.append("not n_b=3")
     for r in rows:
-        got = (r[c["MAXCORE"]], r[c["PT2CAP"]], r[c["CPUS"]], r[c["MAXRUNGSEC"]])
+        got = (r[c["MAXCORE"]], r[c["PT2CAP"]], r[c["MAXRUNGSEC"]])
+        if r[c["CPUS"]] != "4":
+            fails.append(f"L={r[c['L']]} CPUS {r[c['CPUS']]} != 4")
+            break
         if got != _BASELINE[r[c["L"]]]:
             fails.append(f"L={r[c['L']]} solver settings {got} != 292477 {_BASELINE[r[c['L']]]}")
             break
         if not r[c["MEM"]].endswith("G"):
             fails.append(f"MEM {r[c['MEM']]!r} is not a Condor size")
             break
-    prio = {r[c["L"]]: int(r[c["PRIO"]]) for r in rows}
-    if not prio["2"] > prio["3"] > prio["4"] > prio["5"]:
-        fails.append(f"JobPrio not L-ascending: {prio}")
+    prio = {(r[c["SEED"]], r[c["L"]]): int(r[c["PRIO"]]) for r in rows}
+    order = [prio[(s, L)] for s in "012" for L in "2345"]
+    if order != sorted(order, reverse=True) or len(set(order)) != len(order):
+        fails.append(f"JobPrio not seed-major then L-ascending: {prio}")
 
     trimmed, _ = _run("all", {"AS": "2 10", "LS": "2 3", "SEEDS": "0"})
     if len(trimmed.get("grid", [])) != 4:
@@ -110,14 +118,34 @@ def test_asweep_grid():
     assert not fails, "A-sweep grid problems:\n  - " + "\n  - ".join(fails)
 
 
+def test_phase0_seed_base():
+    """Shard seeds get disjoint Phase-0 init blocks; seed 0 is unchanged; stride 1 = legacy."""
+    sys.path.insert(0, _ROOT)
+    from misc.run_frame_shard import phase0_seed_base
+    runs = 32
+    blocks = [set(range(phase0_seed_base(s, 1000, runs), phase0_seed_base(s, 1000, runs) + runs))
+              for s in range(3)]
+    assert not (blocks[0] & blocks[1] or blocks[0] & blocks[2] or blocks[1] & blocks[2])
+    assert phase0_seed_base(0, 1000, runs) == 0 == phase0_seed_base(0, 1, runs)
+    assert phase0_seed_base(2, 1, runs) == 2            # legacy overlapping blocks
+    try:
+        phase0_seed_base(1, 16, runs)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("stride < phase0_runs accepted")
+
+
 def main():
     try:
         test_asweep_grid()
     except AssertionError as e:
         print("test_nb3_Asweep_submit: FAILED\n", e)
         sys.exit(1)
+    test_phase0_seed_base()
     print("test_nb3_Asweep_submit: PASS  (105 shards A=2..10 x L=2..5 x 3 seeds minus L2A8, "
-          "292477 solver settings, explicit A, qis1-3, 2560M disk, env trim, 1-shard smoke)")
+          "292477 solver settings, 4 cpus, seed stride, seed-major prio, explicit A, qis1-3, "
+          "2560M disk, env trim, 1-shard smoke, disjoint Phase-0 seed blocks)")
 
 
 if __name__ == "__main__":

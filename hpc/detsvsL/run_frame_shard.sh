@@ -76,6 +76,7 @@ PT2CAP_ARG=""; [ -n "${NUQU_PT2_MAX_CORE:-}" ] && PT2CAP_ARG="--pt2-max-core ${N
 # the previous rung (monotone -> smooth convergence curve), not a fresh solve per rung.
 WARMGROW_ARG=""; [ -n "${NUQU_WARM_GROW:-}" ] && WARMGROW_ARG="--warm-grow"
 P0RUNS="${NUQU_PHASE0_RUNS:-64}"       # warm-grow Phase-0 basin-escape ensemble size
+P0STRIDE="${NUQU_PHASE0_SEED_STRIDE:-1000}"  # Phase-0 inits = seed*stride+k (1 = legacy overlap)
 # LADDER_START = the phase-0 ENSEMBLE core (rungs[0]) in warm-grow mode. Bigger = the compact
 # ground-state basin is more distinguishable at phase-0, so heavy restarts there can escape the
 # delocalized basin at a SMALL core (the "basin collapse" search fix). Default 1000 (legacy).
@@ -106,7 +107,7 @@ if [ "$LADDER_MODE" = "independent" ]; then
       --A "$A" $FILL_ARG --ladder-mode independent --ladder-start "$LADDERSTART" --n-rungs "$NRUNGS" \
       --max-core "$MAXCORE" --frame-runs "$RUNS" --phase0-core "$PHASE0CORE" \
       --orbopt-cycles "$ORBOPTCYCLES" --max-rung-seconds "$MAXRUNGSEC" --phase0-runs "$P0RUNS" \
-      --ladder-n-runs "$LNRUNS" $BIM_ARG $PT2CAP_ARG $EXACT_ARG $WARMGROW_ARG \
+      --phase0-seed-stride "$P0STRIDE" --ladder-n-runs "$LNRUNS" $BIM_ARG $PT2CAP_ARG $EXACT_ARG $WARMGROW_ARG \
       $BACKEVAL_ARG $BACKCAP_ARG --out "$OUT"
 else
   # shellcheck disable=SC2086

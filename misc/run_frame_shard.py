@@ -36,6 +36,22 @@ from classical.trimci.run_cpp import (_adaptive_ladder_solve, _pick_solver,
                                       default_ladder)
 
 
+def phase0_seed_base(seed, stride, phase0_runs):
+    """Base seed of the warm-grow Phase-0 ensemble for shard `seed`.
+
+    The ensemble draws its `phase0_runs` inits from seeds `base, base+1, ...`. With the old
+    base = seed (stride 1), shards 0/1/2 shared all but one or two of their 32 inits and
+    almost always kept the SAME best one: the 293959 L=2 ladders are bit-identical across
+    seeds, and so are 292477's at L=3. A stride >= phase0_runs gives every shard a
+    disjoint block of inits, so the seeds are really independent searches. Shard seed 0
+    has base 0 either way, so seed-0 shards are unchanged. stride=1 keeps the legacy
+    (overlapping) behavior for comparison."""
+    if stride != 1 and stride < phase0_runs:
+        raise ValueError(f"phase0 seed stride {stride} < phase0_runs {phase0_runs}: "
+                         "neighbouring shards would share inits")
+    return int(seed) * int(stride)
+
+
 def _mean_occupation(res, n_bos):
     """Mean boson occupation per mode of the (framed) ground state -- a near-vacuum
     diagnostic. Basis-dependent: ~0 in the squeeze frame (by design), physical in the
@@ -73,6 +89,9 @@ def main():
     ap.add_argument("--max-rung-seconds", type=float, default=14400.0, help="4h/rung cap")
     ap.add_argument("--phase0-runs", type=int, default=64,
                     help="Phase-0 ensemble seeds (heavy small-core search; grow mode)")
+    ap.add_argument("--phase0-seed-stride", type=int, default=1000,
+                    help="warm-grow Phase-0 inits are seed*stride + k: disjoint per shard "
+                         "(1 = legacy overlapping blocks; see phase0_seed_base)")
     # frame-optimization (COO orbopt / LF displacement) knobs
     ap.add_argument("--phase0-core", type=int, default=2000, help="frame-opt core")
     ap.add_argument("--frame-runs", type=int, default=16, help="COO orbopt num_runs")
@@ -134,6 +153,10 @@ def main():
                     help="memory ceiling for the exact-ref Lanczos (refuses cleanly above)")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
+    # only the warm-grow Phase-0 ensemble uses it; other paths keep seeding from args.seed
+    p0_base = phase0_seed_base(args.seed, args.phase0_seed_stride, args.phase0_runs)
+    if not args.warm_grow:
+        p0_base = None
 
     sites = args.L ** args.dim
     A = max(1, round(args.filling * sites)) if args.filling is not None else args.A
@@ -203,6 +226,8 @@ def main():
         "contact_convention": Hbare.meta["contact_convention"],
         "n_terms": len(Hbare.terms), "ladder_mode": args.ladder_mode,
         "phase0_runs": args.phase0_runs, "ladder_n_runs": args.ladder_n_runs,
+        "phase0_seed_stride": args.phase0_seed_stride,
+        "phase0_seed_base": p0_base,
         "boson_init_mean": ("none" if bim is None else bim),
         "frame_info": {k: v for k, v in finfo.items()
                        if isinstance(v, (str, int, float, bool))},
@@ -227,6 +252,8 @@ def main():
                        "n_rungs": args.n_rungs, "max_core": args.max_core,
                        "warm_grow": bool(args.warm_grow), "seed": args.seed,
                        "phase0_runs": args.phase0_runs, "ladder_n_runs": args.ladder_n_runs,
+                       "phase0_seed_stride": args.phase0_seed_stride,
+                       "phase0_seed_base": p0_base,
                        "pt2_max_core": args.pt2_max_core,
                        "max_rung_seconds": args.max_rung_seconds,
                        "boson_init_mean": ("none" if bim is None else bim),
@@ -348,7 +375,7 @@ def main():
             rungs = [args.ladder_start * 2 ** k for k in range(args.n_rungs)
                      if args.ladder_start * 2 ** k <= args.max_core]
             growing_ladder(
-                Hind, A, rungs, phase0_runs=args.phase0_runs, seed=args.seed,
+                Hind, A, rungs, phase0_runs=args.phase0_runs, seed=p0_base,
                 pt2_diag=pt2_diag, verbose=True, on_rung=on_rung,
                 max_rung_seconds=args.max_rung_seconds, pt2_max_core=args.pt2_max_core)
         else:
