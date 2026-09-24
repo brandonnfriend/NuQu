@@ -98,7 +98,14 @@ Learned the hard way; don't repeat the detours.
   ~3–4×. The run script sets **all** numeric libs to 1 thread/process (fork-safe: single-thread
   BLAS has no pool to corrupt) and `NUQU_NUM_WORKERS=request_cpus`.
 - **Worker count is adaptive**: `_ensemble_workers` reads `NUQU_NUM_WORKERS` → `_CONDOR_REQUEST_CPUS`
-  → `sched_getaffinity`, capped at `n_runs`. Compute-bound solves scale on the **48 physical
+  → `sched_getaffinity`, capped at `n_runs`. **qis Condor does NOT export `_CONDOR_REQUEST_CPUS`**
+  (found 2026-09-24). Before then, every `run_frame_shard.sh` job ran at `cpus=2` whatever
+  `request_cpus` said: 2 fork workers, or 2 OMP threads under `NUQU_DEEP_SOLVE`. That covers
+  292477, 293958 and 293959. `detect_cpus` now reads `NUQU_CPUS` → `_CONDOR_REQUEST_CPUS` →
+  `OMP_THREAD_LIMIT` → `PYTHON_CPU_COUNT` → `Cpus` in `$_CONDOR_MACHINE_AD` → 2. The value used is
+  recorded in the shard manifest (`threads.NUQU_CPUS_RESOLVED`). The other run scripts
+  (nb_cutoff, run_detsvsL*, backeval) still read only `_CONDOR_REQUEST_CPUS`. The DMRG scripts
+  pass cpus explicitly. Compute-bound solves scale on the **48 physical
   cores**, not the 96 SMT threads — request up to ~48 for a big frame fit.
 - **C++ OpenMP** (on the H-build/expand/matvec, behind `-fopenmp`) is in the tree but **dormant**
   (run script pins `OMP=1`): it gave ~1× at L=2 because those solves are *overhead-bound*

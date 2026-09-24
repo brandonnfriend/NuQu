@@ -16,7 +16,23 @@ REPO=/nfs_scratch/bfriend3/NuQu/NuQu
 SANDBOX="$(pwd)"
 [ -r "$REPO/misc/run_frame_shard.py" ] || { echo "ERROR: cannot read repo at $REPO" >&2; exit 1; }
 
-cpus="${_CONDOR_REQUEST_CPUS:-2}"
+# CPU ALLOCATION. qis Condor does NOT export _CONDOR_REQUEST_CPUS (found 2026-09-24: every
+# job before then fell back to cpus=2 -- 2 OMP threads in deep-solve, 2 fork workers
+# otherwise -- whatever request_cpus said). It does export the allocation as
+# OMP_THREAD_LIMIT / PYTHON_CPU_COUNT and as `Cpus` in the job's machine ad, so try those
+# in turn. NUQU_CPUS overrides everything; 2 stays the last-resort default.
+detect_cpus() {
+  for v in "${NUQU_CPUS:-}" "${_CONDOR_REQUEST_CPUS:-}" "${OMP_THREAD_LIMIT:-}" "${PYTHON_CPU_COUNT:-}"; do
+    case "$v" in ''|*[!0-9]*) ;; *) [ "$v" -gt 0 ] && { echo "$v"; return; } ;; esac
+  done
+  if [ -n "${_CONDOR_MACHINE_AD:-}" ] && [ -r "$_CONDOR_MACHINE_AD" ]; then
+    c=$(awk '$1 == "Cpus" && $2 == "=" {print $3; exit}' "$_CONDOR_MACHINE_AD")
+    case "$c" in ''|*[!0-9]*) ;; *) echo "$c"; return ;; esac
+  fi
+  echo 2
+}
+cpus="$(detect_cpus)"
+export NUQU_CPUS_RESOLVED="$cpus"
 # TWO parallelism modes (comparison switch):
 #  * default (fork ensemble): parallelism = independent random-init solves across
 #    fork'd workers; every numeric lib pinned to 1 thread (fork-safe BLAS, no core

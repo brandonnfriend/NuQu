@@ -285,7 +285,12 @@ def main():
                        "back_eval": bool(args.back_eval),
                        "back_support_cap": args.back_support_cap},
             "condor": {k: os.environ.get(k) for k in
-                       ("_CONDOR_SLOT", "_CONDOR_REQUEST_CPUS", "_CONDOR_REQUEST_MEMORY")},
+                       ("_CONDOR_SLOT", "_CONDOR_REQUEST_CPUS", "_CONDOR_REQUEST_MEMORY",
+                        "OMP_THREAD_LIMIT", "PYTHON_CPU_COUNT")},
+            # what the job actually ran with (run_frame_shard.sh detect_cpus, 2026-09-24):
+            "threads": {k: os.environ.get(k) for k in
+                        ("NUQU_CPUS_RESOLVED", "OMP_NUM_THREADS", "NUQU_NUM_WORKERS",
+                         "NUQU_DEEP_SOLVE")},
         }),
     }
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
