@@ -580,7 +580,9 @@ def _adaptive_ladder_solve(H, A, ladder_start, n_rungs, solver, pt2_diag,
 
 
 def growing_ladder(H, A, rungs, phase0_runs=64, seed=0, pt2_diag=None,
-                   verbose=True, on_rung=None, max_rung_seconds=None, pt2_max_core=None):
+                   verbose=True, on_rung=None, max_rung_seconds=None, pt2_max_core=None,
+                   select_core=None, init_strategy="random", novel_ferm_frac=0.0,
+                   novel_keep_frac=0.0, phase0_workers=None):
     """The 'grow, don't redo' core ladder (TrimCI / COO 3-phase workflow):
 
       Phase 0 — heavy ENSEMBLE at the smallest rung: `phase0_runs` independent random
@@ -595,22 +597,57 @@ def growing_ladder(H, A, rungs, phase0_runs=64, seed=0, pt2_diag=None,
     delta) and reaches the large cores that actually converge. Tradeoff: it replaces the
     per-rung ensemble with a Phase-0 ensemble + growth — reliable when the frame makes
     convergence smooth (verified for the squeeze frame); the old independent ladder
-    (`_adaptive_ladder_solve`) stays available as the comparison switch."""
+    (`_adaptive_ladder_solve`) stays available as the comparison switch.
+
+    SEARCH LEVERS (2026-09-24; all default OFF -> the loop below is unchanged):
+      select_core    -- grow EVERY Phase-0 init through the rungs <= select_core and
+                        keep the lowest THERE (`select_phase0_arrays`), not at rung 0;
+      init_strategy  -- "stratified": Phase-0 inits cycle evenly through the
+                        nucleon-arrangement types (`nucleon_arrangement_starts`)
+                        instead of random placements ("random");
+      novel_ferm_frac / novel_keep_frac -- reserve pool / core slots for new nucleon
+                        configurations in every selection round (more hopping);
+      phase0_workers -- fork workers for the select stage (None = the ensemble rule).
+    The select stage's rungs are recorded with phase "0-select"; the first carries
+    `phase0_select` = [(seed, [E per select rung]), ...] for every init."""
     from .pt2 import pt2_from_result
-    from .graph_arrays import ground_state_arrays, ground_state_ensemble_arrays
+    from .graph_arrays import (ground_state_arrays, ground_state_ensemble_arrays,
+                               select_phase0_arrays, nucleon_arrangement_starts)
     rungs = sorted(set(int(r) for r in rungs))
+    if init_strategy not in ("random", "stratified"):
+        raise ValueError(f"init_strategy {init_strategy!r}: use 'random' or 'stratified'")
+    grow_kw = {}
+    if novel_ferm_frac:
+        grow_kw["novel_ferm_frac"] = float(novel_ferm_frac)
+    if novel_keep_frac:
+        grow_kw["novel_keep_frac"] = float(novel_keep_frac)
+    trail, summary, sel_wall = None, None, 0.0
+    if select_core is not None or init_strategy == "stratified":
+        sel = [r for r in rungs if select_core is not None and r <= select_core] or rungs[:1]
+        init_ferms = (nucleon_arrangement_starts(H, A, phase0_runs, np.random.default_rng(seed))
+                      if init_strategy == "stratified" else None)
+        t = time.time()
+        trail, summary = select_phase0_arrays(H, A, sel, phase0_runs, seed=seed,
+                                              init_ferms=init_ferms,
+                                              n_workers=phase0_workers, **grow_kw)
+        sel_wall = time.time() - t
     core, out = None, []
     for i, r in enumerate(rungs):
         t = time.time()
-        if i == 0:                                   # Phase 0: heavy ensemble
+        if trail is not None and i < len(trail):     # Phase 0 via the select levers
+            res = trail[i]
+        elif i == 0:                                 # Phase 0: heavy ensemble
             res = ground_state_ensemble_arrays(H, n_elec=A, n_runs=phase0_runs,
                                                n_dets=r, seed=seed)
         else:                                        # grow, warm-started from prev core
             res = ground_state_arrays(H, n_elec=A, n_dets=r, initial_core=core,
-                                      seed=seed + i)
+                                      seed=seed + i, **grow_kw)
         wall = time.time() - t
+        if trail is not None and i < len(trail):
+            wall = sel_wall if i == 0 else 0.0       # the whole select stage, on rung 0
         core = (res.ferm_arr, res.bos_arr)
-        ph = "0-ensemble" if i == 0 else "grow"
+        ph = ("0-select" if trail is not None and i < len(trail)
+              else "0-ensemble" if i == 0 else "grow")
         if pt2_max_core is not None and int(res.n_dets) > pt2_max_core:
             rung = {"core": int(res.n_dets), "E_var": float(res.energy),
                     "dE_pt2": None, "E_pt2": None, "n_ext": None, "wall_s": wall,
@@ -621,6 +658,8 @@ def growing_ladder(H, A, rungs, phase0_runs=64, seed=0, pt2_diag=None,
                     "dE_pt2": float(pr["dE_pt2"]),
                     "E_pt2": float(pr["E_var"]) + float(pr["dE_pt2"]),
                     "n_ext": pr["n_ext"], "wall_s": wall, "phase": ph}
+        if i == 0 and summary is not None:
+            rung["phase0_select"] = summary
         out.append(rung)
         if verbose:
             pt2s = (f"dE_PT2={rung['dE_pt2']:+.4f}" if rung["dE_pt2"] is not None

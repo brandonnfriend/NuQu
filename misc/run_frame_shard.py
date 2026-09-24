@@ -89,6 +89,17 @@ def main():
     ap.add_argument("--max-rung-seconds", type=float, default=14400.0, help="4h/rung cap")
     ap.add_argument("--phase0-runs", type=int, default=64,
                     help="Phase-0 ensemble seeds (heavy small-core search; grow mode)")
+    # SEARCH LEVERS (2026-09-24), warm-grow only; all default OFF = unchanged solve.
+    ap.add_argument("--phase0-select-core", type=int, default=None,
+                    help="grow every Phase-0 init to this core and keep the lowest there")
+    ap.add_argument("--phase0-init", choices=["random", "stratified"], default="random",
+                    help="stratified = Phase-0 inits cycle through nucleon-arrangement types")
+    ap.add_argument("--novel-ferm-frac", type=float, default=0.0,
+                    help="reserve this fraction of N pool slots for new nucleon configs")
+    ap.add_argument("--novel-keep-frac", type=float, default=0.0,
+                    help="reserve this fraction of core slots for new nucleon configs")
+    ap.add_argument("--phase0-workers", type=int, default=None,
+                    help="fork workers for the Phase-0 select stage")
     ap.add_argument("--phase0-seed-stride", type=int, default=1000,
                     help="warm-grow Phase-0 inits are seed*stride + k: disjoint per shard "
                          "(1 = legacy overlapping blocks; see phase0_seed_base)")
@@ -153,6 +164,8 @@ def main():
                     help="memory ceiling for the exact-ref Lanczos (refuses cleanly above)")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
+    if args.phase0_select_core is not None and args.phase0_select_core <= 0:
+        args.phase0_select_core = None             # 0 = lever off (table-driven submits)
     # only the warm-grow Phase-0 ensemble uses it; other paths keep seeding from args.seed
     p0_base = phase0_seed_base(args.seed, args.phase0_seed_stride, args.phase0_runs)
     if not args.warm_grow:
@@ -228,6 +241,11 @@ def main():
         "phase0_runs": args.phase0_runs, "ladder_n_runs": args.ladder_n_runs,
         "phase0_seed_stride": args.phase0_seed_stride,
         "phase0_seed_base": p0_base,
+        "search_levers": {"phase0_select_core": args.phase0_select_core,
+                          "phase0_init": args.phase0_init,
+                          "novel_ferm_frac": args.novel_ferm_frac,
+                          "novel_keep_frac": args.novel_keep_frac,
+                          "phase0_workers": args.phase0_workers},
         "boson_init_mean": ("none" if bim is None else bim),
         "frame_info": {k: v for k, v in finfo.items()
                        if isinstance(v, (str, int, float, bool))},
@@ -254,6 +272,11 @@ def main():
                        "phase0_runs": args.phase0_runs, "ladder_n_runs": args.ladder_n_runs,
                        "phase0_seed_stride": args.phase0_seed_stride,
                        "phase0_seed_base": p0_base,
+                       "search_levers": {"phase0_select_core": args.phase0_select_core,
+                                         "phase0_init": args.phase0_init,
+                                         "novel_ferm_frac": args.novel_ferm_frac,
+                                         "novel_keep_frac": args.novel_keep_frac,
+                                         "phase0_workers": args.phase0_workers},
                        "pt2_max_core": args.pt2_max_core,
                        "max_rung_seconds": args.max_rung_seconds,
                        "boson_init_mean": ("none" if bim is None else bim),
@@ -276,7 +299,8 @@ def main():
     save()  # header immediately: even a shard that dies in Phase-0 leaves a record
 
     def on_rung(rung, res):
-        r = {k: rung[k] for k in ("core", "E_var", "dE_pt2", "E_pt2", "n_ext", "wall_s", "phase")
+        r = {k: rung[k] for k in ("core", "E_var", "dE_pt2", "E_pt2", "n_ext", "wall_s", "phase",
+                                  "phase0_select")
              if k in rung}
         r["mean_occ"] = _mean_occupation(res, Hbare.n_bos_modes)
         # QPE warm-start overlap p0 = |c_dominant|^2 of this (framed) core — the
@@ -377,7 +401,10 @@ def main():
             growing_ladder(
                 Hind, A, rungs, phase0_runs=args.phase0_runs, seed=p0_base,
                 pt2_diag=pt2_diag, verbose=True, on_rung=on_rung,
-                max_rung_seconds=args.max_rung_seconds, pt2_max_core=args.pt2_max_core)
+                max_rung_seconds=args.max_rung_seconds, pt2_max_core=args.pt2_max_core,
+                select_core=args.phase0_select_core, init_strategy=args.phase0_init,
+                novel_ferm_frac=args.novel_ferm_frac, novel_keep_frac=args.novel_keep_frac,
+                phase0_workers=args.phase0_workers)
         else:
             _adaptive_ladder_solve(
                 Hind, A, args.ladder_start, args.n_rungs, solver, pt2_diag,

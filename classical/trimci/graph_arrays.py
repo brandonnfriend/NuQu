@@ -61,20 +61,124 @@ def random_core_arrays(H, n_elec, n_init, rng, boson_init_mean=0.5):
     return ferm, bos
 
 
+def fixed_ferm_core_arrays(H, n_init, ferm_occ, rng, boson_init_mean=0.5):
+    """Initial core that holds ONE assigned nucleon arrangement `ferm_occ` (an int
+    fermion bitmask) under `n_init` random near-vacuum boson configurations, with the
+    all-vacuum state as the anchor. The stratified-start lever: `random_core_arrays`
+    draws a fresh random nucleon placement for every initial state, so which
+    arrangement a run explores is left to the first few selection rounds."""
+    from .backend import _states_to_arrays
+    from .graph import boson_occupation_weights
+    from .state import MixedState
+    weights = boson_occupation_weights(H.N_f, boson_init_mean)
+    states = {MixedState(int(ferm_occ), tuple([0] * H.n_bos_modes))}
+    guard = 0
+    while len(states) < n_init and guard < 50 * n_init:
+        guard += 1
+        bos = tuple(int(x) for x in rng.choice(H.N_f, size=H.n_bos_modes, p=weights))
+        states.add(MixedState(int(ferm_occ), bos))
+    return _states_to_arrays(list(states), _ferm_words(H))
+
+
+def mode_sites(H):
+    """Lattice site of each compact fermion mode. `build_from_eft` compacts the
+    quantum register's nucleon qubits (site*(4+3*n_b) + slot) in sorted order, so
+    compact mode m sits on site m // 4; read it from the index map when present."""
+    imap = H.meta.get("fermion_index_map") if getattr(H, "meta", None) else None
+    n_b = H.meta.get("n_b") if getattr(H, "meta", None) else None
+    if imap and n_b is not None:
+        stride = 4 + 3 * int(n_b)
+        sites = np.empty(H.n_ferm_modes, dtype=int)
+        for orig, k in imap.items():
+            sites[k] = int(orig) // stride
+        return sites
+    return np.arange(H.n_ferm_modes) // 4
+
+
+def site_partitions(n_elec, max_per_site, max_sites):
+    """Every way to split `n_elec` nucleons into per-site counts (each <= max_per_site,
+    at most max_sites occupied sites), as descending tuples: the arrangement TYPES,
+    from fully spread (1,1,...,1) to maximally clustered (4,4,...)."""
+    out = []
+
+    def rec(left, cap, parts):
+        if left == 0:
+            out.append(tuple(parts))
+            return
+        if len(parts) >= max_sites:
+            return
+        for c in range(min(cap, left), 0, -1):
+            rec(left - c, c, parts + [c])
+    rec(int(n_elec), int(max_per_site), [])
+    return out
+
+
+def nucleon_arrangement_starts(H, n_elec, n_runs, rng):
+    """`n_runs` fermion bitmasks that cover the nucleon-arrangement TYPES evenly.
+
+    Types are the site-occupancy partitions (`site_partitions`); the runs cycle
+    through them in a random order, so every type gets floor/ceil(n_runs/n_types)
+    starts. Within a type the occupied sites and each site's spin-isospin slots are
+    drawn at random, so repeated starts of one type land in different places."""
+    sites = mode_sites(H)
+    n_sites = int(sites.max()) + 1
+    by_site = [np.flatnonzero(sites == j) for j in range(n_sites)]
+    cap = min(len(m) for m in by_site)
+    types = site_partitions(n_elec, cap, n_sites)
+    order = rng.permutation(len(types))
+    starts = []
+    for k in range(int(n_runs)):
+        parts = types[order[k % len(types)]]
+        occ = 0
+        for site, c in zip(rng.choice(n_sites, size=len(parts), replace=False), parts):
+            for m in rng.choice(by_site[int(site)], size=c, replace=False):
+                occ |= 1 << int(m)
+        starts.append(occ)
+    return starts
+
+
+def _rows_isin(a, b):
+    """Boolean mask: which rows of 2-D array `a` also occur as rows of `b`."""
+    a = np.ascontiguousarray(a)
+    b = np.ascontiguousarray(b)
+    dt = np.dtype((np.void, a.dtype.itemsize * a.shape[1]))
+    return np.isin(a.view(dt).ravel(), b.view(dt).ravel())
+
+
 # ---------------------------------------------------------------------------
 #  Array-native expansion / trimming — all "keep" ops are on ROW INDICES
 # ---------------------------------------------------------------------------
 
-def expand_arrays(H, core_ferm, core_bos, coeffs, pool_factor=3):
+def expand_arrays(H, core_ferm, core_bos, coeffs, pool_factor=3,
+                  novel_ferm_frac=0.0, novel_oversample=4):
     """Pool = core ⊕ top-(pool_factor·N) scored candidates, as arrays.
 
     Returns (pool_ferm, pool_bos) with the core occupying the first N rows
     (candidates after). Candidates are unique and disjoint from the core
     (guaranteed by `expand_topk` in C++), so the concatenation needs no dedup.
+
+    `novel_ferm_frac` > 0 (exploration lever, default OFF = the path above, unchanged):
+    ALSO admit up to novel_ferm_frac·N candidates whose NUCLEON configuration is not
+    in the core at all (a hop, or a spin/isospin flip), best score first, drawn from
+    the next novel_oversample·keep candidates below the cut. Nucleon hopping is weak
+    (h = 1/2Ma²), so those candidates score low and are otherwise almost never let
+    into the diagonalization; the diagonalization still decides whether they stay.
     """
     N = core_ferm.shape[0]
     keep = max(pool_factor * N, 1)
     cf, cb, _sc = cpp_expand_topk(H, core_ferm, core_bos, coeffs, keep)
+    if novel_ferm_frac and novel_ferm_frac > 0 and cf.shape[0] > 0:
+        # a second, wider call; the default pool above is kept EXACTLY (C++ breaks
+        # score ties its own way), so lever ON = default pool + the added rows.
+        wf, wb, ws = cpp_expand_topk(H, core_ferm, core_bos, coeffs,
+                                     keep * (1 + int(novel_oversample)))
+        cand = np.flatnonzero(~_rows_isin(wf, core_ferm))
+        cand = cand[np.argsort(-ws[cand], kind="stable")]
+        rows = lambda f, b: np.hstack([f, b.astype(np.uint64)])
+        cand = cand[~_rows_isin(rows(wf[cand], wb[cand]), rows(cf, cb))]
+        add = cand[:int(math.ceil(novel_ferm_frac * N))]
+        cf = np.concatenate([cf, wf[add]], axis=0)
+        cb = np.concatenate([cb, wb[add]], axis=0)
     if cf.shape[0] == 0:
         return core_ferm, core_bos
     pool_ferm = np.concatenate([core_ferm, cf], axis=0)
@@ -108,8 +212,14 @@ def local_trim_arrays(H, pool_ferm, pool_bos, num_groups, keep_per_group, rng):
     return np.concatenate(survivors) if survivors else np.arange(P)
 
 
-def global_trim_arrays(H, ferm, bos, keep):
+def global_trim_arrays(H, ferm, bos, keep, novel_keep_frac=0.0, prev_core_ferm=None):
     """Global trim: one diagonalization, keep the top-`keep` rows by |amplitude|.
+
+    `novel_keep_frac` > 0 (exploration lever, default OFF): up to novel_keep_frac·keep
+    of the kept rows are RESERVED for the highest-amplitude rows whose nucleon
+    configuration is not in `prev_core_ferm`, so a newly reached arrangement survives
+    long enough for later rounds to grow its pion cloud. Any kept subset is still a
+    valid variational space, so E stays an upper bound.
 
     Returns (core_ferm, core_bos, core_coeffs, energy).
     """
@@ -117,6 +227,22 @@ def global_trim_arrays(H, ferm, bos, keep):
     amp = np.abs(coeffs)
     P = ferm.shape[0]
     k = min(keep, P)
+    if novel_keep_frac and novel_keep_frac > 0 and prev_core_ferm is not None and k < P:
+        novel = np.flatnonzero(~_rows_isin(ferm, prev_core_ferm))
+        n_res = min(int(math.ceil(novel_keep_frac * k)), novel.size)
+        res = novel[np.argsort(-amp[novel], kind="stable")[:n_res]]
+        mask = np.ones(P, dtype=bool)
+        mask[res] = False
+        others = np.flatnonzero(mask)
+        k2 = k - n_res
+        if k2 <= 0:
+            top_o = others[:0]
+        elif k2 >= others.size:
+            top_o = others
+        else:
+            top_o = others[np.argpartition(amp[others], -k2)[-k2:]]
+        top = np.concatenate([res, top_o])
+        return ferm[top], bos[top], coeffs[top], E0
     top = np.argpartition(amp, -k)[-k:] if k < P else np.arange(P)
     return ferm[top], bos[top], coeffs[top], E0
 
@@ -130,6 +256,8 @@ def ground_state_arrays(H, n_elec, n_dets=200, n_init=20, pool_factor=3,
                         tol=1e-9, seed=None, boson_init_mean=0.5, verbose=False,
                         max_n_dets=None, conv_tol_rel=None, conv_patience=2,
                         target_gs_rel=None, initial_core=None,
+                        init_ferm=None, novel_ferm_frac=0.0, novel_oversample=4,
+                        novel_keep_frac=0.0,
                         # accepted + ignored for drop-in parity with the object
                         # path (which threads diag_fn/expand_fn hooks):
                         diag_fn=None, expand_fn=None):
@@ -141,6 +269,14 @@ def ground_state_arrays(H, n_elec, n_dets=200, n_init=20, pool_factor=3,
     Returns a GroundStateResult whose `.ferm_arr`/`.bos_arr` carry the final core
     compactly (so io can save the wavefunction without materializing MixedStateS);
     `.states` is left empty. `.coeffs` is the amplitude array.
+
+    Exploration levers (all default OFF -> the unchanged algorithm):
+      init_ferm       -- start from this one nucleon arrangement (int bitmask) under
+                         random boson clouds (`fixed_ferm_core_arrays`), not a random
+                         placement per initial state;
+      novel_ferm_frac -- reserve pool slots for new nucleon configurations
+                         (`expand_arrays`);
+      novel_keep_frac -- reserve core slots for them through the global trim.
     """
     adaptive = conv_tol_rel is not None or target_gs_rel is not None
     ceiling = (max_n_dets if max_n_dets is not None else n_dets)
@@ -156,6 +292,9 @@ def ground_state_arrays(H, n_elec, n_dets=200, n_init=20, pool_factor=3,
         # then continues the x1.5 ramp from the warm core size, not from n_init.
         core_ferm = np.ascontiguousarray(initial_core[0], dtype=np.uint64)
         core_bos = np.ascontiguousarray(initial_core[1], dtype=np.uint16)
+    elif init_ferm is not None:
+        core_ferm, core_bos = fixed_ferm_core_arrays(H, n_init, init_ferm, rng,
+                                                     boson_init_mean=boson_init_mean)
     else:
         core_ferm, core_bos = random_core_arrays(H, n_elec, n_init, rng,
                                                  boson_init_mean=boson_init_mean)
@@ -173,7 +312,8 @@ def ground_state_arrays(H, n_elec, n_dets=200, n_init=20, pool_factor=3,
         N = core_ferm.shape[0]
 
         pool_ferm, pool_bos = expand_arrays(H, core_ferm, core_bos, coeffs,
-                                            pool_factor)
+                                            pool_factor, novel_ferm_frac=novel_ferm_frac,
+                                            novel_oversample=novel_oversample)
         P = pool_ferm.shape[0]
         keep_per_group = max(1, (target * local_keep_ratio) // num_groups)
         # local_trim only helps when the pool is much larger than the target
@@ -197,7 +337,8 @@ def ground_state_arrays(H, n_elec, n_dets=200, n_init=20, pool_factor=3,
         surv_ferm = pool_ferm[surv_idx]
         surv_bos = pool_bos[surv_idx]
         core_ferm, core_bos, coeffs, energy = global_trim_arrays(
-            H, surv_ferm, surv_bos, target)
+            H, surv_ferm, surv_bos, target, novel_keep_frac=novel_keep_frac,
+            prev_core_ferm=(pool_ferm[:N] if novel_keep_frac else None))
 
         history.append((core_ferm.shape[0], energy))
         dE = abs(history[-1][1] - history[-2][1])
@@ -251,6 +392,45 @@ def _ensemble_worker(s):
     (an int) is pickled. Returns the pure-numpy GroundStateResult (picklable back)."""
     st = _FORK_ENSEMBLE_STATE
     return ground_state_arrays(st["H"], st["n_elec"], seed=s, **st["kwargs"])
+
+
+def _select_worker(arg):
+    """Forked child for the Phase-0 SELECT lever: solve one init at the first rung,
+    then warm-grow it through `rungs`, returning every rung's result (the parent keeps
+    the lowest at the last rung). Only (seed, init_ferm) crosses the pipe."""
+    s, init_ferm = arg
+    st = _FORK_ENSEMBLE_STATE
+    H, n_elec, rungs, kw = st["H"], st["n_elec"], st["rungs"], st["kwargs"]
+    res = ground_state_arrays(H, n_elec, n_dets=rungs[0], seed=s, init_ferm=init_ferm, **kw)
+    out = [res]
+    for i, r in enumerate(rungs[1:], start=1):
+        res = ground_state_arrays(H, n_elec, n_dets=r, initial_core=(res.ferm_arr, res.bos_arr),
+                                  seed=s + i, **kw)
+        out.append(res)
+    return out
+
+
+def select_phase0_arrays(H, n_elec, rungs, n_runs, seed=0, init_ferms=None,
+                         n_workers=None, **kwargs):
+    """Phase-0 SELECT lever: grow EVERY one of `n_runs` inits (seeds seed+k) through
+    `rungs` (e.g. 1k..16k) and keep the run that is lowest at the LAST rung, instead
+    of the one lowest at the first. At L=2 A=5 the 1k energy barely predicts the
+    16k one (the best-at-1k pick ends in a basin 16 MeV/site above the best), because
+    nucleon-arrangement changes happen during growth. Returns (per-rung results of the
+    winner, [(seed, E at each rung) for every run])."""
+    seeds = [int(seed) + k for k in range(int(n_runs))]
+    ferms = list(init_ferms) if init_ferms is not None else [None] * len(seeds)
+    args = list(zip(seeds, ferms))
+    nw = _ensemble_workers(n_runs) if n_workers is None else max(1, min(n_workers, n_runs))
+    _FORK_ENSEMBLE_STATE.update(H=H, n_elec=n_elec, rungs=list(rungs), kwargs=kwargs)
+    if nw == 1:
+        trails = [_select_worker(a) for a in args]
+    else:
+        with mp.get_context("fork").Pool(nw) as pool:
+            trails = pool.map(_select_worker, args)
+    summary = [(s, [float(r.energy) for r in t]) for s, t in zip(seeds, trails)]
+    best = min(range(len(trails)), key=lambda i: trails[i][-1].energy)
+    return trails[best], summary
 
 
 def _ensemble_workers(n_runs):

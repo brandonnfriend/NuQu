@@ -77,6 +77,13 @@ PT2CAP_ARG=""; [ -n "${NUQU_PT2_MAX_CORE:-}" ] && PT2CAP_ARG="--pt2-max-core ${N
 WARMGROW_ARG=""; [ -n "${NUQU_WARM_GROW:-}" ] && WARMGROW_ARG="--warm-grow"
 P0RUNS="${NUQU_PHASE0_RUNS:-64}"       # warm-grow Phase-0 basin-escape ensemble size
 P0STRIDE="${NUQU_PHASE0_SEED_STRIDE:-1000}"  # Phase-0 inits = seed*stride+k (1 = legacy overlap)
+# SEARCH LEVERS (warm-grow only; unset = unchanged solve). See run_cpp.growing_ladder.
+LEVER_ARGS=""
+[ -n "${NUQU_PHASE0_SELECT_CORE:-}" ] && LEVER_ARGS="$LEVER_ARGS --phase0-select-core ${NUQU_PHASE0_SELECT_CORE}"
+[ -n "${NUQU_PHASE0_INIT:-}" ]        && LEVER_ARGS="$LEVER_ARGS --phase0-init ${NUQU_PHASE0_INIT}"
+[ -n "${NUQU_NOVEL_FERM_FRAC:-}" ]    && LEVER_ARGS="$LEVER_ARGS --novel-ferm-frac ${NUQU_NOVEL_FERM_FRAC}"
+[ -n "${NUQU_NOVEL_KEEP_FRAC:-}" ]    && LEVER_ARGS="$LEVER_ARGS --novel-keep-frac ${NUQU_NOVEL_KEEP_FRAC}"
+[ -n "${NUQU_PHASE0_WORKERS:-}" ]     && LEVER_ARGS="$LEVER_ARGS --phase0-workers ${NUQU_PHASE0_WORKERS}"
 # LADDER_START = the phase-0 ENSEMBLE core (rungs[0]) in warm-grow mode. Bigger = the compact
 # ground-state basin is more distinguishable at phase-0, so heavy restarts there can escape the
 # delocalized basin at a SMALL core (the "basin collapse" search fix). Default 1000 (legacy).
@@ -107,7 +114,7 @@ if [ "$LADDER_MODE" = "independent" ]; then
       --A "$A" $FILL_ARG --ladder-mode independent --ladder-start "$LADDERSTART" --n-rungs "$NRUNGS" \
       --max-core "$MAXCORE" --frame-runs "$RUNS" --phase0-core "$PHASE0CORE" \
       --orbopt-cycles "$ORBOPTCYCLES" --max-rung-seconds "$MAXRUNGSEC" --phase0-runs "$P0RUNS" \
-      --phase0-seed-stride "$P0STRIDE" --ladder-n-runs "$LNRUNS" $BIM_ARG $PT2CAP_ARG $EXACT_ARG $WARMGROW_ARG \
+      --phase0-seed-stride "$P0STRIDE" $LEVER_ARGS --ladder-n-runs "$LNRUNS" $BIM_ARG $PT2CAP_ARG $EXACT_ARG $WARMGROW_ARG \
       $BACKEVAL_ARG $BACKCAP_ARG --out "$OUT"
 else
   # shellcheck disable=SC2086
