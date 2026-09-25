@@ -390,8 +390,22 @@ def _ensemble_worker(s):
     """Runs in a forked child. Reads H/n_elec/kwargs from INHERITED module state so
     the un-picklable C++-backed H is never sent through the pipe -- only the seed `s`
     (an int) is pickled. Returns the pure-numpy GroundStateResult (picklable back)."""
+    _child_single_thread()
     st = _FORK_ENSEMBLE_STATE
     return ground_state_arrays(st["H"], st["n_elec"], seed=s, **st["kwargs"])
+
+
+def _child_single_thread():
+    """In a forked worker: drop to ONE OpenMP thread, so W workers use W cores rather than
+    W x (the parent's OMP_NUM_THREADS). Thread count does not change results. Best-effort:
+    an older mixed_ci build without the binding just keeps its default."""
+    try:
+        from .backend import _load_cpp
+        m = _load_cpp()
+        if hasattr(m, "set_num_threads"):
+            m.set_num_threads(1)
+    except Exception:
+        pass
 
 
 def _select_worker(arg):
@@ -399,6 +413,7 @@ def _select_worker(arg):
     then warm-grow it through `rungs`, returning every rung's result (the parent keeps
     the lowest at the last rung). Only (seed, init_ferm) crosses the pipe."""
     s, init_ferm = arg
+    _child_single_thread()
     st = _FORK_ENSEMBLE_STATE
     H, n_elec, rungs, kw = st["H"], st["n_elec"], st["rungs"], st["kwargs"]
     res = ground_state_arrays(H, n_elec, n_dets=rungs[0], seed=s, init_ferm=init_ferm, **kw)

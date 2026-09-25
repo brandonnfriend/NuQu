@@ -2,11 +2,14 @@
 
 Runs the submit script with a stubbed `condor_submit` and checks the emitted grid/.sub:
   * every row has exactly the 10 columns the `queue` line names;
-  * the grid is A=2..10 x L=2..5 x seeds{0,1,2} minus the reused L=2 A=8 cell (105 shards);
+  * the grid is A=2..10 x L=2..5 x seeds{0,1,2} = 108 shards (L=2 relaunched for every A,
+    2026-09-25: the old-search L=2 data, incl. 292477's A=8, is superseded);
   * per-L solver settings (MAXCORE, PT2CAP, MAXRUNGSEC) match the 292477 baseline, so
-    the new points and the reused L=2 A=8 point come from one pipeline; CPUS is 4 (measured
-    ~1.5 cores busy; only the SpMV threads);
+    the grid stays comparable with the baseline; CPUS is 4 at L=2 and 8 at L>=3 (293962:
+    deep rungs scale 1.3-1.4x from 4 to 16 threads);
   * the Phase-0 seed stride is set (independent seeds), and JobPrio is seed-major then L;
+  * the chosen search levers are ON (select core 16000 + stratified starts, workers = cpus)
+    and the "novel" lever is OFF;
   * explicit A (`filling none`), n_b=3, the qis1-3 pin and the small disk request survive;
   * the env overrides trim the grid, and `test` submits exactly one shard.
 """
@@ -62,6 +65,12 @@ def _check_sub(sub, fails, name):
         fails.append(f"{name}: qis1-3 pin missing/incorrect")
     if "request_disk            = 2560M" not in sub:
         fails.append(f"{name}: request_disk not the 2560M that fits qis1/qis3")
+    for lever in ("NUQU_PHASE0_SELECT_CORE=16000", "NUQU_PHASE0_INIT=stratified",
+                  "NUQU_PHASE0_WORKERS=$(CPUS)"):
+        if lever not in sub:
+            fails.append(f"{name}: search lever {lever} missing")
+    if "NUQU_NOVEL" in sub:
+        fails.append(f"{name}: the novel-config lever should stay OFF")
     if "NUQU_PHASE0_SEED_STRIDE=1000" not in sub:
         fails.append(f"{name}: Phase-0 seed stride missing (seeds would share inits)")
     if " bare $(A) none " not in sub:
@@ -82,18 +91,18 @@ def test_asweep_grid():
     rows = [r for r in rows if len(r) == len(_VARS)]
     cells = {(r[c["L"]], r[c["A"]], r[c["SEED"]]) for r in rows}
     expect = {(str(L), str(A), str(s)) for L in range(2, 6) for A in range(2, 11)
-              for s in range(3)} - {("2", "8", str(s)) for s in range(3)}
+              for s in range(3)}
     if cells != expect:
         fails.append(f"grid cells differ: missing {sorted(expect - cells)[:5]}, "
                      f"extra {sorted(cells - expect)[:5]}")
-    if len(rows) != 105:
-        fails.append(f"{len(rows)} shards, expected 105")
+    if len(rows) != 108:
+        fails.append(f"{len(rows)} shards, expected 108")
     if {r[c["NB"]] for r in rows} != {"3"}:
         fails.append("not n_b=3")
     for r in rows:
         got = (r[c["MAXCORE"]], r[c["PT2CAP"]], r[c["MAXRUNGSEC"]])
-        if r[c["CPUS"]] != "4":
-            fails.append(f"L={r[c['L']]} CPUS {r[c['CPUS']]} != 4")
+        if r[c["CPUS"]] != ("4" if r[c["L"]] == "2" else "8"):
+            fails.append(f"L={r[c['L']]} CPUS {r[c['CPUS']]} (want 4 at L=2, 8 at L>=3)")
             break
         if got != _BASELINE[r[c["L"]]]:
             fails.append(f"L={r[c['L']]} solver settings {got} != 292477 {_BASELINE[r[c['L']]]}")
@@ -143,8 +152,8 @@ def main():
         print("test_nb3_Asweep_submit: FAILED\n", e)
         sys.exit(1)
     test_phase0_seed_base()
-    print("test_nb3_Asweep_submit: PASS  (105 shards A=2..10 x L=2..5 x 3 seeds minus L2A8, "
-          "292477 solver settings, 4 cpus, seed stride, seed-major prio, explicit A, qis1-3, "
+    print("test_nb3_Asweep_submit: PASS  (108 shards A=2..10 x L=2..5 x 3 seeds, 292477 solver "
+          "settings, 4/8 cpus, levers select+stratified, seed stride, seed-major prio, qis1-3, "
           "2560M disk, env trim, 1-shard smoke, disjoint Phase-0 seed blocks)")
 
 

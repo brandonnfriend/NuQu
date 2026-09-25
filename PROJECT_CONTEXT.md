@@ -119,7 +119,11 @@ The Λ audit at L=2, dim=3, A=2 measured **c_Π · Π_max² = 73.25%** of Λ and
 - `--novel-ferm-frac` and `--novel-keep-frac` (`NUQU_NOVEL_*`) reserve pool and core slots for new nucleon configurations every round, i.e. more hopping.
 - `--phase0-workers` sets the fork width.
 
-Why: at L=2 A=5, single inits grown to 16k land in discrete arrangement basins (274.7 / ~285 / 291 / ~294 / 305 MeV/site). 2 of 8 reach 274.7, below 293959's 1M bound (276.1), and the 1k energy barely predicts which. Evaluation campaign: `hpc/detsvsL/submit_search_levers.sh` (6 arms × A{2,4,5,6,9} × 3 seeds, L=2 to 128k). Defaults get decided after it. Test: `tests/test_search_levers.py`.
+Why: at L=2 A=5, single inits grown to 16k land in discrete arrangement basins (274.7 / ~285 / 291 / ~294 / 305 MeV/site). 2 of 8 reach 274.7, below 293959's 1M bound (276.1), and the 1k energy barely predicts which. Evaluation campaign: `hpc/detsvsL/submit_search_levers.sh` (6 arms × A{2,4,5,6,9} × 3 seeds, L=2 to 128k). Defaults get decided after it. Test: `tests/test_search_levers.py`. **Lever verdict (293961, 2026-09-25).** Counting (A, seed) runs within 0.5 MeV/site of the best L=2 bound over A{2,4,5,6,9} × 3 seeds: base 5/15, novel 5/15, strat 10/15, select 14/15, stratsel 13/15. At 128k the levers beat 293959's 1M bounds (A=4: 276.9 vs 286.1; A=5: 274.3 vs 276.1). E∞ now extrapolates at every A: A=4 276.5±0.1, A=6 260.7±0.5, A=9 ≈244±2.5.
+
+The A-sweep turns ON select-core 16000 plus stratified starts; novel stays OFF. Code defaults stay OFF, so validated paths are unchanged. L=2 is relaunched for every A: 293959 and 292477's L=2 A=8 used the old search and are superseded.
+
+**CPU fix verified (293962).** Manifests record the real allocation (4/8/16), and E_var is bit-identical across thread counts. Deep rungs scale weakly (4→16 threads: 1.27× at L=2, 1.32–1.43× at L=3), so L≥3 asks for 8 cpus. qis gives at least 4. Forked Phase-0 workers now call `mixed_ci.set_num_threads(1)` so deep-solve doesn't oversubscribe.
 - **Frame isospectrality / "similar-enough n_b" campaign staged (2026-09-02, `remediation/vertex-fix`).**
   Salvages the frame-optimization *energy* claims by quantifying the non-isospectrality error and
   the frame-adjusted boson cutoff. **Theory verdict** (mathematical-physicist + prior codex consult,

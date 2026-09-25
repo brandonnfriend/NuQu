@@ -41,6 +41,10 @@
 
 #include "mixed_ci.hpp"
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
 namespace py = pybind11;
 using namespace mixedci;
 
@@ -730,6 +734,27 @@ private:
 
 PYBIND11_MODULE(mixed_ci, m) {
     m.doc() = "NuQu Tier-2 mixed fermion-boson H_ij provider (C++ port of hij.connections)";
+
+    // OpenMP thread control (2026-09-25). A forked Phase-0 worker inherits the parent's
+    // OMP_NUM_THREADS (= the job's cpus under NUQU_DEEP_SOLVE), so W workers would each
+    // open a cpus-wide team: W x cpus threads on cpus cores. Workers call
+    // set_num_threads(1). Results do not depend on the thread count (row-gather SpMV,
+    // per-column build; 293962 matched to the last bit at 4/8/16 threads). No-ops
+    // without -fopenmp (the macOS build).
+    m.def("set_num_threads", [](int n) {
+#ifdef _OPENMP
+        omp_set_num_threads(n > 0 ? n : 1);
+#else
+        (void)n;
+#endif
+    }, py::arg("n"), "omp_set_num_threads(n) (no-op without OpenMP)");
+    m.def("get_max_threads", []() {
+#ifdef _OPENMP
+        return omp_get_max_threads();
+#else
+        return 1;
+#endif
+    }, "omp_get_max_threads() (1 without OpenMP)");
 
     py::class_<SubspaceContext, std::shared_ptr<SubspaceContext>>(m, "SubspaceContext")
         .def("size", &SubspaceContext::size,
