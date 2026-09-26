@@ -90,3 +90,29 @@ def test_occupation_disagreement_alone_blocks_the_pass():
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
+
+
+def test_unmatched_arm_is_reported_not_dropped():
+    """A held counterpart arm must still surface the surviving arm's numbers.
+
+    The L=4 shards of cluster 293942 are the motivating case: both uniform arms hit
+    OOM at 96 GB while both prior arms finished. Silently skipping the group would
+    erase the only L=4 occupation we have AND the infeasibility that caused it.
+    """
+    from misc.compare_seed_control import unmatched_groups
+    arms = _arms({4: (100.0, 0.04, 100.0, 0.04)})
+    del arms["uniform"]
+    out = unmatched_groups({(4, 64): arms, (2, 64): _arms({4: (1.0, 0.04, 1.0, 0.04)})})
+    assert len(out) == 1, "only the single-arm group is unmatched"
+    assert out[0]["key"] == (4, 64)
+    assert out[0]["arm"] == "prior" and out[0]["missing"] == "uniform"
+    assert [r["N_f"] for r in out[0]["rows"]] == [4]
+
+
+def test_unmatched_group_gets_no_verdict():
+    """No comparison exists, so nothing may launder into a PASS."""
+    from misc.compare_seed_control import unmatched_groups
+    arms = _arms({4: (100.0, 0.04, 100.0, 0.04)})
+    del arms["uniform"]
+    out = unmatched_groups({(4, 64): arms})
+    assert "verdict" not in out[0]

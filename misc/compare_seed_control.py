@@ -147,6 +147,30 @@ def pooled_best(arms):
     return out
 
 
+def unmatched_groups(groups):
+    """Groups where only ONE arm has data, with that arm's rows.
+
+    A missing arm is not a null result. In cluster 293942 both L=4 UNIFORM shards
+    exceeded 96 GB and were held while both L=4 PRIOR shards finished, so the
+    asymmetry is itself the finding: a uniform draw across 3*L^3 boson modes seeds
+    high-occupation states whose expansion graph is far denser. Dropping these
+    groups from the report would hide both the surviving arm's numbers and the
+    infeasibility of its counterpart, so they are reported separately and WITHOUT a
+    verdict (no comparison is possible).
+    """
+    out = []
+    for key in sorted(groups, key=lambda k: (k[0] or 0, k[1] or 0)):
+        arms = groups[key]
+        if len(arms) >= 2:
+            continue
+        arm = next(iter(arms))
+        rows = arms[arm]["rows"]
+        out.append(dict(key=key, arm=arm, missing="uniform" if arm == "prior" else "prior",
+                        rows=[rows[nf] for nf in sorted(rows)],
+                        per_arm=subspace_violations(rows)))
+    return out
+
+
 def report_group(key, arms, fails):
     L, nr = key
     hdr = f"=== L={L}, n_runs={nr} " + "=" * 30
@@ -196,13 +220,24 @@ def main():
     for key in sorted(groups, key=lambda k: (k[0] or 0, k[1] or 0)):
         arms = groups[key]
         if len(arms) < 2:
-            print(f"\n=== L={key[0]}, n_runs={key[1]} === only {sorted(arms)} — skipped")
+            print(f"\n=== L={key[0]}, n_runs={key[1]} === only {sorted(arms)} — "
+                  "no comparison possible, reported as an unmatched arm")
             continue
         r = report_group(key, arms, fails)
         if r:
             results.append(r)
 
-    if args.out and results:
+    unmatched = unmatched_groups(groups)
+    for u in unmatched:
+        L, nr = u["key"]
+        print(f"\n=== L={L}, n_runs={nr} (UNMATCHED: {u['arm']} only, "
+              f"{u['missing']} arm absent) ===")
+        for x in u["rows"]:
+            n = x.get("N_per_mode")
+            print(f"{x['N_f']:>4} {x.get('n_b'):>4} {x['E_var']:12.4f} "
+                  f"{'—' if n is None else f'{n:9.5f}'}")
+
+    if args.out and (results or unmatched):
         md = ["# Seed control (F-009) — uniform vs near-vacuum initialization\n",
               "_Matched arms per (L, n_runs): identical settings except `boson_init_mean`. "
               "`E_var` is a valid Ritz upper bound under EITHER init, so a mismatch is a "
@@ -227,6 +262,24 @@ def main():
                     f"`N_f={x['bound_from_N_f']}` bound proved by the other arm"
                     for x in r["cross_arm"]) + ".\n")
             md.append(f"\n**VERDICT: {r['verdict']}** — {r['why']}\n")
+        for u in unmatched:
+            L, nr = u["key"]
+            md += [f"\n## L={L}, n_runs={nr} — UNMATCHED ({u['arm']} arm only)\n",
+                   f"_The `{u['missing']}` arm has no data at this (L, n_runs), so no "
+                   "comparison is possible and no verdict is issued. The absence is "
+                   "reported rather than dropped: in cluster 293942 the missing arm is "
+                   "`uniform` at L=4, held after exceeding 96 GB while both prior arms "
+                   "completed, which is itself evidence about the two initializations._\n",
+                   f"| $N_f$ | $n_b$ | $E$ {u['arm']} | ⟨N⟩ {u['arm']} |",
+                   "|--:|--:|--:|--:|"]
+            for x in u["rows"]:
+                n = x.get("N_per_mode")
+                md.append(f"| {x['N_f']} | {x.get('n_b')} | {x['E_var']:.4f} | "
+                          f"{'—' if n is None else f'{n:.5f}'} |")
+            if u["per_arm"]:
+                md.append("\n**Under-convergence (within arm):** " + "; ".join(
+                    f"`N_f={x['N_f']}` is {x['excess']:.3f} MeV above the "
+                    f"`N_f={x['bound_from_N_f']}` bound" for x in u["per_arm"]) + ".\n")
         open(args.out, "w").write("\n".join(md) + "\n")
         print(f"\n[tbl] wrote {args.out}")
 
