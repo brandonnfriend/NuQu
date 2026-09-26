@@ -44,12 +44,18 @@
 #      MeV/site); select 14/15, stratified+select 13/15; the "novel" (more hopping) lever did
 #      nothing (5/15) at 2x cost and stays OFF. The levers found bounds at 128k below 293959's
 #      1M ones (A=4: 276.9 vs 286.1). So L=2 is RELAUNCHED for every A, and A=8 is no longer
-#      reused from 292477 (old search). Select workers = the job's cpus (NUQU_PHASE0_WORKERS),
+#      reused from 292477 (old search). Select workers = P0W (NUQU_PHASE0_WORKERS; see 10),
 #      each forced to 1 OpenMP thread (mixed_ci.set_num_threads) so deep-solve does not
 #      oversubscribe.
 #   9. (2026-09-25, 293962) CPUS resolved from the real allocation (detect_cpus). Deep rungs
 #      scale weakly: 4->16 threads = 1.27x at L=2, 1.32-1.43x at L=3, so L>=3 asks 8 (memory,
 #      not cores, caps concurrency there) and L=2 asks 4 (qis gives 4 minimum anyway).
+#  10. (2026-09-25, 293963 OOM holds) L=4 MEM 144G -> 192G: 144G was below 292477's own 146 GB
+#      L=4 peak (A=2-5 held after 6-7 h, deep in the ladder). L=5 MEM 128G -> 192G and the
+#      select stage capped at 4 fork workers (P0W): 8 workers each growing an L=5 core to 16k
+#      hit 128G in ~40 min. P0W only sets how many inits grow at once -- the same 32 inits
+#      and the same lowest-at-16k pick, so the result is unchanged. Applied to 293963 in place
+#      (condor_qedit RequestMemory / Environment on held+idle L>=4 jobs, then condor_release).
 #
 # GRID: A in {2..10} x L in {2..5} x seed in {0,1,2} = 108 shards.
 # Trim without editing (env overrides): AS="2 4 6 8 10"  LS="2 3 4"  SEEDS="0".
@@ -59,7 +65,7 @@
 # COST. Earlier wall-clocks (292477, 293959) ran at 2 threads; 4->8 threads buys ~1.2x. Per shard,
 # incl. the select stage (32 inits to 16k across the job's cpus): L=2 ~3-5 h/4c, L=3 ~5-6 h/8c,
 # L=4 ~12-14 h/8c, L=5 ~9-10 h/8c  ->  ~6.6k CPU-h allocated for 108 shards. Memory caps
-# concurrency at L>=3 (~7 x 128-144G per qis node): ~2-3 days wall on qis1+qis2.
+# concurrency at L>=3 (~5-7 x 128-192G per qis node): ~2-3 days wall on qis1+qis2.
 #
 # Run from $REPO/hpc/detsvsL/ ON THE PINNED SUBMIT NODE (ssh hep-submit):
 #     cd /nfs_scratch/bfriend3/NuQu/NuQu && git fetch origin -q \
@@ -81,10 +87,11 @@ SEEDS="${SEEDS:-0 1 2}"
 # args to run_frame_shard.sh: L seed campaign frame A filling max_core ladder_mode
 #                             frame_runs orbopt_cycles phase0_core max_rung_seconds
 ARGS='$(L) $(SEED) '"${BASE}"'-nb$(NB) bare $(A) none $(MAXCORE) independent 4 3 1000 $(MAXRUNGSEC)'
-ENVSTR='NUQU_DEEP_SOLVE=1 NUQU_WARM_GROW=1 NUQU_LADDER_NRUNS=1 NUQU_N_B=$(NB) NUQU_N_RUNGS=11 NUQU_PT2_MAX_CORE=$(PT2CAP) NUQU_PHASE0_RUNS=32 NUQU_PHASE0_SEED_STRIDE=1000 NUQU_PHASE0_SELECT_CORE=16000 NUQU_PHASE0_INIT=stratified NUQU_PHASE0_WORKERS=$(CPUS)'
+ENVSTR='NUQU_DEEP_SOLVE=1 NUQU_WARM_GROW=1 NUQU_LADDER_NRUNS=1 NUQU_N_B=$(NB) NUQU_N_RUNGS=11 NUQU_PT2_MAX_CORE=$(PT2CAP) NUQU_PHASE0_RUNS=32 NUQU_PHASE0_SEED_STRIDE=1000 NUQU_PHASE0_SELECT_CORE=16000 NUQU_PHASE0_INIT=stratified NUQU_PHASE0_WORKERS=$(P0W)'
 
-row() { printf '%s %s %s %s %s %s %s %s %s %s\n' "$@"; }
-# L -> "MAXCORE PT2CAP MEM CPUS MAXRUNGSEC PRIO"   (MAXCORE/PT2CAP/MAXRUNGSEC = 292477)
+row() { printf '%s %s %s %s %s %s %s %s %s %s %s\n' "$@"; }
+# L -> "MAXCORE PT2CAP MEM CPUS MAXRUNGSEC PRIO P0W"   (MAXCORE/PT2CAP/MAXRUNGSEC = 292477;
+#   P0W = select-stage fork workers)
 #   292477 peaks at A=L^3: L=2 14-20 GB; L=4 PT2@256k 146 GB; L=3/L=5 ~118/106 GB + solve.
 #   Measured at A=10: L=3 n_ext 15.9M@64k (0.71x A=27) -> PT2@512k ~125M ext ~105 GB;
 #   L=4 19.2M@32k -> PT2@256k ~130M ~110 GB (292477 peaked 146 GB at A=64); L=5 is < A=125's
@@ -93,10 +100,10 @@ row() { printf '%s %s %s %s %s %s %s %s %s %s\n' "$@"; }
 #   every finished rung (HPC_WORKFLOW s6).
 sizing_for_L() {
   case "$1" in
-    2) echo "1024000 1024000 32G  4 14400 40" ;;
-    3) echo "1024000 512000  128G 8 21600 30" ;;
-    4) echo "512000  256000  144G 8 21600 20" ;;
-    5) echo "128000  65536   128G 8 21600 10" ;;
+    2) echo "1024000 1024000 32G  4 14400 40 4" ;;
+    3) echo "1024000 512000  128G 8 21600 30 8" ;;
+    4) echo "512000  256000  192G 8 21600 20 8" ;;
+    5) echo "128000  65536   192G 8 21600 10 4" ;;
     *) echo "ERROR unknown L=$1" >&2; exit 1 ;;
   esac
 }
@@ -119,7 +126,7 @@ JobPrio                 = \$(PRIO)
 Output                  = campaign_${BASE}/logs/${arm}_L\$(L)_A\$(A)_s\$(SEED).out
 Error                   = campaign_${BASE}/logs/${arm}_L\$(L)_A\$(A)_s\$(SEED).err
 Log                     = campaign_${BASE}/logs/campaign.log
-queue NB,L,A,SEED,MAXCORE,PT2CAP,MEM,CPUS,MAXRUNGSEC,PRIO from ${grid}
+queue NB,L,A,SEED,MAXCORE,PT2CAP,MEM,CPUS,MAXRUNGSEC,PRIO,P0W from ${grid}
 EOF
   condor_submit "campaign_${BASE}/${arm}.sub"
   echo "${arm}  CAMPAIGN=${BASE}  jobs=$(wc -l < "$grid")"
@@ -131,7 +138,7 @@ if [ "$MODE" = "test" ]; then
   # L=3 A=10 s0 to 64k with the levers, 8 cpus, deep-solve: the first run of the forked
   # select stage UNDER deep-solve (1-thread workers), and its cost at L=3.
   G="campaign_${BASE}/smoke.txt"
-  row 3 3 10 0 64000 64000 48G 8 7200 50 > "$G"
+  row 3 3 10 0 64000 64000 48G 8 7200 50 8 > "$G"
   submit_grid smoke "$G"
   echo "SMOKE: expect ~1-2 h. Then check: ExitCode 0, rung 0 phase '0-select' with 32 trails,"
   echo "  manifest threads.NUQU_CPUS_RESOLVED == 8, condor RemoteUserCpu/wall > 1."
@@ -144,7 +151,7 @@ if [ "$MODE" = "all" ]; then
     set -- $(sizing_for_L "$L")
     for A in $AS; do
       # seed-major priority: seed 0 everywhere, then seed 1, then seed 2
-      for S in $SEEDS; do row 3 "$L" "$A" "$S" "$1" "$2" "$3" "$4" "$5" $(( $6 + 100 * (2 - S) )) >> "$G"; done
+      for S in $SEEDS; do row 3 "$L" "$A" "$S" "$1" "$2" "$3" "$4" "$5" $(( $6 + 100 * (2 - S) )) "$7" >> "$G"; done
     done
   done
   submit_grid Asweep "$G"

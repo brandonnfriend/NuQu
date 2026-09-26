@@ -124,6 +124,8 @@ Why: at L=2 A=5, single inits grown to 16k land in discrete arrangement basins (
 The A-sweep turns ON select-core 16000 plus stratified starts; novel stays OFF. Code defaults stay OFF, so validated paths are unchanged. L=2 is relaunched for every A: 293959 and 292477's L=2 A=8 used the old search and are superseded.
 
 **CPU fix verified (293962).** Manifests record the real allocation (4/8/16), and E_var is bit-identical across thread counts. Deep rungs scale weakly (4→16 threads: 1.27× at L=2, 1.32–1.43× at L=3), so L≥3 asks for 8 cpus. qis gives at least 4. Forked Phase-0 workers now call `mixed_ci.set_num_threads(1)` so deep-solve doesn't oversubscribe.
+
+**LIVE: 293963 (2026-09-25, from 8dfc973, `CAMPAIGN=20260925-084543-nb3Asweep`, 108 shards).** L=2 finished 27/27 and L=3 seed 0 finished 9/9, so the deep + forked select stage works at L=3. Out-of-memory holds: L=4 at 144G (below 292477's own 146 GB peak; failed after 6–7 h) and L=5 at 128G (8 select workers × 16k L=5 cores; failed in ~40 min). Fixed in place by `condor_qedit` of the held and idle L≥4 jobs to 192G, with L=5 at 4 select workers (the same 32 inits and the same pick), then release. The L=4 s0 A=6–10 jobs were already running at 144G and may need a qedit + release. The submit script now carries a per-L `P0W` column (commit "A-sweep L>=4 memory 192G").
 - **Frame isospectrality / "similar-enough n_b" campaign staged (2026-09-02, `remediation/vertex-fix`).**
   Salvages the frame-optimization *energy* claims by quantifying the non-isospectrality error and
   the frame-adjusted boson cutoff. **Theory verdict** (mathematical-physicist + prior codex consult,

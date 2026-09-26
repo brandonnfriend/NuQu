@@ -8,7 +8,8 @@ Runs the submit script with a stubbed `condor_submit` and checks the emitted gri
     the grid stays comparable with the baseline; CPUS is 4 at L=2 and 8 at L>=3 (293962:
     deep rungs scale 1.3-1.4x from 4 to 16 threads);
   * the Phase-0 seed stride is set (independent seeds), and JobPrio is seed-major then L;
-  * the chosen search levers are ON (select core 16000 + stratified starts, workers = cpus)
+  * L=4/L=5 ask 192G and L=5 runs 4 select workers (293963 OOM holds at 144G/128G);
+  * the chosen search levers are ON (select core 16000 + stratified starts, workers = P0W)
     and the "novel" lever is OFF;
   * explicit A (`filling none`), n_b=3, the qis1-3 pin and the small disk request survive;
   * the env overrides trim the grid, and `test` submits exactly one shard.
@@ -21,7 +22,7 @@ import tempfile
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _SCRIPT = os.path.join(_ROOT, "hpc", "detsvsL", "submit_nb3_Asweep.sh")
-_VARS = ["NB", "L", "A", "SEED", "MAXCORE", "PT2CAP", "MEM", "CPUS", "MAXRUNGSEC", "PRIO"]
+_VARS = ["NB", "L", "A", "SEED", "MAXCORE", "PT2CAP", "MEM", "CPUS", "MAXRUNGSEC", "PRIO", "P0W"]
 # 292477 (submit_nb3_baseline.sh) per-L: MAXCORE PT2CAP MAXRUNGSEC
 _BASELINE = {"2": ("1024000", "1024000", "14400"), "3": ("1024000", "512000", "21600"),
              "4": ("512000", "256000", "21600"), "5": ("128000", "65536", "21600")}
@@ -66,7 +67,7 @@ def _check_sub(sub, fails, name):
     if "request_disk            = 2560M" not in sub:
         fails.append(f"{name}: request_disk not the 2560M that fits qis1/qis3")
     for lever in ("NUQU_PHASE0_SELECT_CORE=16000", "NUQU_PHASE0_INIT=stratified",
-                  "NUQU_PHASE0_WORKERS=$(CPUS)"):
+                  "NUQU_PHASE0_WORKERS=$(P0W)"):
         if lever not in sub:
             fails.append(f"{name}: search lever {lever} missing")
     if "NUQU_NOVEL" in sub:
@@ -106,6 +107,12 @@ def test_asweep_grid():
             break
         if got != _BASELINE[r[c["L"]]]:
             fails.append(f"L={r[c['L']]} solver settings {got} != 292477 {_BASELINE[r[c['L']]]}")
+            break
+        if r[c["P0W"]] != ("4" if r[c["L"]] in ("2", "5") else "8"):
+            fails.append(f"L={r[c['L']]} select workers {r[c['P0W']]} (want 4 at L=2/5, 8 at L=3/4)")
+            break
+        if r[c["L"]] in ("4", "5") and r[c["MEM"]] != "192G":
+            fails.append(f"L={r[c['L']]} MEM {r[c['MEM']]} (293963 OOM: L=4/5 need 192G)")
             break
         if not r[c["MEM"]].endswith("G"):
             fails.append(f"MEM {r[c['MEM']]!r} is not a Condor size")
