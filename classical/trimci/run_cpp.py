@@ -668,7 +668,9 @@ def growing_ladder(H, A, rungs, phase0_runs=64, seed=0, pt2_diag=None,
                   f"E_var={rung['E_var']:12.5f} MeV  {pt2s}  [{wall:.0f}s]")
         if on_rung is not None:
             on_rung(rung, res)
-        if max_rung_seconds is not None and wall > max_rung_seconds:
+        # the budget predicts whether the NEXT grow rung fits, so it never fires on the
+        # select stage (its rung-0 wall is 32 grows, not one rung; 293963 L=5 stopped at 1k)
+        if max_rung_seconds is not None and ph != "0-select" and wall > max_rung_seconds:
             if verbose:
                 print(f"  (rung wall {wall:.0f}s > {max_rung_seconds:.0f}s — stop growing)")
             break

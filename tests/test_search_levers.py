@@ -13,7 +13,8 @@ Checks:
   * `expand_arrays` with the lever keeps the default pool as a subset and only adds
     candidates whose nucleon configuration is new; `global_trim_arrays` reserves the
     requested slots and keeps the core size;
-  * the select stage returns the run that is lowest at its LAST rung.
+  * the select stage returns the run that is lowest at its LAST rung;
+  * the rung-time budget never stops the ladder inside the select stage.
 """
 import os
 import sys
@@ -96,6 +97,17 @@ def test_select_keeps_lowest_at_last_rung():
     assert trail[-1].energy == min(e[-1] for _, e in summary)
 
 
+def test_rung_budget_skips_select_stage():
+    """The rung-time budget stops at the first slow GROW rung, never inside the select
+    stage (293963: an L=5 select stage over budget ended every shard at the 1k rung)."""
+    out = growing_ladder(_H, _A, [100, 200, 400, 800], phase0_runs=2, seed=1, verbose=False,
+                         select_core=200, phase0_workers=1, max_rung_seconds=1e-9)
+    assert [r["phase"] for r in out] == ["0-select", "0-select", "grow"], out
+    off = growing_ladder(_H, _A, [100, 200], phase0_runs=2, seed=1, verbose=False,
+                         max_rung_seconds=1e-9)
+    assert [r["phase"] for r in off] == ["0-ensemble"], "levers-off budget behaviour changed"
+
+
 def test_lever_submit_grid():
     """submit_search_levers.sh: 6 arms x A{2,4,5,6,9} x 3 seeds, each arm's lever env."""
     import shutil
@@ -135,6 +147,7 @@ def main():
     test_partitions_and_stratified_starts()
     test_novel_expand_and_reserved_trim()
     test_select_keeps_lowest_at_last_rung()
+    test_rung_budget_skips_select_stage()
     test_lever_submit_grid()
     print("test_search_levers: PASS  (levers OFF == old solve; stratified starts cover every "
           "arrangement type evenly; novel pool/core reservation; select = lowest at last rung)")
