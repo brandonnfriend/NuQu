@@ -56,6 +56,10 @@
 #      hit 128G in ~40 min. P0W only sets how many inits grow at once -- the same 32 inits
 #      and the same lowest-at-16k pick, so the result is unchanged. Applied to 293963 in place
 #      (condor_qedit RequestMemory / Environment on held+idle L>=4 jobs, then condor_release).
+#  11. (2026-09-28, 293963) L=4/L=5 MEM 192G -> 256G. At 192G, 13 more L>=4 jobs were held with
+#      "last measured" 88-165 GB: transient spikes between Condor's memory samples, in the last
+#      L=4 rung (512k), the last L=5 rung (128k) and the L=5 select stage. Applied in place
+#      to every held + idle L>=4 job.
 #
 # GRID: A in {2..10} x L in {2..5} x seed in {0,1,2} = 108 shards.
 # Trim without editing (env overrides): AS="2 4 6 8 10"  LS="2 3 4"  SEEDS="0".
@@ -102,8 +106,8 @@ sizing_for_L() {
   case "$1" in
     2) echo "1024000 1024000 32G  4 14400 40 4" ;;
     3) echo "1024000 512000  128G 8 21600 30 8" ;;
-    4) echo "512000  256000  192G 8 21600 20 8" ;;
-    5) echo "128000  65536   192G 8 21600 10 4" ;;
+    4) echo "512000  256000  256G 8 21600 20 8" ;;
+    5) echo "128000  65536   256G 8 21600 10 4" ;;
     *) echo "ERROR unknown L=$1" >&2; exit 1 ;;
   esac
 }
