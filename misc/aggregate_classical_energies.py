@@ -50,8 +50,8 @@ import numpy as np
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
-from classical.trimci.extrapolation import (combine_seeds, fit_einf_pt2,  # noqa: E402
-                                            split_at_collapse)
+from classical.trimci.extrapolation import (combine_seeds, core_energy_ladder,  # noqa: E402
+                                            fit_einf_pt2, split_at_collapse)
 from misc.apply_wick_correction import (  # noqa: E402
     DEFAULT_CONVENTION, add_convention_arg, annotate, apply_to_rungs, figure_note,
     shard_convention)
@@ -133,7 +133,7 @@ def analyze(groups, meta):
         # the failing diagnostic: PT2 extrapolated from the PRE-collapse basin, which is
         # where 290832's PT2 cap forced every PT2 point to live.
         seed0 = sorted(groups[key])[0]
-        rungs = sorted(groups[key][seed0], key=lambda r: r["core"])
+        rungs = core_energy_ladder(sorted(groups[key][seed0], key=lambda r: r["core"]))
         post, basin = split_at_collapse(rungs, sites=m["sites"])
         pre = [r for r in rungs[:basin["collapse_index"]] if r.get("dE_pt2") is not None]
         pre_fit = (fit_einf_pt2([r["E_var"] for r in pre], [r["dE_pt2"] for r in pre])

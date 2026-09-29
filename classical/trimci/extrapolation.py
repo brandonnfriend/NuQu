@@ -283,6 +283,21 @@ def _print_report(out):
 # truncation, or the search being in the wrong basin. Those are separate budget lines.
 
 
+def core_energy_ladder(rungs):
+    """The rungs whose E_var is the saved CORE's energy, when a ladder mixes conventions.
+
+    `run_cpp.growing_ladder` stores the PT2-recomputed core energy on rungs where PT2
+    ran, and the survivor POOL's energy (`res.energy`, a strictly larger space) on
+    rungs above the PT2 cap (`dE_pt2` None). Both are valid Ritz bounds, but of
+    different spaces, so a difference across them is meaningless: the top pool rung
+    reads as a 3-4 MeV/site "drop" that `split_at_collapse` then takes as the basin
+    collapse (seen 2026-09-28, A-sweep 293963, every L>=3 ladder). If the ladder has
+    both kinds, the pool rungs are dropped; a ladder of one kind is returned whole, so
+    uniform ladders (PT2 on every rung, or on none) are unchanged."""
+    with_pt2 = [r for r in rungs if r.get("dE_pt2") is not None]
+    return with_pt2 if 0 < len(with_pt2) < len(rungs) else list(rungs)
+
+
 def split_at_collapse(rungs, sites=None):
     """Split a warm-grown ladder at its 'basin collapse' rung.
 
@@ -331,14 +346,21 @@ def einf_with_uncertainty(rungs, sites=None, min_post=3):
     """
     rungs = sorted([r for r in rungs if r.get("E_var") is not None], key=lambda r: r["core"])
     per = lambda x: (x / sites) if (x is not None and sites) else None
-    post, basin = split_at_collapse(rungs, sites=sites)
+    # The bound is the deepest rung of ANY convention (a pool energy is still a Ritz bound);
+    # the collapse split, the fits and the last-doubling diagnostic use the core-energy
+    # rungs only, since they difference E_var along the ladder (`core_energy_ladder`).
     E_var_bound = rungs[-1]["E_var"] if rungs else None
-    dE_last = (abs(rungs[-1]["E_var"] - rungs[-2]["E_var"]) if len(rungs) >= 2 else None)
+    fit_rungs = core_energy_ladder(rungs)
+    pool_cores = [r["core"] for r in rungs if r not in fit_rungs]
+    post, basin = split_at_collapse(fit_rungs, sites=sites)
+    dE_last = (abs(fit_rungs[-1]["E_var"] - fit_rungs[-2]["E_var"])
+               if len(fit_rungs) >= 2 else None)
     pt2_post = [r for r in post if r.get("dE_pt2") is not None]
     E_pt2_deepest = (pt2_post[-1]["E_var"] + pt2_post[-1]["dE_pt2"]) if pt2_post else None
 
     out = {
         "n_rungs": len(rungs), "n_post": len(post),
+        "pool_rungs_excluded_from_fit": pool_cores,
         "cores": [r["core"] for r in rungs],
         "post_cores": [r["core"] for r in post],
         "n_pt2_post": len(pt2_post),

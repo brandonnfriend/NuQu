@@ -217,6 +217,27 @@ def main():
     elif "FIT-ONLY" not in (r7.get("reason") or ""):
         fails.append(f"refused for the wrong reason: {r7.get('reason')}")
 
+    # --- 8. a top rung above the PT2 cap (POOL energy) is not a basin collapse -----------
+    # growing_ladder stores the pool's energy (a larger space) where PT2 is skipped, so
+    # the last rung sits well below the core-energy trend. It must stay the bound, but
+    # the collapse split and the fits may only difference core-energy rungs (293963).
+    # gentle core steps (<= 1.1 MeV), then a pool rung 1.5 MeV lower: still above E_fci,
+    # but the largest single "drop" on the ladder, as in the real data
+    uni = _shci_ladder(dps=(-12.0, -10.0, -8.5, -7.2, -6.1, -5.2))
+    pool_top = {"core": uni[-1]["core"] * 2, "E_var": uni[-1]["E_var"] - 1.5, "dE_pt2": None}
+    r8 = einf_with_uncertainty(uni + [pool_top], sites=SITES)
+    r8u = einf_with_uncertainty(uni, sites=SITES)
+    if r8["E_var_bound"] != pool_top["E_var"]:
+        fails.append("the pool rung must still be the variational bound")
+    if r8["collapse_core"] == pool_top["core"] or r8["n_post"] != r8u["n_post"]:
+        fails.append(f"pool rung taken as the collapse (collapse at {r8['collapse_core']})")
+    if not (r8["ok"] and abs(r8["E_inf"] - r8u["E_inf"]) < 1e-9):
+        fails.append(f"mixed ladder did not extrapolate like its core rungs: {r8.get('reason')}")
+    if r8["pool_rungs_excluded_from_fit"] != [pool_top["core"]]:
+        fails.append("excluded pool rungs not recorded")
+    if r8u["pool_rungs_excluded_from_fit"] != []:
+        fails.append("a uniform ladder must be used whole")
+
     if fails:
         print("test_einf_uncertainty: FAILED")
         for f in fails:
@@ -224,7 +245,7 @@ def main():
         sys.exit(1)
     print(f"test_einf_uncertainty: PASS  (power-law E_inf {r['E_inf']:.2f}±{r['sigma']:.2f} "
           f"vs planted {E_INF}; SHCI intercept {r2['E_inf']:.3f} vs planted {E_FCI}; "
-          f"guard + min-rung + fit-only + pooled-bound refusals fire; sigma >= the SHCI "
+          f"guard + min-rung + fit-only + pooled-bound refusals fire; pool top rung kept out of the fit; sigma >= the SHCI "
           f"half-distance; seed spread {pooled['sigma_seed']:.2f} MeV kept OUT of sigma and "
           f"reported as the robustness check)")
 
