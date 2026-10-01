@@ -60,6 +60,9 @@
 #      "last measured" 88-165 GB: transient spikes between Condor's memory samples, in the last
 #      L=4 rung (512k), the last L=5 rung (128k) and the L=5 select stage. Applied in place
 #      to every held + idle L>=4 job.
+#  12. (2026-10-01, 293963) L=4 MEM 256G -> 384G. Six L=4 jobs (s1 A5-A9, s2 A6) were held again at
+#      256G, all inside the 512k rung (256k done), with last-measured usage of 122-169 GB. The
+#      finished L=4 jobs peaked at 167-191 GB, so the top-rung spike varies by shard.
 #
 # GRID: A in {2..10} x L in {2..5} x seed in {0,1,2} = 108 shards.
 # Trim without editing (env overrides): AS="2 4 6 8 10"  LS="2 3 4"  SEEDS="0".
@@ -106,7 +109,7 @@ sizing_for_L() {
   case "$1" in
     2) echo "1024000 1024000 32G  4 14400 40 4" ;;
     3) echo "1024000 512000  128G 8 21600 30 8" ;;
-    4) echo "512000  256000  256G 8 21600 20 8" ;;
+    4) echo "512000  256000  384G 8 21600 20 8" ;;
     5) echo "128000  65536   256G 8 21600 10 4" ;;
     *) echo "ERROR unknown L=$1" >&2; exit 1 ;;
   esac
