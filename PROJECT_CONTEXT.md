@@ -133,6 +133,20 @@ The A-sweep turns ON select-core 16000 plus stratified starts; novel stays OFF. 
 - **Notes:** recorded in `results/README.md` §02, `basin_collapse_and_search_note.md` and `AUDIT_RESPONSE_2026-09-05.md` item 8.
 - **Manifests:** `verify_accepted_manifests` fails the same 6 classical manifests before and after, all on script/figure hashes. Re-seal is open.
 
+**σ convention = TrimCI/COO literature (2026-10-06, user decision):** `extrapolation.DEFAULT_SIGMA_CONVENTION = "trimci-coo"`.
+- **Primary:** PT2-linear (TrimCI) with bootstrap σ (COO SM S5.2).
+- **Cross-check:** the R²-scan power law, reported but never added.
+- **Seed spread:** reported separately.
+- **Legacy:** `nuqu-2026-09` is still selectable and reproduces the accepted JSON exactly.
+- **Retired:** last-doubling ΔE as an uncertainty indicator.
+
+**Full A-sweep:** `misc/make_Asweep_figures.py` → `docs/presentation/classical_baseline_{multiA,perA}.png` + `_table.md`.
+- **L=2:** E∞ ± ≤0.13 MeV/site, apart from A=9 at 0.45. The cross-check agrees to ≤0.15.
+- **L=3:** E∞ ± 0.3–0.6, but the power-law cross-check sits 7–10 lower.
+- **L=4:** E∞ ± 0.5–0.7; the power law resolves no limit.
+- **L=5:** bound only.
+- **Missing shard:** L5 A3 s2, which failed on a network error and was resubmitted as 294238.
+
 **Preliminary multi-A figures:** `docs/presentation/classical_baseline_{multiA,perA}_prelim.png`, from the 80 finished shards pulled to `data/classical/2026-09-25/bare_Asweep_nb3_293963/`.
 - L=2–4 extrapolate at every A. L=5 is genuinely bound-only (per-rung drops still growing).
 - **Frame isospectrality / "similar-enough n_b" campaign staged (2026-09-02, `remediation/vertex-fix`).**

@@ -516,9 +516,37 @@ def build_manifest(label, data_dirs, records, shard_info, provenance, expect_n_b
     }
 
 
-def aggregation_rules(min_rungs=4, min_pt2_post=0):
+def aggregation_rules(min_rungs=4, min_pt2_post=0, sigma_convention=None):
     """The policy text emitted into every manifest. Exposed so a test can compare it to
-    what `combine_seeds` actually does -- these strings had gone stale once."""
+    what `combine_seeds` actually does -- these strings had gone stale once. The
+    extrapolator/uncertainty text follows the sigma convention in force."""
+    from classical.trimci.extrapolation import DEFAULT_SIGMA_CONVENTION, LITERATURE_CONVENTION
+    conv = sigma_convention or DEFAULT_SIGMA_CONVENTION
+    rules = _legacy_rules(min_rungs, min_pt2_post)
+    rules["sigma_convention"] = conv
+    rules["pool_rungs"] = ("rungs above the PT2 cap store the survivor-POOL energy; they stay "
+                           "the variational bound but are excluded from the collapse split "
+                           "and every fit (2026-09-28)")
+    if conv == LITERATURE_CONVENTION:
+        rules["extrapolators"] = (
+            "TrimCI/COO literature convention: PRIMARY = TrimCI's PT2-linear intercept "
+            "(E_var + dE_PT2 vs dE_PT2) when >=4 post-collapse PT2 rungs exist, else COO's "
+            "R^2-scan power law E_extrap + a*N^-alpha on E_var (>=5 rungs; a best fit on the "
+            "widest scanned gap = no curvature = refused). The other estimator is a reported "
+            "cross-check, never added")
+        rules["uncertainty"] = (
+            "an EXTRAPOLATION uncertainty on the best-bound seed: the standard deviation of the "
+            "primary estimator over 500 nonparametric bootstrap replicates of the fitted rungs "
+            "(COO, Zhang & Otten 2026, SM S5.2), with the [5th, 95th] percentile as the 90% "
+            "c.i. The SEED SPREAD IS NOT IN SIGMA, and neither is the gap to the cross-check "
+            "estimator -- both are reported beside it. Covers the scatter of THIS ladder about "
+            "its estimator ONLY -- not the estimator's own model error, n_b, lattice/finite "
+            "volume, EFT truncation, or search-basin risk")
+    return rules
+
+
+def _legacy_rules(min_rungs=4, min_pt2_post=0):
+    """The nuqu-2026-09 policy text (kept for the legacy convention and its A/B)."""
     return {
         "basin_split": "ladder split at the largest single-doubling E_var drop; only "
                        "POST-collapse rungs are fitted (pre-collapse PT2 extrapolation is "

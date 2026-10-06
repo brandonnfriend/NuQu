@@ -491,7 +491,221 @@ def einf_with_uncertainty(rungs, sites=None, min_post=3):
     return out
 
 
-def combine_seeds(per_seed, sites=None, min_post=3):
+# ---------------------------------------------------------------------------------------
+# LITERATURE CONVENTION (2026-10-06): match the TrimCI / COO papers (Zhang & Otten 2025,
+# arXiv TrimCI; Zhang & Otten 2026, arXiv:2605.22977, SM S5.2). COO fits the variational
+# energies to E(N) = E_extrap + a N^-alpha by an "R^2-scan": scan 5000 candidate E_extrap
+# BELOW the lowest computed energy, fit (a, alpha) by linear least squares in log-log for
+# each, keep the candidate with the highest R^2. sigma = standard deviation of E_extrap
+# over 500 nonparametric bootstrap replicates (resample the points with replacement, refit
+# the same way); the 90% c.i. is the [5th, 95th] percentile. COO cross-validates against an
+# independent extrapolation. TrimCI's own estimator (its Table II "Extrapolation" column) is
+# the linear fit of E_var + dE_PT2 against dE_PT2 (SHCI style), quoted with no error bar.
+# What we report, element by element from those two papers:
+#   * PRIMARY = TrimCI's PT2-linear intercept, with sigma from COO's procedure (bootstrap
+#     std over 500 replicates of the PT2 rungs), when >= 4 post-collapse PT2 rungs exist;
+#   * CROSS-CHECK = COO's R^2-scan power law on E_var with its own bootstrap sigma (the
+#     primary when there is no PT2). The gap between the two is REPORTED, never added to
+#     sigma -- neither paper combines estimators.
+# Measured on the 293963 A-sweep (2026-10-06): the two agree to <= 0.15 MeV/site at L=2; at
+# L=3 the variational ladder decays as N^-0.08 and the power law's bootstrap sigma is
+# ~400 MeV/site; at L=4 it shows no curvature at all, so only PT2-linear resolves a limit.
+# Choices the papers leave open, made here and recorded in every record:
+#   * the candidate grid: 5000 gaps d = E_lo - E_extrap, log-spaced over [1e-4, 1e2] x the
+#     energy span of the fitted points, with E_lo the lower of the deepest fitted energy
+#     and the variational bound (a pool-energy top rung is a bound too, so the limit must
+#     lie below it);
+#   * an optimum on the widest gap means the ladder shows no curvature -> no finite limit
+#     is resolved, and the fit is refused;
+#   * the fit window is the post-collapse core-energy rungs (`core_energy_ladder` +
+#     `split_at_collapse`), our analogue of COO's late-window fit; >= 5 points required so
+#     that bootstrap replicates of a 3-parameter fit keep a degree of freedom.
+# The previous NuQu convention (max of the SHCI half-distance and an internal quadrature)
+# stays available as convention="nuqu-2026-09" for the A/B record.
+# ---------------------------------------------------------------------------------------
+LITERATURE_CONVENTION = "trimci-coo"
+LEGACY_CONVENTION = "nuqu-2026-09"
+DEFAULT_SIGMA_CONVENTION = LITERATURE_CONVENTION
+
+
+def _r2scan(logN, E, E_lo, span, n_scan):
+    """Vectorised COO R^2-scan. Returns (E_extrap, a, alpha, R2, at_edge) or None."""
+    gaps = span * np.logspace(-4, 2, n_scan)
+    Ex = E_lo - gaps                                   # candidates strictly below E_lo
+    Y = np.log(E[None, :] - Ex[:, None])               # (n_scan, n)
+    x = logN - logN.mean()
+    yb = Y.mean(axis=1, keepdims=True)
+    sxx = float((x ** 2).sum())
+    if sxx <= 0:
+        return None
+    slope = ((Y - yb) * x[None, :]).sum(axis=1) / sxx
+    resid = Y - yb - slope[:, None] * x[None, :]
+    sst = ((Y - yb) ** 2).sum(axis=1)
+    r2 = 1.0 - (resid ** 2).sum(axis=1) / np.where(sst > 0, sst, np.nan)
+    if not np.isfinite(r2).any():
+        return None
+    k = int(np.nanargmax(r2))
+    intercept = float(yb[k, 0] - slope[k] * logN.mean())
+    return (float(Ex[k]), float(np.exp(intercept)), float(-slope[k]), float(r2[k]),
+            k == n_scan - 1)
+
+
+def fit_einf_power_r2scan(cores, energies, E_bound=None, n_scan=5000, n_boot=500,
+                          seed=0, min_points=5):
+    """COO power-law extrapolation with bootstrap sigma (see the convention note above)."""
+    N = np.asarray(cores, dtype=float)
+    E = np.asarray(energies, dtype=float)
+    out = {"ok": False, "E_inf": None, "sigma": None, "ci90": None, "a": None, "alpha": None,
+           "R2": None, "n_points": int(len(E)), "n_scan": n_scan, "n_boot": n_boot,
+           "grid": "gaps log-spaced [1e-4, 1e2] x span below min(E_min, bound)"}
+    if len(E) < min_points:
+        out["reason"] = f"power law needs >= {min_points} post-collapse rungs, got {len(E)}"
+        return out
+    E_lo = float(E.min()) if E_bound is None else float(min(E.min(), E_bound))
+    span = float(E.max() - E.min())
+    if span <= 0:
+        out["reason"] = "flat ladder: no span to fit"
+        return out
+    logN = np.log(N)
+    fit = _r2scan(logN, E, E_lo, span, n_scan)
+    if fit is None:
+        out["reason"] = "R2-scan failed"
+        return out
+    Ex, a, alpha, r2, edge = fit
+    out.update(E_inf=Ex, a=a, alpha=alpha, R2=r2)
+    if edge or alpha <= 0:
+        out.update(E_inf=None, E_inf_unresolved=Ex)
+        out["reason"] = ("no curvature: the best R^2 sits on the widest gap scanned (no finite "
+                         "limit resolved)" if edge else f"non-decaying power law (alpha={alpha:.3g})")
+        return out
+    rng = np.random.default_rng(seed)
+    boots = []
+    n = len(E)
+    for _ in range(n_boot):
+        idx = rng.integers(0, n, n)
+        if len(np.unique(idx)) < 3:
+            continue
+        f = _r2scan(logN[idx], E[idx], E_lo, span, n_scan)
+        if f is not None:
+            boots.append(f[0])
+    if len(boots) < max(50, n_boot // 5):
+        out["reason"] = f"only {len(boots)} usable bootstrap replicates"
+        return out
+    boots = np.asarray(boots)
+    out.update(ok=True, sigma=float(boots.std(ddof=1)),
+               ci90=[float(np.percentile(boots, 5)), float(np.percentile(boots, 95))],
+               n_boot_used=int(len(boots)),
+               reason=f"R2-scan power law over {n} rungs; sigma = bootstrap std ({len(boots)} replicates)")
+    return out
+
+
+def fit_einf_pt2_bootstrap(E_vars, dE_pt2s, n_boot=500, seed=0, min_points=4):
+    """TrimCI's estimator (linear E_var + dE_PT2 vs dE_PT2, intercept at dE_PT2 = 0) with
+    COO's uncertainty procedure (std of the intercept over `n_boot` nonparametric
+    bootstrap replicates of the rungs; 90% c.i. = [5th, 95th] percentile)."""
+    base = fit_einf_pt2(E_vars, dE_pt2s, min_points=min_points)
+    out = {**base, "fit_sigma": base.get("sigma"), "sigma": None, "ci90": None,
+           "n_points": len(E_vars), "n_boot": n_boot}
+    if not base.get("ok"):
+        return out
+    Ev = np.asarray(E_vars, dtype=float)
+    dp = np.asarray(dE_pt2s, dtype=float)
+    rng = np.random.default_rng(seed)
+    boots = []
+    for _ in range(n_boot):
+        idx = rng.integers(0, len(Ev), len(Ev))
+        if len(np.unique(idx)) < 3 or np.ptp(dp[idx]) < 1e-9:
+            continue
+        boots.append(float(np.polyfit(dp[idx], Ev[idx] + dp[idx], 1)[1]))
+    if len(boots) < max(50, n_boot // 5):
+        out.update(ok=False, reason=f"only {len(boots)} usable bootstrap replicates")
+        return out
+    boots = np.asarray(boots)
+    out.update(sigma=float(boots.std(ddof=1)),
+               ci90=[float(np.percentile(boots, 5)), float(np.percentile(boots, 95))],
+               n_boot_used=int(len(boots)),
+               reason=f"TrimCI PT2-linear intercept over {len(Ev)} rungs; sigma = bootstrap "
+                      f"std ({len(boots)} replicates)")
+    return out
+
+
+def einf_literature(rungs, sites=None, min_post=5, n_scan=5000, n_boot=500, seed=0,
+                    min_pt2=4):
+    """E_infinity +- sigma on the TrimCI/COO literature convention, for ONE ladder.
+
+    Same record shape as `einf_with_uncertainty` (so `combine_seeds`, the aggregators and
+    the release gate read either). `dE_last_doubling` is still computed for backward
+    compatibility but is NOT an error term: late drops can be the search moving to a better
+    nucleon arrangement, so it is not comparable across seeds (2026-10-06)."""
+    rungs = sorted([r for r in rungs if r.get("E_var") is not None], key=lambda r: r["core"])
+    per = lambda x: (x / sites) if (x is not None and sites) else None
+    E_var_bound = rungs[-1]["E_var"] if rungs else None
+    fit_rungs = core_energy_ladder(rungs)
+    pool_cores = [r["core"] for r in rungs if r not in fit_rungs]
+    post, basin = split_at_collapse(fit_rungs, sites=sites)
+    dE_last = (abs(fit_rungs[-1]["E_var"] - fit_rungs[-2]["E_var"])
+               if len(fit_rungs) >= 2 else None)
+    pt2_post = [r for r in post if r.get("dE_pt2") is not None]
+    E_pt2_deepest = (pt2_post[-1]["E_var"] + pt2_post[-1]["dE_pt2"]) if pt2_post else None
+    out = {
+        "convention": LITERATURE_CONVENTION,
+        "n_rungs": len(rungs), "n_post": len(post),
+        "pool_rungs_excluded_from_fit": pool_cores,
+        "cores": [r["core"] for r in rungs], "post_cores": [r["core"] for r in post],
+        "n_pt2_post": len(pt2_post),
+        "E_var_bound": E_var_bound, "E_var_bound_ps": per(E_var_bound),
+        "dE_last_doubling": dE_last, "dE_last_doubling_ps": per(dE_last),
+        "E_var_plus_pt2": E_pt2_deepest, "E_var_plus_pt2_ps": per(E_pt2_deepest),
+        "sites": sites, **basin,
+    }
+    power = fit_einf_power_r2scan([r["core"] for r in post], [r["E_var"] for r in post],
+                                  E_bound=E_var_bound, n_scan=n_scan, n_boot=n_boot,
+                                  seed=seed, min_points=min_post)
+    pt2 = (fit_einf_pt2_bootstrap([r["E_var"] for r in pt2_post],
+                                  [r["dE_pt2"] for r in pt2_post], n_boot=n_boot, seed=seed,
+                                  min_points=min_pt2) if len(pt2_post) >= min_pt2 else
+           {"ok": False, "reason": f"PT2 on only {len(pt2_post)} post-collapse rungs "
+                                   f"(need {min_pt2})", "E_inf": None, "sigma": None})
+    # the variational guard applies to BOTH estimators: a limit above a computed Ritz
+    # bound is refuted by the data (seen 2026-09-29 with a least-squares power law)
+    for est in (pt2, power):
+        if est.get("ok") and E_var_bound is not None and est["E_inf"] > E_var_bound + 1e-9:
+            est.update(ok=False, reason=f"extrapolation {est['E_inf']:.3f} lies ABOVE the "
+                                         f"variational bound {E_var_bound:.3f}")
+    out["power"], out["pt2"] = power, pt2
+    # PRIMARY: the TrimCI paper's own estimator (its Table II extrapolations are PT2-linear)
+    # when available; the COO power law otherwise. The other one is the cross-check, as in
+    # COO's own TrimCI-vs-UDMRG comparison. Neither paper adds the two.
+    if pt2.get("ok") and pt2.get("sigma") is not None:
+        prim, other, name = pt2, power, "pt2_linear"
+    elif power.get("ok"):
+        prim, other, name = power, pt2, "power_r2scan"
+    else:
+        out.update(ok=False, primary=None, E_inf=None, E_inf_ps=None, sigma=None,
+                   sigma_ps=None, sigma_terms={}, cross_check=None,
+                   reason=f"no estimator resolved a limit (PT2-linear: {pt2.get('reason')}; "
+                          f"power law: {power.get('reason')})")
+        return out
+    E_inf, sig = prim["E_inf"], prim["sigma"]
+    gap = abs(other["E_inf"] - E_inf) if other.get("ok") else None
+    out.update(ok=True, primary=name, reason=prim["reason"], E_inf=E_inf, E_inf_ps=per(E_inf),
+               sigma=sig, sigma_ps=per(sig), sigma_source="bootstrap",
+               ci90=prim["ci90"], ci90_ps=[per(x) for x in prim["ci90"]],
+               sigma_terms={"bootstrap": sig}, sigma_terms_ps={"bootstrap": per(sig)},
+               cross_check={"estimator": "power_r2scan" if name == "pt2_linear" else "pt2_linear",
+                            "ok": bool(other.get("ok")),
+                            "E_inf": other.get("E_inf") if other.get("ok") else None,
+                            "E_inf_ps": per(other.get("E_inf")) if other.get("ok") else None,
+                            "sigma_ps": per(other.get("sigma")) if other.get("ok") else None,
+                            "gap": gap, "gap_ps": per(gap),
+                            "within_sigma": (gap <= sig) if gap is not None else None,
+                            "reason": other.get("reason")},
+               extrap_distance=float(E_var_bound - E_inf),
+               extrap_distance_ps=per(E_var_bound - E_inf))
+    return out
+
+
+def combine_seeds(per_seed, sites=None, min_post=3, convention=None):
     """Aggregate independent solver trajectories (seeds) for one (L, n_b) point.
 
     Each seed is its own warm-grow ladder, so the seed-to-seed spread of E_infinity is a
@@ -506,8 +720,14 @@ def combine_seeds(per_seed, sites=None, min_post=3):
     # Each seed is fitted on its OWN ladder only -- the seed spread is a property of the
     # POOL, so folding it into every per-seed sigma and then averaging those sigmas would
     # double-count it. It enters once, below.
-    final = {s: einf_with_uncertainty(r, sites=sites, min_post=min_post)
-             for s, r in per_seed.items()}
+    convention = convention or DEFAULT_SIGMA_CONVENTION
+    if convention == LITERATURE_CONVENTION:
+        final = {s: einf_literature(r, sites=sites) for s, r in per_seed.items()}
+    elif convention == LEGACY_CONVENTION:
+        final = {s: einf_with_uncertainty(r, sites=sites, min_post=min_post)
+                 for s, r in per_seed.items()}
+    else:
+        raise ValueError(f"unknown sigma convention {convention!r}")
     ok = {s: v for s, v in final.items() if v.get("ok")}
     E_infs = np.array([v["E_inf"] for v in ok.values()], dtype=float)
     sigma_seed = float(E_infs.std(ddof=1)) if len(E_infs) >= 2 else None
@@ -515,6 +735,7 @@ def combine_seeds(per_seed, sites=None, min_post=3):
     bound = min(bounds) if bounds else None                      # tightest rigorous bound
     per = lambda x: (x / sites) if (x is not None and sites) else None
     pooled = {
+        "sigma_convention": convention,
         "seeds": sorted(per_seed), "n_seeds": len(per_seed), "n_seeds_extrapolated": len(ok),
         "sites": sites,
         "E_var_bound": bound, "E_var_bound_ps": per(bound),

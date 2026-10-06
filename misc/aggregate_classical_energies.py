@@ -123,13 +123,13 @@ def load(dirs, require_post_fix=True, convention=DEFAULT_CONVENTION, A=None):
     return groups, meta
 
 
-def analyze(groups, meta):
+def analyze(groups, meta, sigma_convention=None):
     """One record per (n_b, L): the pooled extrapolation + the pre-basin cross-check."""
     recs = []
     for key in sorted(groups, key=lambda k: (k[0], k[1])):
         n_b, L = key
         m = meta[key]
-        pooled = combine_seeds(groups[key], sites=m["sites"])
+        pooled = combine_seeds(groups[key], sites=m["sites"], convention=sigma_convention)
         # the failing diagnostic: PT2 extrapolated from the PRE-collapse basin, which is
         # where 290832's PT2 cap forced every PT2 point to live.
         seed0 = sorted(groups[key])[0]
@@ -186,7 +186,27 @@ def make_figure(recs, out_base, convention=DEFAULT_CONVENTION):
 
     # (b) where the error bar comes from — the budget, per (n_b, L)
     ex = [r for r in recs if r["ok"] and r.get("sigma_ps") is not None]
-    if ex:
+    lit = bool(recs) and recs[0].get("sigma_convention") == "trimci-coo"
+    if ex and lit:
+        # literature convention: sigma is one bootstrap term; the cross-check gap and the seed
+        # spread are reported BESIDE it (never added), so show all three side by side
+        labels = [f"$n_b$={r['n_b']}\n$L$={r['L']}" for r in ex]
+        x = np.arange(len(ex))
+        bs = [r["sigma_ps"] or 0.0 for r in ex]
+        gp = [((r["per_seed"].get(r.get("best_seed"), {}).get("cross_check") or {})
+               .get("gap_ps") or 0.0) for r in ex]
+        sp = [((r.get("seed_robustness") or {}).get("spread_ps") or 0.0) for r in ex]
+        axB.bar(x - 0.27, bs, width=0.26, color=BLUE, label="σ (bootstrap, reported)")
+        axB.bar(x, gp, width=0.26, color=ORANGE, label="|PT2-linear − power law| (reported)")
+        axB.bar(x + 0.27, sp, width=0.26, color=TEAL, label="seed spread (reported)")
+        axB.set_xlim(-0.6, len(ex) - 0.4)
+        axB.set_xticks(x); axB.set_xticklabels(labels, fontsize=8)
+        axB.set_ylabel("MeV / site", color=INK2, fontsize=9.5)
+        axB.set_title("b  σ (TrimCI/COO bootstrap) beside the two checks it does not contain",
+                      color=INK, fontsize=10.5, loc="left", weight="bold")
+        axB.legend(frameon=False, fontsize=7.4, loc="upper left", labelcolor=INK2)
+        _style(axB)
+    elif ex:
         labels = [f"$n_b$={r['n_b']}\n$L$={r['L']}" for r in ex]
         x = np.arange(len(ex))
         bottom = np.zeros(len(ex))
@@ -253,10 +273,15 @@ def make_table(recs, out_path, convention=DEFAULT_CONVENTION):
         "own right. `E_var+PT2` is Epstein–Nesbet (non-variational). $E_\\infty$ is the "
         "$N\\to\\infty$ Full-CI-within-truncation limit, ESTIMATED by extrapolation over the "
         "POST-collapse rungs, never measured._\n",
-        "**What σ covers:** it is an *extrapolation* uncertainty on the **best-bound seed** — the "
-        "trajectory taken furthest, which supplies the central value — taken as the larger of the "
-        "SHCI convention (half the extrapolation distance) and the internal quadrature of fit ⊕ "
-        "method (PT2/SHCI vs power-law disagreement) ⊕ stability (leave-one-out refit). "
+        ("**What σ covers (TrimCI/COO literature convention):** the bootstrap standard "
+         "deviation (500 replicates, COO SM S5.2) of the primary estimator on the **best-bound "
+         "seed** — TrimCI's PT2-linear intercept where PT2 rungs exist, COO's R²-scan power "
+         "law otherwise. The gap to the other estimator is reported beside σ, never added. "
+         if recs and recs[0].get("sigma_convention") == "trimci-coo" else
+         "**What σ covers:** it is an *extrapolation* uncertainty on the **best-bound seed** — the "
+         "trajectory taken furthest, which supplies the central value — taken as the larger of the "
+         "SHCI convention (half the extrapolation distance) and the internal quadrature of fit ⊕ "
+         "method (PT2/SHCI vs power-law disagreement) ⊕ stability (leave-one-out refit). ") +
         "**The seed spread is NOT in σ**: multiple random starts are a search device, so run-to-run "
         "agreement is reported separately as a robustness check (next table but one). "
         "**What σ does NOT cover:** the boson cutoff $n_b$, lattice spacing / finite volume, the "
@@ -282,35 +307,58 @@ def make_table(recs, out_path, convention=DEFAULT_CONVENTION):
                   f"{r['E_var_bound_ps']:.1f} | {'—' if dE is None else f'{dE:.2f}'} | "
                   f"{'—' if pt2 is None else f'{pt2:.1f}'} | {rep} | {prim} | {v0.get('n_post', 0)} |")
 
-    md += ["", "### Error budget (MeV/site)", "",
-           "_σ is an **extrapolation** uncertainty: the larger of the **SHCI convention** "
-           "(Holmes, Tubman & Umrigar 2016 — \"the uncertainty in our extrapolated energy is "
-           "given as 1/2 of the energy extrapolation\") and our internal quadrature of "
-           "fit ⊕ method ⊕ stability. Taking the larger keeps us at or above what a referee "
-           "would compute from the same numbers. All terms belong to the **best (tightest-bound) "
-           "seed** — the trajectory taken furthest, which is the one reported._", "",
-           "**The seed spread is deliberately NOT in σ.** Multiple random starts are a *search* "
-           "device, not a statistical sample: TrimCI (Zhang & Otten 2025) runs many independent "
-           "starts, takes *\"the best-performing run\"* as the candidate for the global "
-           "ground-state basin, and uses run-to-run agreement as a **robustness check** — never "
-           "as an error bar. `E_var` is variational, so a seed that lands higher searched worse; "
-           "it is not a second measurement of the same quantity. The spread is reported in the "
-           "next table instead.", "",
-           "| $n_b$ | L | best seed | σ fit | σ method | σ stability | SHCI ½-dist | **σ (source)** |",
-           "|--:|--:|--:|--:|--:|--:|--:|--:|"]
-    for r in recs:
-        if not r["ok"]:
-            continue
-        best = r.get("best_seed")
-        v = r["per_seed"].get(best, {})
-        terms = v.get("sigma_terms_ps") or {}
-        row = [(f"{terms[t]:.2f}" if terms.get(t) is not None else "—")
-               for t in ("fit", "method", "stability", "shci_half_distance")]
-        src = {"shci_half_distance": "SHCI", "internal_quadrature": "internal"}.get(
-            v.get("sigma_source"), "—")
-        tot = f"{r['sigma_ps']:.2f}" if r.get("sigma_ps") is not None else "—"
-        md.append(f"| {r['n_b']} | {r['L']} | {best} | " + " | ".join(row) +
-                  f" | **{tot}** ({src}) |")
+    if recs and recs[0].get("sigma_convention") == "trimci-coo":
+        md += ["", "### Error budget (MeV/site) — TrimCI/COO literature convention", "",
+               "_σ is the bootstrap std of the primary estimator (COO, Zhang & Otten 2026, SM "
+               "S5.2: 500 nonparametric replicates of the fitted rungs). It measures the scatter "
+               "of the ladder about that estimator only. The cross-check gap (PT2-linear vs the "
+               "R²-scan power law) and the seed spread are the two independent checks, reported "
+               "here and never folded into σ — as COO reports its TrimCI-vs-UDMRG gap._", "",
+               "| $n_b$ | L | best seed | primary | **σ** | 90% c.i. | cross-check $E_\\infty$ | gap | seed spread |",
+               "|--:|--:|--:|:--|--:|:--|--:|--:|--:|"]
+        for r in recs:
+            if not r["ok"]:
+                continue
+            best = r.get("best_seed")
+            v = r["per_seed"].get(best, {})
+            cc = v.get("cross_check") or {}
+            ci = v.get("ci90_ps")
+            sp = (r.get("seed_robustness") or {}).get("spread_ps")
+            f2 = lambda x: "—" if x is None else f"{x:.2f}"
+            md.append(f"| {r['n_b']} | {r['L']} | {best} | {v.get('primary')} | "
+                      f"**{f2(r.get('sigma_ps'))}** | "
+                      f"{'—' if not ci else f'[{ci[0]:.2f}, {ci[1]:.2f}]'} | "
+                      f"{f2(cc.get('E_inf_ps'))} | {f2(cc.get('gap_ps'))} | {f2(sp)} |")
+    if not (recs and recs[0].get("sigma_convention") == "trimci-coo"):
+        md += ["", "### Error budget (MeV/site)", "",
+               "_σ is an **extrapolation** uncertainty: the larger of the **SHCI convention** "
+               "(Holmes, Tubman & Umrigar 2016 — \"the uncertainty in our extrapolated energy is "
+               "given as 1/2 of the energy extrapolation\") and our internal quadrature of "
+               "fit ⊕ method ⊕ stability. Taking the larger keeps us at or above what a referee "
+               "would compute from the same numbers. All terms belong to the **best (tightest-bound) "
+               "seed** — the trajectory taken furthest, which is the one reported._", "",
+               "**The seed spread is deliberately NOT in σ.** Multiple random starts are a *search* "
+               "device, not a statistical sample: TrimCI (Zhang & Otten 2025) runs many independent "
+               "starts, takes *\"the best-performing run\"* as the candidate for the global "
+               "ground-state basin, and uses run-to-run agreement as a **robustness check** — never "
+               "as an error bar. `E_var` is variational, so a seed that lands higher searched worse; "
+               "it is not a second measurement of the same quantity. The spread is reported in the "
+               "next table instead.", "",
+               "| $n_b$ | L | best seed | σ fit | σ method | σ stability | SHCI ½-dist | **σ (source)** |",
+               "|--:|--:|--:|--:|--:|--:|--:|--:|"]
+        for r in recs:
+            if not r["ok"]:
+                continue
+            best = r.get("best_seed")
+            v = r["per_seed"].get(best, {})
+            terms = v.get("sigma_terms_ps") or {}
+            row = [(f"{terms[t]:.2f}" if terms.get(t) is not None else "—")
+                   for t in ("fit", "method", "stability", "shci_half_distance")]
+            src = {"shci_half_distance": "SHCI", "internal_quadrature": "internal"}.get(
+                v.get("sigma_source"), "—")
+            tot = f"{r['sigma_ps']:.2f}" if r.get("sigma_ps") is not None else "—"
+            md.append(f"| {r['n_b']} | {r['L']} | {best} | " + " | ".join(row) +
+                      f" | **{tot}** ({src}) |")
 
     md += ["", "### Search robustness — did independent random starts find the same state?", "",
            "_TrimCI's own robustness argument is that independent random starts converge to the "
@@ -400,13 +448,18 @@ def main():
     ap.add_argument("--allow-pre-vertex-fix", action="store_true",
                     help="NOT for release: lift the pre-2026-08-18 data refusal")
     add_convention_arg(ap)
+    ap.add_argument("--sigma-convention", default=None,
+                    choices=["trimci-coo", "nuqu-2026-09"],
+                    help="E_inf error-bar convention (default: trimci-coo, the TrimCI/COO "
+                         "papers' R^2-scan power law + bootstrap sigma; nuqu-2026-09 = the "
+                         "previous max(SHCI half-distance, internal quadrature))")
     args = ap.parse_args()
     os.makedirs(args.out_dir, exist_ok=True)
     groups, meta = load(args.data, require_post_fix=not args.allow_pre_vertex_fix,
                         convention=args.convention)
     assert groups, "no bare_*.json found"
     print(f"[conv] {figure_note(args.convention)}")
-    recs = analyze(groups, meta)
+    recs = analyze(groups, meta, sigma_convention=args.sigma_convention)
     for r in recs:
         r["contact_convention"] = args.convention
     make_figure(recs, f"{args.out_dir}/classical_energy_aggregate", args.convention)
