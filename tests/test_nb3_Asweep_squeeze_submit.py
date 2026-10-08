@@ -11,7 +11,7 @@ Runs the submit script with a stubbed `condor_submit` and checks:
   * the automatic OOM policy (2026-10-08, C2): request_memory grows MEM x (1 + NumHolds) to
     a 768 GB cap, periodic_release after a memory hold (code 34) below 4 holds, and
     on_exit_remove re-queues a provisioning failure (exit 3) up to 3 starts;
-  * `oomtest` submits one deliberately undersized shard (1 GB) to exercise that policy.
+  * `oomtest` submits one deliberately undersized shard (2 GB) to exercise that policy.
   * the frame is threaded into the runner arguments and the log names;
   * `squeeze`, `refs` and env trims select the right subsets; `test` submits one shard.
 """
@@ -100,10 +100,10 @@ def test_full_grid():
 def test_oomtest_mode():
     g, s = _run("oomtest")
     rows = g["oomtest"]
-    assert len(rows) == 1 and rows[0][:5] == ["gaussian", "3", "2", "4", "0"] and rows[0][7] == "1"
+    assert len(rows) == 1 and rows[0][:5] == ["gaussian", "3", "2", "4", "0"] and rows[0][7] == "2"
     check_policy(s["oomtest"])
-    g, _ = _run("oomtest", {"OOM_MEM": "2"})
-    assert g["oomtest"][0][7] == "2"
+    g, _ = _run("oomtest", {"OOM_MEM": "1"})
+    assert g["oomtest"][0][7] == "1"
 
 
 def test_modes_and_trims():

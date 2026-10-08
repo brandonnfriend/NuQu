@@ -151,11 +151,11 @@ fi
 
 if [ "$MODE" = "oomtest" ]; then
   # the auto-recovery smoke: a cheap L=2 A=4 s0 shard to 16k, deliberately undersized at
-  # OOM_MEM GB (default 1), so it should be held on memory, release itself with 2x, 3x, ...
-  # and finish from its checkpoint. Check `condor_q -l <id> -af NumHolds RequestMemory` while
+  # OOM_MEM GB (default 2 -> 2, 4, 6, 8 GB), so it should be held on memory, release itself
+  # with more, and finish from its checkpoint. Check `condor_q -af NumHolds RequestMemory` while
   # it runs and, when done, the shard JSON's "resumed" list and per-rung "mem".
   G="campaign_${BASE}/oomtest.txt"
-  row gaussian 3 2 4 0 16000 16000 "${OOM_MEM:-1}" 4 7200 50 4 32 > "$G"
+  row gaussian 3 2 4 0 16000 16000 "${OOM_MEM:-2}" 4 7200 50 4 32 > "$G"
   submit_grid oomtest "$G"
   echo "OOMTEST: expect NumHolds >= 1, RequestMemory doubling, then ExitCode 0 within ~1 h."
   exit 0

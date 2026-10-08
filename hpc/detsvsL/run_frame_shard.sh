@@ -109,10 +109,11 @@ provision_python() {
   fi
   uv venv --python 3.10 "$SANDBOX/venv" >/dev/null 2>&1 || { echo "ERROR: uv venv failed" >&2; return 1; }
 }
-# deps: the wheelhouse in $TOOLS/wheels (no network at all); else PyPI with retries.
+# deps: the wheelhouse in $TOOLS/wheels, installed from its compiled lock (no network, no
+# resolving); else PyPI with retries.
 provision_wheels() {
-  if [ -d "$TOOLS/wheels" ] && VIRTUAL_ENV="$SANDBOX/venv" uv pip install -q --no-index \
-       --find-links "$TOOLS/wheels" -r "$REQ" >/dev/null 2>&1; then
+  if [ -r "$TOOLS/wheels/requirements.lock" ] && VIRTUAL_ENV="$SANDBOX/venv" uv pip install -q --no-index \
+       --find-links "$TOOLS/wheels" -r "$TOOLS/wheels/requirements.lock" >/dev/null 2>&1; then
     WHL_SRC="tools"
   else
     retry 3 env VIRTUAL_ENV="$SANDBOX/venv" uv pip install -q -r "$REQ" \

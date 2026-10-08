@@ -48,20 +48,30 @@ swap_in "$TOOLS/uv.new" "$TOOLS/uv"
 UV="$TOOLS/uv"
 "$UV" --version
 
-echo "[provision] CPython 3.10 -> $TOOLS/uvpy"
-rm -rf "$TOOLS/uvpy.new"
-UV_PYTHON_INSTALL_DIR="$TOOLS/uvpy.new" "$UV" python install 3.10
-swap_in "$TOOLS/uvpy.new" "$TOOLS/uvpy"
+# the interpreter unpack is ~5 min of NFS small-file writes, so it is skipped when already
+# present (FORCE=1 redoes it). --no-bin: no launcher in $HOME/.local/bin.
+if [ "${FORCE:-0}" != "1" ] && ls "$TOOLS/uvpy" 2>/dev/null | grep -q '^cpython-3\.10'; then
+  echo "[provision] CPython 3.10 already in $TOOLS/uvpy ($(ls "$TOOLS/uvpy" | grep '^cpython-3\.10' | head -1)); FORCE=1 to redo"
+else
+  echo "[provision] CPython 3.10 -> $TOOLS/uvpy"
+  rm -rf "$TOOLS/uvpy.new"
+  UV_PYTHON_INSTALL_DIR="$TOOLS/uvpy.new" "$UV" python install --no-bin 3.10
+  swap_in "$TOOLS/uvpy.new" "$TOOLS/uvpy"
+fi
 ls "$TOOLS/uvpy" | grep '^cpython-3\.10' >/dev/null || { echo "ERROR: no cpython-3.10 in $TOOLS/uvpy" >&2; exit 1; }
 
 echo "[provision] wheelhouse for $REQ -> $TOOLS/wheels"
 UV_PYTHON_INSTALL_DIR="$TOOLS/uvpy" UV_PYTHON_DOWNLOADS=never "$UV" venv --python 3.10 "$TMP/venv" >/dev/null
 VIRTUAL_ENV="$TMP/venv" "$UV" pip install -q pip
-rm -rf "$TOOLS/wheels.new"
-"$TMP/venv/bin/python" -m pip download -q -r "$REQ" -d "$TOOLS/wheels.new" --only-binary=:all:
+rm -rf "$TOOLS/wheels.new"; mkdir -p "$TOOLS/wheels.new"
+# uv resolves the pin set (pip's resolver cannot: cirq==1.4.0 -> cirq-rigetti conflict under
+# --only-binary); pip then only FETCHES those exact wheels, no resolving (--no-deps).
+LOCK="$TOOLS/wheels.new/requirements.lock"
+"$UV" pip compile -q --python "$TMP/venv/bin/python" "$REQ" -o "$LOCK"
+"$TMP/venv/bin/python" -m pip download -q --no-deps -r "$LOCK" -d "$TOOLS/wheels.new" --only-binary=:all:
 # prove the wheelhouse is complete OFFLINE, exactly as a job will use it
 UV_PYTHON_INSTALL_DIR="$TOOLS/uvpy" UV_PYTHON_DOWNLOADS=never "$UV" venv --python 3.10 "$TMP/venv2" >/dev/null
-VIRTUAL_ENV="$TMP/venv2" "$UV" pip install -q --no-index --find-links "$TOOLS/wheels.new" -r "$REQ"
+VIRTUAL_ENV="$TMP/venv2" "$UV" pip install -q --no-index --find-links "$TOOLS/wheels.new" -r "$LOCK"
 "$TMP/venv2/bin/python" -c 'import numpy, scipy, openfermion, pybind11; print("[provision] offline install OK:", numpy.__version__, scipy.__version__)'
 swap_in "$TOOLS/wheels.new" "$TOOLS/wheels"
 
@@ -71,7 +81,7 @@ swap_in "$TOOLS/wheels.new" "$TOOLS/wheels"
   echo "uv: $UV_VERSION ($("$UV" --version))"
   echo "python: $(ls "$TOOLS/uvpy" | grep '^cpython-3\.10' | head -1)"
   echo "requirements_sha256: $(sha256sum "$REQ" | cut -c1-16)  ($REQ)"
-  echo "wheels: $(ls "$TOOLS/wheels" | wc -l) files"
+  echo "wheels: $(ls "$TOOLS/wheels" | grep -c '\.whl$') wheels, lock $(grep -c '==' "$TOOLS/wheels/requirements.lock") pins"
 } > "$TOOLS/MANIFEST"
 cat "$TOOLS/MANIFEST"
 echo "[provision] done: $TOOLS"

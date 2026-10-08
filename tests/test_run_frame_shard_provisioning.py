@@ -99,6 +99,7 @@ def test_python_and_wheels():
         os.makedirs(os.path.join(tools, "uvpy", "cpython-3.10.18-linux-x86_64-gnu", "bin"))
         open(os.path.join(tools, "uvpy", "cpython-3.10.18-linux-x86_64-gnu", "bin", "python3.10"), "w").write("")
         os.makedirs(os.path.join(tools, "wheels"))
+        open(os.path.join(tools, "wheels", "requirements.lock"), "w").write("numpy==1.26.4\n")
         _stub(binp, "uv", 'echo "uv $* downloads=${UV_PYTHON_DOWNLOADS:-unset}" >> "$LOG"; '
                           'case "$*" in *--no-index*) exit "${OFFLINE_RC:-0}" ;; esac; exit 0')
         p, calls = _run(tmp, binp, "provision_python; echo rc=$? src=$PY_SRC; "
@@ -107,6 +108,7 @@ def test_python_and_wheels():
         assert os.path.exists(os.path.join(tmp, "uvpy", "cpython-3.10.18-linux-x86_64-gnu", "bin", "python3.10"))
         assert "python install" not in calls and "venv --python 3.10" in calls
         assert "downloads=never" in calls and "--no-index --find-links" in calls
+        assert "wheels/requirements.lock" in calls, "offline install uses the compiled lock"
         assert "pip install -q -r" not in calls, "offline install succeeded: no PyPI call"
         # offline wheelhouse broken -> PyPI fallback with retries
         p, calls = _run(tmp, binp, "export OFFLINE_RC=1; provision_wheels; echo rc=$? src=$WHL_SRC", tools)
