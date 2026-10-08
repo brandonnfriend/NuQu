@@ -221,6 +221,11 @@ class GroundStateResult:
     # and io.`_states_arrays` reads these directly. ferm is (N, W) uint64 words.
     ferm_arr: object = None      # np.ndarray (N, W) uint64 or None
     bos_arr: object = None       # np.ndarray (N, n_bos) uint16 or None
+    # Memory / pool instrumentation (2026-10-08, C3 of the classical infrastructure
+    # notes): per-round pool sizes and peak RSS inside the array solver, so a shard
+    # records WHERE its top-rung memory spike happens (expand pool, trim, or the
+    # diagonalization). Output only -- never read by the solve.
+    stats: object = None         # dict or None
 
 
 def halving_drop(history):

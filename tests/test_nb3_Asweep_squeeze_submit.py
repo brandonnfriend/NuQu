@@ -6,7 +6,12 @@ Runs the submit script with a stubbed `condor_submit` and checks:
     L=2..4 x 3 seeds (18);
   * Phase-0 starts = 16 L capped at 64 in the squeeze arm (32/48/64), 32 for the bare refs
     (= cluster 293963); seed stride, select core, stratified starts, workers = P0W present;
-  * per-L MAXCORE / PT2CAP / MEM / CPUS / MAXRUNGSEC match 293963's final, working sizing;
+  * per-L MAXCORE / PT2CAP / MEM / CPUS / MAXRUNGSEC match 293963's final, working sizing
+    (MEM is now an integer in GB: the base of the auto-growing request);
+  * the automatic OOM policy (2026-10-08, C2): request_memory grows MEM x (1 + NumHolds) to
+    a 768 GB cap, periodic_release after a memory hold (code 34) below 4 holds, and
+    on_exit_remove re-queues a provisioning failure (exit 3) up to 3 starts;
+  * `oomtest` submits one deliberately undersized shard (1 GB) to exercise that policy.
   * the frame is threaded into the runner arguments and the log names;
   * `squeeze`, `refs` and env trims select the right subsets; `test` submits one shard.
 """
@@ -19,10 +24,22 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _SCRIPT = os.path.join(_ROOT, "hpc", "detsvsL", "submit_nb3_Asweep_squeeze.sh")
 _VARS = ["FRAME", "NB", "L", "A", "SEED", "MAXCORE", "PT2CAP", "MEM", "CPUS", "MAXRUNGSEC",
          "PRIO", "P0W", "P0RUNS"]
-_SIZING = {"2": ("1024000", "1024000", "32G", "4", "14400", "4"),
-           "3": ("1024000", "512000", "128G", "8", "21600", "8"),
-           "4": ("512000", "256000", "384G", "8", "21600", "8"),
-           "5": ("128000", "65536", "384G", "8", "21600", "8")}
+_SIZING = {"2": ("1024000", "1024000", "32", "4", "14400", "4"),
+           "3": ("1024000", "512000", "128", "8", "21600", "8"),
+           "4": ("512000", "256000", "384", "8", "21600", "8"),
+           "5": ("128000", "65536", "384", "8", "21600", "8")}
+_POLICY = ["MEMCAP_MB               = 786432",
+           "NHOLDS                  = ifThenElse(isUndefined(NumHolds), 0, NumHolds)",
+           "MEMGROW_MB              = ($(MEM) * 1024 * (1 + $(NHOLDS)))",
+           "request_memory          = ifThenElse($(MEMGROW_MB) < $(MEMCAP_MB), $(MEMGROW_MB), $(MEMCAP_MB))",
+           "periodic_release        = (HoldReasonCode == 34) && (NumHolds < 4)",
+           "on_exit_remove          = !((ExitBySignal == False) && (ExitCode == 3) && (NumJobStarts < 3))"]
+
+
+def check_policy(sub):
+    for ln in _POLICY:
+        assert ln in sub, ln
+    assert "request_memory          = $(MEM)\n" not in sub
 
 
 def _run(mode, env_extra=None):
@@ -76,6 +93,17 @@ def test_full_grid():
               "NUQU_PHASE0_WORKERS=$(P0W)", " $(FRAME) $(A) none ", "_$(FRAME)_L$(L)"):
         assert s in sub, s
     assert "NUQU_NOVEL" not in sub and "qis4" not in sub
+    check_policy(sub)
+    assert all(r[c["MEM"]].isdigit() for r in rows), "MEM must be an integer (GB)"
+
+
+def test_oomtest_mode():
+    g, s = _run("oomtest")
+    rows = g["oomtest"]
+    assert len(rows) == 1 and rows[0][:5] == ["gaussian", "3", "2", "4", "0"] and rows[0][7] == "1"
+    check_policy(s["oomtest"])
+    g, _ = _run("oomtest", {"OOM_MEM": "2"})
+    assert g["oomtest"][0][7] == "2"
 
 
 def test_modes_and_trims():
@@ -92,9 +120,10 @@ def test_modes_and_trims():
 
 def main():
     test_full_grid()
+    test_oomtest_mode()
     test_modes_and_trims()
     print("test_nb3_Asweep_squeeze_submit: PASS  (99 squeeze + 18 bare refs; starts 16L<=64 vs 32; "
-          "293963 sizing; frame threaded; modes, trims, 1-shard smoke)")
+          "293963 sizing; frame threaded; auto-OOM policy; oomtest; modes, trims, 1-shard smoke)")
 
 
 if __name__ == "__main__":

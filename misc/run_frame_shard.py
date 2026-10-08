@@ -14,6 +14,13 @@ Two campaigns use it:
     -- how fermionic (COO) vs boson (squeeze) frames help as nucleon interaction grows.
 
     python -m misc.run_frame_shard --L 3 --seed 0 --frame coo --filling 1.0 --out x.json
+
+RESUME (2026-10-08, infrastructure C1). In the warm-grow ladder every finished rung's core
+is also checkpointed beside the JSON (`<stem>.core.npz`, see classical/trimci/checkpoint).
+With `--resume`, a restart that finds the JSON + a checkpoint whose settings match
+continues from the next rung (bit-identical to an uninterrupted run); a finished shard
+exits 0 at once; a mismatched checkpoint is refused (exit 2) rather than mixed. Each rung
+also records its peak RSS and the solver's pool sizes (`mem`, infrastructure C3).
 """
 import argparse
 import json
@@ -27,6 +34,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src_PI.utils.manifest import build_manifest
 from classical.trimci import build_from_eft, frame_workflow, frame
+from classical.trimci import checkpoint as ckpt
+from classical.trimci.graph_arrays import peak_rss_mb
 from classical.trimci.back_evaluate import back_evaluate_frame
 from classical.trimci.frame_qpe import warmstart_overlap
 from classical.trimci.observables import occupation_tail, occupation_histogram
@@ -163,6 +172,14 @@ def main():
     ap.add_argument("--exact-max-mem-gb", type=float, default=24.0,
                     help="memory ceiling for the exact-ref Lanczos (refuses cleanly above)")
     ap.add_argument("--out", required=True)
+    ap.add_argument("--resume", action="store_true",
+                    help="continue from the checkpoint beside --out if one exists and its "
+                         "settings match (warm-grow ladder); a finished shard exits 0; a "
+                         "mismatch exits 2. Without it a restart overwrites --out.")
+    ap.add_argument("--checkpoint-dir", default=None,
+                    help="where per-rung core checkpoints go (default: beside --out)")
+    ap.add_argument("--no-checkpoint", action="store_true",
+                    help="do not write per-rung core checkpoints")
     args = ap.parse_args()
     if args.phase0_select_core is not None and args.phase0_select_core <= 0:
         args.phase0_select_core = None             # 0 = lever off (table-driven submits)
@@ -228,6 +245,63 @@ def main():
         except Exception:
             E_exact = None
 
+    physical = {"L": args.L, "dim": args.dim, "n_b": args.n_b, "N_f": Hbare.N_f,
+                "A": A, "filling": args.filling, "sites": sites,
+                "n_terms": len(Hbare.terms), "frame": args.frame,
+                "contact_convention": Hbare.meta["contact_convention"]}
+    solver_cfg = {"ladder_mode": args.ladder_mode, "ladder_start": args.ladder_start,
+                  "n_rungs": args.n_rungs, "max_core": args.max_core,
+                  "warm_grow": bool(args.warm_grow), "seed": args.seed,
+                  "phase0_runs": args.phase0_runs, "ladder_n_runs": args.ladder_n_runs,
+                  "phase0_seed_stride": args.phase0_seed_stride,
+                  "phase0_seed_base": p0_base,
+                  "search_levers": {"phase0_select_core": args.phase0_select_core,
+                                    "phase0_init": args.phase0_init,
+                                    "novel_ferm_frac": args.novel_ferm_frac,
+                                    "novel_keep_frac": args.novel_keep_frac,
+                                    "phase0_workers": args.phase0_workers},
+                  "pt2_max_core": args.pt2_max_core,
+                  "max_rung_seconds": args.max_rung_seconds,
+                  "boson_init_mean": ("none" if bim is None else bim),
+                  "frame_runs": args.frame_runs, "phase0_core": args.phase0_core,
+                  "orbopt_cycles": args.orbopt_cycles,
+                  "back_eval": bool(args.back_eval),
+                  "back_support_cap": args.back_support_cap}
+    # the warm-grow ladder (the campaign path); computed here so a resume can check it
+    ladder_rungs = None
+    if args.ladder_mode == "independent" and args.warm_grow:
+        ladder_rungs = [args.ladder_start * 2 ** k for k in range(args.n_rungs)
+                        if args.ladder_start * 2 ** k <= args.max_core]
+    cfg_key = ckpt.config_key(physical, solver_cfg)
+    checkpointing = (not args.no_checkpoint) and ladder_rungs is not None
+
+    # RESUME decision (before `out` is built, so a resumed run keeps the original record)
+    resume = None
+    if args.resume and os.path.exists(args.out):
+        try:
+            prior = json.load(open(args.out))
+        except Exception as e:
+            print(f"[frameshard] existing {args.out} unreadable ({e}) -> starting fresh")
+            prior = None
+        saved = ckpt.load_checkpoint(args.out, args.checkpoint_dir) if ladder_rungs else None
+        action, info = ckpt.resume_plan(prior, saved, ladder_rungs or [], cfg_key)
+        if action == "done":
+            print(f"[frameshard] {args.out} is already done "
+                  f"(rungs={[r['core'] for r in prior.get('rungs', [])]}) -> nothing to do")
+            return
+        if action == "refuse":
+            print(f"[frameshard] REFUSING to resume {args.out}: {info['reason']}", file=sys.stderr)
+            sys.exit(2)
+        if action == "resume":
+            resume = info
+            print(f"[frameshard] RESUME from rung index {info['start_index'] - 1} "
+                  f"(core {info['core'][0].shape[0]}, {info['path']}); "
+                  f"{len(prior['rungs']) - info['n_rungs_keep']} unfinished rung(s) redone")
+        elif ladder_rungs is None:
+            print("[frameshard] --resume: only the warm-grow ladder checkpoints; starting fresh")
+        else:
+            print(f"[frameshard] --resume: {info.get('reason', 'no prior run')} -> starting fresh")
+
     out = {
         "E_exact": E_exact, "exact_support": exact_support,
         "kind": "frame_shard", "L": args.L, "dim": args.dim, "A": A,
@@ -262,28 +336,8 @@ def main():
         "manifest": build_manifest(extra={
             "run": "misc.run_frame_shard",
             "argv": sys.argv[1:],
-            "physical": {"L": args.L, "dim": args.dim, "n_b": args.n_b, "N_f": Hbare.N_f,
-                         "A": A, "filling": args.filling, "sites": sites,
-                         "n_terms": len(Hbare.terms), "frame": args.frame,
-                         "contact_convention": Hbare.meta["contact_convention"]},
-            "solver": {"ladder_mode": args.ladder_mode, "ladder_start": args.ladder_start,
-                       "n_rungs": args.n_rungs, "max_core": args.max_core,
-                       "warm_grow": bool(args.warm_grow), "seed": args.seed,
-                       "phase0_runs": args.phase0_runs, "ladder_n_runs": args.ladder_n_runs,
-                       "phase0_seed_stride": args.phase0_seed_stride,
-                       "phase0_seed_base": p0_base,
-                       "search_levers": {"phase0_select_core": args.phase0_select_core,
-                                         "phase0_init": args.phase0_init,
-                                         "novel_ferm_frac": args.novel_ferm_frac,
-                                         "novel_keep_frac": args.novel_keep_frac,
-                                         "phase0_workers": args.phase0_workers},
-                       "pt2_max_core": args.pt2_max_core,
-                       "max_rung_seconds": args.max_rung_seconds,
-                       "boson_init_mean": ("none" if bim is None else bim),
-                       "frame_runs": args.frame_runs, "phase0_core": args.phase0_core,
-                       "orbopt_cycles": args.orbopt_cycles,
-                       "back_eval": bool(args.back_eval),
-                       "back_support_cap": args.back_support_cap},
+            "physical": physical,
+            "solver": solver_cfg,
             "condor": {k: os.environ.get(k) for k in
                        ("_CONDOR_SLOT", "_CONDOR_REQUEST_CPUS", "_CONDOR_REQUEST_MEMORY",
                         "OMP_THREAD_LIMIT", "PYTHON_CPU_COUNT")},
@@ -293,6 +347,20 @@ def main():
                          "NUQU_DEEP_SOLVE")},
         }),
     }
+    wall_before = 0.0
+    if resume is not None:
+        # keep the ORIGINAL record (header, manifest, finished rungs); only note the restart
+        out = prior
+        out["rungs"] = out["rungs"][:resume["n_rungs_keep"]]
+        out["done"] = False
+        wall_before = float(out.get("wall_s") or 0.0)
+        out.setdefault("resumed", []).append({
+            "from_rung_index": resume["start_index"] - 1,
+            "from_core": int(resume["core"][0].shape[0]),
+            "checkpoint": resume["path"],
+            "wall_s_before": wall_before,
+            "restart_manifest": build_manifest(extra={"argv": sys.argv[1:]}),
+        })
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
 
     def save():
@@ -305,7 +373,8 @@ def main():
 
     def on_rung(rung, res):
         r = {k: rung[k] for k in ("core", "E_var", "dE_pt2", "E_pt2", "n_ext", "wall_s", "phase",
-                                  "phase0_select", "phase0_select_starts")
+                                  "phase0_select", "phase0_select_starts",
+                                  "rung_index", "resumable")
              if k in rung}
         r["mean_occ"] = _mean_occupation(res, Hbare.n_bos_modes)
         # QPE warm-start overlap p0 = |c_dominant|^2 of this (framed) core — the
@@ -362,9 +431,38 @@ def main():
             except Exception as e:
                 r["E_orig"] = None
                 r["back_error"] = str(e)[:200]
+        # MEMORY (infrastructure C3): peak RSS of this process and of its reaped fork
+        # workers (the select stage), plus the solver's own pool-size / RSS trace, so the
+        # top-rung spike that Condor's 5-minute samples miss is recorded per rung.
+        st = getattr(res, "stats", None) or {}
+        r["mem"] = {"peak_rss_mb": round(peak_rss_mb(), 1),
+                    "children_peak_rss_mb": round(peak_rss_mb(children=True), 1),
+                    "solver_peak_rss_mb": st.get("peak_rss_mb"),
+                    "max_pool": st.get("max_pool"), "max_surv": st.get("max_surv"),
+                    "rounds": st.get("rounds"), "trace": st.get("trace")}
         out["rungs"].append(r)
-        out["wall_s"] = time.time() - t0
+        out["wall_s"] = wall_before + (time.time() - t0)
         save()   # INCREMENTAL: survive an OOM/timeout on the next (deeper) rung
+        # CHECKPOINT the finished core (after the JSON, so a torn restart redoes a rung
+        # rather than losing one -- see checkpoint.resume_plan)
+        if checkpointing and r.get("resumable") and "rung_index" in r:
+            try:
+                tc = time.time()
+                path = ckpt.save_checkpoint(args.out, res, r["rung_index"], ladder_rungs,
+                                            cfg_key, ckpt_dir=args.checkpoint_dir)
+                out["checkpoint"] = {"path": path, "rung_index": r["rung_index"],
+                                     "core": r["core"],
+                                     "bytes": os.path.getsize(path),
+                                     "wall_s": round(time.time() - tc, 1)}
+                save()
+            except Exception as e:                   # never let a checkpoint kill the ladder
+                print(f"[frameshard] checkpoint failed at rung {r['core']}: {e}")
+        # TEST HOOK (tests/test_resume_ladder.py): die hard right after this rung was saved,
+        # the way an OOM kill would, so the resume path is exercised deterministically.
+        die = os.environ.get("NUQU_TEST_DIE_AFTER_RUNG_INDEX")
+        if die not in (None, "") and r.get("rung_index") == int(die):
+            print(f"[frameshard] TEST HOOK: exiting after rung index {die}", flush=True)
+            os._exit(137)
 
     if args.ladder_mode == "grow":
         # Project-scaled ladder (our ~1M-det wall at L=2, 512k at L=3, then decreasing).
@@ -401,15 +499,15 @@ def main():
             # GROW within the frozen frame: Phase-0 ensemble at the smallest rung, then
             # warm-start each rung from the previous core (no from-scratch redo). Monotone
             # -> smooth convergence curve for the cost extrapolation.
-            rungs = [args.ladder_start * 2 ** k for k in range(args.n_rungs)
-                     if args.ladder_start * 2 ** k <= args.max_core]
             growing_ladder(
-                Hind, A, rungs, phase0_runs=args.phase0_runs, seed=p0_base,
+                Hind, A, ladder_rungs, phase0_runs=args.phase0_runs, seed=p0_base,
                 pt2_diag=pt2_diag, verbose=True, on_rung=on_rung,
                 max_rung_seconds=args.max_rung_seconds, pt2_max_core=args.pt2_max_core,
                 select_core=args.phase0_select_core, init_strategy=args.phase0_init,
                 novel_ferm_frac=args.novel_ferm_frac, novel_keep_frac=args.novel_keep_frac,
-                phase0_workers=args.phase0_workers)
+                phase0_workers=args.phase0_workers,
+                resume=(None if resume is None else
+                        {"core": resume["core"], "start_index": resume["start_index"]}))
         else:
             _adaptive_ladder_solve(
                 Hind, A, args.ladder_start, args.n_rungs, solver, pt2_diag,
@@ -418,8 +516,10 @@ def main():
                 boson_init_mean=bim, pt2_max_core=args.pt2_max_core)
 
     out["done"] = True
-    out["wall_s"] = time.time() - t0
+    out["wall_s"] = wall_before + (time.time() - t0)
     save()
+    if checkpointing:
+        ckpt.drop_previous(args.out, args.checkpoint_dir)   # a done shard keeps its final core only
     print(f"[frameshard] L={args.L} A={A} frame={args.frame} seed={args.seed} "
           f"rungs={[r['core'] for r in out['rungs']]} wall={out['wall_s']:.0f}s -> {args.out}")
 

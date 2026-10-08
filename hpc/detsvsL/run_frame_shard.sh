@@ -8,13 +8,25 @@
 # the mixed_ci C++ hot path, then runs misc/run_frame_shard.py which builds the frame
 # (bare|gaussian|coo|gaussian+coo) and runs a deep ladder with INCREMENTAL per-rung
 # saving (a shard that OOMs/times-out at a deep rung keeps everything it finished).
+#
+# PROVISIONING THAT SURVIVES A NETWORK BLIP (2026-10-08, infrastructure C4). 294238 was a
+# full resubmit because one job could not reach astral.sh at start-up. Now the job takes
+# a pinned uv binary, a managed CPython 3.10 and a wheelhouse from $NUQU_TOOLS
+# (/nfs_scratch/bfriend3/NuQu/tools, populated once by `sh provision_tools.sh` on the
+# submit node), COPYING them into the sandbox so nothing on NFS is written concurrently.
+# Each piece falls back to its download with a retry loop. Any provisioning failure exits
+# with code 3, which the submit files re-queue (on_exit_remove), unlike a solver failure.
+#
+# RESUME (infrastructure C1): the python runs with --resume (NUQU_RESUME=0 disables it), so
+# a re-queued or released job continues from the last checkpointed rung beside its JSON.
 set -u
+PROVISION_FAIL=3
 L="$1"; SEED="$2"; CAMPAIGN="$3"; FRAME="$4"; A="$5"; FILLING="$6"; MAXCORE="${7:-1024000}"
 LADDER_MODE="${8:-grow}"; RUNS="${9:-64}"; ORBOPTCYCLES="${10:-10}"
 PHASE0CORE="${11:-2000}"; MAXRUNGSEC="${12:-14400}"
 REPO=/nfs_scratch/bfriend3/NuQu/NuQu
 SANDBOX="$(pwd)"
-[ -r "$REPO/misc/run_frame_shard.py" ] || { echo "ERROR: cannot read repo at $REPO" >&2; exit 1; }
+[ -r "$REPO/misc/run_frame_shard.py" ] || { echo "ERROR: cannot read repo at $REPO" >&2; exit "$PROVISION_FAIL"; }
 
 # CPU ALLOCATION. qis Condor does NOT export _CONDOR_REQUEST_CPUS (found 2026-09-24: every
 # job before then fell back to cpus=2 -- 2 OMP threads in deep-solve, 2 fork workers
@@ -55,13 +67,64 @@ export HOME="$SANDBOX" UV_INSTALL_DIR="$SANDBOX/uvbin" \
 export PATH="$UV_INSTALL_DIR:$SANDBOX/.local/bin:$PATH"
 
 echo "[shard] host=$(hostname) L=$L seed=$SEED frame=$FRAME A=$A filling=$FILLING max_core=$MAXCORE cpus=$cpus"
-curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null 2>&1 || { echo "ERROR: uv install failed" >&2; exit 1; }
-command -v uv >/dev/null 2>&1 || { echo "ERROR: uv not on PATH" >&2; exit 1; }
-uv python install 3.10 >/dev/null 2>&1
-uv venv --python 3.10 "$SANDBOX/venv" >/dev/null 2>&1 || { echo "ERROR: uv venv failed" >&2; exit 1; }
+
+TOOLS="${NUQU_TOOLS:-/nfs_scratch/bfriend3/NuQu/tools}"   # see provision_tools.sh
+UV_PIN="${NUQU_UV_VERSION:-0.12.23}"
+REQ="$REPO/hpc/detsvsL/requirements-hpc.txt"
+# retry N cmd...: up to N attempts, sleeping 20 s, 40 s, ... between them (a blip, not an outage)
+retry() {
+  n="$1"; shift; i=1
+  while :; do
+    "$@" && return 0
+    [ "$i" -ge "$n" ] && return 1
+    echo "[shard] attempt $i/$n failed: $*  (retrying)" >&2
+    sleep $(( i * 20 )); i=$(( i + 1 ))
+  done
+}
+# uv: the pinned binary from $TOOLS, copied into the sandbox; else the versioned installer.
+provision_uv() {
+  mkdir -p "$UV_INSTALL_DIR"
+  if [ -x "$TOOLS/uv" ] && cp "$TOOLS/uv" "$UV_INSTALL_DIR/uv" 2>/dev/null; then
+    UV_SRC="tools"
+  else
+    # download THEN run (a `curl | sh` pipeline reports sh's status, so a failed curl
+    # looked like success and only the later `uv not on PATH` check caught it: 294238)
+    retry 3 sh -c "curl -LsSf --connect-timeout 20 --max-time 300 -o '$SANDBOX/uv-install.sh' https://astral.sh/uv/$UV_PIN/install.sh && sh '$SANDBOX/uv-install.sh' >/dev/null 2>&1" \
+      || { echo "ERROR: uv install failed" >&2; return 1; }
+    UV_SRC="download"
+  fi
+  command -v uv >/dev/null 2>&1 || { echo "ERROR: uv not on PATH" >&2; return 1; }
+}
+# CPython 3.10: the managed install from $TOOLS/uvpy copied into the sandbox (relocatable
+# python-build-standalone; copying avoids any concurrent write to NFS); else uv downloads it.
+provision_python() {
+  mkdir -p "$UV_PYTHON_INSTALL_DIR"
+  if [ -d "$TOOLS/uvpy" ] && ls "$TOOLS/uvpy" 2>/dev/null | grep -q '^cpython-3\.10' \
+     && cp -r "$TOOLS/uvpy/." "$UV_PYTHON_INSTALL_DIR/" 2>/dev/null; then
+    PY_SRC="tools"; export UV_PYTHON_DOWNLOADS=never
+  else
+    rm -rf "$UV_PYTHON_INSTALL_DIR"; mkdir -p "$UV_PYTHON_INSTALL_DIR"
+    retry 3 uv python install 3.10 || { echo "ERROR: uv python install failed" >&2; return 1; }
+    PY_SRC="download"
+  fi
+  uv venv --python 3.10 "$SANDBOX/venv" >/dev/null 2>&1 || { echo "ERROR: uv venv failed" >&2; return 1; }
+}
+# deps: the wheelhouse in $TOOLS/wheels (no network at all); else PyPI with retries.
+provision_wheels() {
+  if [ -d "$TOOLS/wheels" ] && VIRTUAL_ENV="$SANDBOX/venv" uv pip install -q --no-index \
+       --find-links "$TOOLS/wheels" -r "$REQ" >/dev/null 2>&1; then
+    WHL_SRC="tools"
+  else
+    retry 3 env VIRTUAL_ENV="$SANDBOX/venv" uv pip install -q -r "$REQ" \
+      || { echo "ERROR: pip install failed" >&2; return 1; }
+    WHL_SRC="pypi"
+  fi
+}
+provision_uv      || exit "$PROVISION_FAIL"
+provision_python  || exit "$PROVISION_FAIL"
+provision_wheels  || exit "$PROVISION_FAIL"
 PY="$SANDBOX/venv/bin/python"
-VIRTUAL_ENV="$SANDBOX/venv" uv pip install -q -r "$REPO/hpc/detsvsL/requirements-hpc.txt" \
-    || { echo "ERROR: pip install failed" >&2; exit 1; }
+echo "[shard] provisioned uv=$UV_SRC python=$PY_SRC wheels=$WHL_SRC ($("$PY" --version 2>&1), uv $(uv --version 2>&1 | head -1))"
 cp "$REPO/classical/trimci/backend_fork/mixed_ci_pybind.cpp" \
    "$REPO/classical/trimci/backend_fork/mixed_ci.hpp" "$SANDBOX/"
 PYBIND_INC="$("$PY" -c 'import pybind11; print(pybind11.get_include())')"
@@ -122,6 +185,8 @@ P1MODE="${NUQU_PHASE1_MODE:-coevolve}"         # coevolve (faithful) | doubling-
 SQOPT="${NUQU_SQUEEZE_OPT:-analytic}"          # analytic r* | numerical (the r* study)
 P1MAX_ARG=""; [ -n "${NUQU_PHASE1_MAX_DETS:-}" ] && P1MAX_ARG="--phase1-max-dets ${NUQU_PHASE1_MAX_DETS}"
 P2MAX_ARG=""; [ -n "${NUQU_PHASE2_MAX_DETS:-}" ] && P2MAX_ARG="--phase2-max-dets ${NUQU_PHASE2_MAX_DETS}"
+# RESUME from the last checkpointed rung beside $OUT (default on; NUQU_RESUME=0 = overwrite).
+RESUME_ARG="--resume"; [ "${NUQU_RESUME:-1}" = "0" ] && RESUME_ARG=""
 # grow: Phase-0 ensemble + Phase-1 co-evolution + warm-start growth (deep/convergence runs).
 # independent: fit the frame ONCE (cheap; NO Phase-1 co-evolution, which is the 60+ min
 # cost) then grow a FROZEN frame -- for cheap frame COMPARISONS at equal footing.
@@ -131,14 +196,14 @@ if [ "$LADDER_MODE" = "independent" ]; then
       --max-core "$MAXCORE" --frame-runs "$RUNS" --phase0-core "$PHASE0CORE" \
       --orbopt-cycles "$ORBOPTCYCLES" --max-rung-seconds "$MAXRUNGSEC" --phase0-runs "$P0RUNS" \
       --phase0-seed-stride "$P0STRIDE" $LEVER_ARGS --ladder-n-runs "$LNRUNS" $BIM_ARG $PT2CAP_ARG $EXACT_ARG $WARMGROW_ARG \
-      $BACKEVAL_ARG $BACKCAP_ARG --out "$OUT"
+      $BACKEVAL_ARG $BACKCAP_ARG $RESUME_ARG --out "$OUT"
 else
   # shellcheck disable=SC2086
   "$PY" -m misc.run_frame_shard --L "$L" --seed "$SEED" --dim "$DIM" --n_b "$NB" --frame "$FRAME" \
       --A "$A" $FILL_ARG --ladder-mode grow --ladder-start 1000 --max-core "$MAXCORE" \
       --phase0-runs "$RUNS" --orbopt-cycles "$ORBOPTCYCLES" \
       --profile "$PROFILE" --phase1-mode "$P1MODE" --squeeze-opt "$SQOPT" $P1MAX_ARG $P2MAX_ARG \
-      $BACKEVAL_ARG $BACKCAP_ARG --max-rung-seconds "$MAXRUNGSEC" --out "$OUT"
+      $BACKEVAL_ARG $BACKCAP_ARG --max-rung-seconds "$MAXRUNGSEC" $RESUME_ARG --out "$OUT"
 fi
 status=$?
 echo "[shard] done status=$status -> $OUT"

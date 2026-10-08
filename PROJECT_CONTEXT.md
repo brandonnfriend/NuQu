@@ -153,6 +153,17 @@ The A-sweep turns ON select-core 16000 plus stratified starts; novel stays OFF. 
 - **Start records:** shards now record each start's nucleon arrangement (`rungs[0].phase0_select_starts`, output only).
 - **Smoke first:** `test` mode, L=4 A=10, 64 starts.
 - **Remaining ideas:** calibration, larger A and infrastructure are written up in `docs/classical_next_studies_2026-10-08.md` (local).
+- **Infrastructure for the squeeze campaign (2026-10-08, branch `infra/resume-oom-provisioning`):**
+  (C1) per-rung core checkpoints + `--resume` (bit-identical, `tests/test_resume_ladder.py`);
+  (C2) auto-growing `request_memory` + `periodic_release` on memory holds + provisioning
+  re-queue in both A-sweep submit files (dry-run validated on HTCondor 25.0; `oomtest` mode);
+  (C3) per-rung `mem` records + `misc/analyze_shard_memory.py` (the predictive per-row MEM
+  model needs the first instrumented L=4 shards); (C4) pinned uv/python/wheelhouse from
+  `/nfs_scratch/bfriend3/NuQu/tools` with retries and exit 3 (**`sh hpc/detsvsL/provision_tools.sh`
+  must still be run once on hep-submit**); (C5) `load(frame=)`, `make_Asweep_figures --frame
+  --compare-frame --As` + binding tables. (C6) manifests NOT re-sealed: 6/8 classical manifests
+  fail only on analysis-script/figure hashes, and whether to regenerate the accepted outputs under
+  the `trimci-coo` default is the user's call. See `hpc/HPC_WORKFLOW.md` §4/§6.
 
 **Preliminary multi-A figures:** `docs/presentation/classical_baseline_{multiA,perA}_prelim.png`, from the 80 finished shards pulled to `data/classical/2026-09-25/bare_Asweep_nb3_293963/`.
 - L=2–4 extrapolate at every A. L=5 is genuinely bound-only (per-rung drops still growing).

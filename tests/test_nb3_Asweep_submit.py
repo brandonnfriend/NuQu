@@ -78,6 +78,14 @@ def _check_sub(sub, fails, name):
         fails.append(f"{name}: not an explicit-A bare run (filling must be 'none')")
     if "-nb$(NB)" not in sub or "NUQU_N_B=$(NB)" not in sub:
         fails.append(f"{name}: n_b not threaded into campaign dir / env")
+    # the automatic OOM policy (2026-10-08, C2) -- same lines as the squeeze submit
+    for ln in ("MEMGROW_MB              = ($(MEM) * 1024 * (1 + $(NHOLDS)))",
+               "request_memory          = ifThenElse($(MEMGROW_MB) < $(MEMCAP_MB), $(MEMGROW_MB), $(MEMCAP_MB))",
+               "periodic_release        = (HoldReasonCode == 34) && (NumHolds < 4)",
+               "on_exit_remove          = !((ExitBySignal == False) && (ExitCode == 3) && (NumJobStarts < 3))",
+               "MEMCAP_MB               = 786432"):
+        if ln not in sub:
+            fails.append(f"{name}: auto-OOM policy line missing: {ln}")
 
 
 def test_asweep_grid():
@@ -111,11 +119,11 @@ def test_asweep_grid():
         if r[c["P0W"]] != ("4" if r[c["L"]] in ("2", "5") else "8"):
             fails.append(f"L={r[c['L']]} select workers {r[c['P0W']]} (want 4 at L=2/5, 8 at L=3/4)")
             break
-        if r[c["MEM"]] != {"4": "384G", "5": "256G"}.get(r[c["L"]], r[c["MEM"]]):
+        if r[c["MEM"]] != {"4": "384", "5": "256"}.get(r[c["L"]], r[c["MEM"]]):
             fails.append(f"L={r[c['L']]} MEM {r[c['MEM']]} (293963 OOM: L=4 384G, L=5 256G)")
             break
-        if not r[c["MEM"]].endswith("G"):
-            fails.append(f"MEM {r[c['MEM']]!r} is not a Condor size")
+        if not r[c["MEM"]].isdigit():
+            fails.append(f"MEM {r[c['MEM']]!r} must be an integer GB (the auto-growing base)")
             break
     prio = {(r[c["SEED"]], r[c["L"]]): int(r[c["PRIO"]]) for r in rows}
     order = [prio[(s, L)] for s in "012" for L in "2345"]

@@ -35,6 +35,8 @@ from __future__ import annotations
 import math
 import multiprocessing as mp
 import os
+import resource
+import sys
 
 import numpy as np
 
@@ -47,6 +49,15 @@ from .state import fermion_determinants  # noqa: F401  (parity with graph API)
 # ---------------------------------------------------------------------------
 #  Array-native initial core
 # ---------------------------------------------------------------------------
+
+def peak_rss_mb(children=False):
+    """Peak resident set size of this process (or of its reaped children) in MB.
+    `ru_maxrss` is KB on Linux and bytes on macOS; it is MONOTONE, so a later reading
+    only ever shows a new high-water mark (never size a stage from a delta)."""
+    who = resource.RUSAGE_CHILDREN if children else resource.RUSAGE_SELF
+    r = resource.getrusage(who).ru_maxrss
+    return float(r) / (1024.0 ** 2) if sys.platform == "darwin" else float(r) / 1024.0
+
 
 def random_core_arrays(H, n_elec, n_init, rng, boson_init_mean=0.5):
     """Sample `n_init` near-vacuum random states as (ferm (n,W), bos (n,n_bos)).
@@ -306,6 +317,10 @@ def ground_state_arrays(H, n_elec, n_dets=200, n_init=20, pool_factor=3,
     cap_round = None
     converged = False
     stop_reason = "max_rounds"
+    # memory / pool trace (output only): one row per round, [round, N_core, P_pool,
+    # S_survivors, peak-RSS after expand, after trim+diag] in MB. Peak RSS is monotone,
+    # so the first row where it jumps names the stage that set the high-water mark.
+    trace = []
 
     for rnd in range(max_rounds):
         target = min(ceiling, max(target + n_init, int(np.ceil(target * 1.5))))
@@ -315,6 +330,7 @@ def ground_state_arrays(H, n_elec, n_dets=200, n_init=20, pool_factor=3,
                                             pool_factor, novel_ferm_frac=novel_ferm_frac,
                                             novel_oversample=novel_oversample)
         P = pool_ferm.shape[0]
+        rss_expand = peak_rss_mb()
         keep_per_group = max(1, (target * local_keep_ratio) // num_groups)
         # local_trim only helps when the pool is much larger than the target
         # (it cheaply prunes before the big global diagonalization). When each
@@ -341,6 +357,8 @@ def ground_state_arrays(H, n_elec, n_dets=200, n_init=20, pool_factor=3,
             prev_core_ferm=(pool_ferm[:N] if novel_keep_frac else None))
 
         history.append((core_ferm.shape[0], energy))
+        trace.append([int(rnd), int(N), int(P), int(surv_idx.shape[0]),
+                      round(rss_expand, 1), round(peak_rss_mb(), 1)])
         dE = abs(history[-1][1] - history[-2][1])
         n_now = core_ferm.shape[0]
         at_ceiling = n_now >= min(ceiling, sector)
@@ -370,6 +388,11 @@ def ground_state_arrays(H, n_elec, n_dets=200, n_init=20, pool_factor=3,
                 break
 
     coeffs = np.ascontiguousarray(coeffs, dtype=complex)
+    stats = {"rounds": len(trace),
+             "max_pool": max((t[2] for t in trace), default=int(core_ferm.shape[0])),
+             "max_surv": max((t[3] for t in trace), default=int(core_ferm.shape[0])),
+             "peak_rss_mb": round(peak_rss_mb(), 1),
+             "trace": trace}
     return GroundStateResult(
         energy=energy,
         states=[],                       # array path: not materialized (see io)
@@ -380,6 +403,7 @@ def ground_state_arrays(H, n_elec, n_dets=200, n_init=20, pool_factor=3,
         stop_reason=stop_reason,
         ferm_arr=np.ascontiguousarray(core_ferm, dtype=np.uint64),
         bos_arr=np.ascontiguousarray(core_bos, dtype=np.uint16),
+        stats=stats,
     )
 
 

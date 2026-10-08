@@ -44,6 +44,7 @@
 #         && git checkout remediation/vertex-fix && git reset --hard origin/remediation/vertex-fix
 #     cd hpc/detsvsL
 #     sh submit_nb3_Asweep_squeeze.sh test     # 1 squeeze shard: L=4 A=10 s0 to 64k, 64 starts
+#     sh submit_nb3_Asweep_squeeze.sh oomtest  # 1 undersized L=2 shard: exercises auto-OOM recovery + resume
 #     sh submit_nb3_Asweep_squeeze.sh all      # squeeze + refs (117 shards)
 #     sh submit_nb3_Asweep_squeeze.sh squeeze  # squeeze arm only
 #     sh submit_nb3_Asweep_squeeze.sh refs     # bare A=0/1 references only
@@ -63,15 +64,29 @@ ARGS='$(L) $(SEED) '"${BASE}"'-nb$(NB) $(FRAME) $(A) none $(MAXCORE) independent
 ENVSTR='NUQU_DEEP_SOLVE=1 NUQU_WARM_GROW=1 NUQU_LADDER_NRUNS=1 NUQU_N_B=$(NB) NUQU_N_RUNGS=11 NUQU_PT2_MAX_CORE=$(PT2CAP) NUQU_PHASE0_RUNS=$(P0RUNS) NUQU_PHASE0_SEED_STRIDE=1000 NUQU_PHASE0_SELECT_CORE=16000 NUQU_PHASE0_INIT=stratified NUQU_PHASE0_WORKERS=$(P0W)'
 VARS="FRAME,NB,L,A,SEED,MAXCORE,PT2CAP,MEM,CPUS,MAXRUNGSEC,PRIO,P0W,P0RUNS"
 
+# AUTOMATIC OUT-OF-MEMORY RECOVERY (2026-10-08, infrastructure C2; HTCondor 25.0 on hep-submit).
+# 293963 took three manual rounds of condor_qedit RequestMemory + condor_release because the
+# top-rung spike sits 100-250 GB above Condor's last 5-minute sample. Now a memory hold
+# (HoldReasonCode 34, cgroup limit) re-queues itself with more memory and no human in the loop:
+#   request_memory   = MEM GB x (1 + NumHolds), capped at MEMCAP_GB (qis nodes have ~1 TB);
+#   periodic_release = the job releases itself after a memory hold, up to MAXHOLDS holds,
+#                      then it stays held for a person to look at;
+#   on_exit_remove   = a provisioning failure (run_frame_shard.sh exit 3: uv / python /
+#                      wheels unreachable) is re-queued, up to 3 starts; everything else leaves.
+# Every restart RESUMES from the last checkpointed rung (C1), so a hold costs one rung.
+# NumHolds, not NumSystemHolds: in 293963's history the cgroup holds left NumSystemHolds at 0.
+MEMCAP_GB="${MEMCAP_GB:-768}"
+MAXHOLDS="${MAXHOLDS:-4}"
+
 row() { printf '%s %s %s %s %s %s %s %s %s %s %s %s %s\n' "$@"; }
-# L -> "MAXCORE PT2CAP MEM CPUS MAXRUNGSEC PRIO P0W"  (293963's final, working sizing; L=5 gets
+# L -> "MAXCORE PT2CAP MEM(GB) CPUS MAXRUNGSEC PRIO P0W"  (293963's final, working sizing; L=5 gets
 # 8 select workers at 384G so the 64-start select stage stays ~7-10 h)
 sizing_for_L() {
   case "$1" in
-    2) echo "1024000 1024000 32G  4 14400 40 4" ;;
-    3) echo "1024000 512000  128G 8 21600 30 8" ;;
-    4) echo "512000  256000  384G 8 21600 20 8" ;;
-    5) echo "128000  65536   384G 8 21600 10 8" ;;
+    2) echo "1024000 1024000 32  4 14400 40 4" ;;
+    3) echo "1024000 512000  128 8 21600 30 8" ;;
+    4) echo "512000  256000  384 8 21600 20 8" ;;
+    5) echo "128000  65536   384 8 21600 10 8" ;;
     *) echo "ERROR unknown L=$1" >&2; exit 1 ;;
   esac
 }
@@ -90,7 +105,12 @@ transfer_input_files    = run_frame_shard.sh
 transfer_output_files   = ""
 ${QIS}
 request_cpus            = \$(CPUS)
-request_memory          = \$(MEM)
+MEMCAP_MB               = $(( MEMCAP_GB * 1024 ))
+NHOLDS                  = ifThenElse(isUndefined(NumHolds), 0, NumHolds)
+MEMGROW_MB              = (\$(MEM) * 1024 * (1 + \$(NHOLDS)))
+request_memory          = ifThenElse(\$(MEMGROW_MB) < \$(MEMCAP_MB), \$(MEMGROW_MB), \$(MEMCAP_MB))
+periodic_release        = (HoldReasonCode == 34) && (NumHolds < ${MAXHOLDS})
+on_exit_remove          = !((ExitBySignal == False) && (ExitCode == 3) && (NumJobStarts < 3))
 request_disk            = 2560M
 JobPrio                 = \$(PRIO)
 Output                  = campaign_${BASE}/logs/${arm}_\$(FRAME)_L\$(L)_A\$(A)_s\$(SEED).out
@@ -122,10 +142,22 @@ if [ "$MODE" = "test" ]; then
   # one squeeze shard at the largest default start count: L=4 A=10 s0, 64 starts, to 64k with
   # PT2 every rung. Measures the squeezed select-stage cost and per-rung memory before the grid.
   G="campaign_${BASE}/smoke.txt"
-  row gaussian 3 4 10 0 64000 64000 192G 8 21600 50 8 64 > "$G"
+  row gaussian 3 4 10 0 64000 64000 192 8 21600 50 8 64 > "$G"
   submit_grid smoke "$G"
   echo "SMOKE: expect ~4-6 h. Check: ExitCode 0; rung 0 '0-select' with 64 trails and 64"
   echo "  phase0_select_starts; frame 'gaussian'; select wall; MemoryUsage per rung."
+  exit 0
+fi
+
+if [ "$MODE" = "oomtest" ]; then
+  # the auto-recovery smoke: a cheap L=2 A=4 s0 shard to 16k, deliberately undersized at
+  # OOM_MEM GB (default 1), so it should be held on memory, release itself with 2x, 3x, ...
+  # and finish from its checkpoint. Check `condor_q -l <id> -af NumHolds RequestMemory` while
+  # it runs and, when done, the shard JSON's "resumed" list and per-rung "mem".
+  G="campaign_${BASE}/oomtest.txt"
+  row gaussian 3 2 4 0 16000 16000 "${OOM_MEM:-1}" 4 7200 50 4 32 > "$G"
+  submit_grid oomtest "$G"
+  echo "OOMTEST: expect NumHolds >= 1, RequestMemory doubling, then ExitCode 0 within ~1 h."
   exit 0
 fi
 
@@ -134,11 +166,11 @@ case "$MODE" in
   all)     add_rows gaussian "$LS" "$AS" squeeze "$G"; add_rows bare "$REF_LS" "0 1" ref "$G" ;;
   squeeze) add_rows gaussian "$LS" "$AS" squeeze "$G" ;;
   refs)    add_rows bare "$REF_LS" "0 1" ref "$G" ;;
-  *) echo "usage: sh submit_nb3_Asweep_squeeze.sh {test|all|squeeze|refs}" >&2; exit 2 ;;
+  *) echo "usage: sh submit_nb3_Asweep_squeeze.sh {test|oomtest|all|squeeze|refs}" >&2; exit 2 ;;
 esac
 submit_grid Asweep "$G"
 echo "  -> squeeze A={${AS}} x L={${LS}} and/or bare refs A={0 1} x L={${REF_LS}}, seeds {${SEEDS}}"
 echo
-echo "Retrieve:  rsync -az hep:/nfs_scratch/bfriend3/NuQu/NuQu/hpc/detsvsL/campaign_${BASE}-nb3/shards/ \\"
+echo "Retrieve:  rsync -az --exclude '*.npz' hep:/nfs_scratch/bfriend3/NuQu/NuQu/hpc/detsvsL/campaign_${BASE}-nb3/shards/ \\"
 echo "               data/classical/\$(date +%F)/Asweep_squeeze_nb3_<cluster>/"
 exit 0

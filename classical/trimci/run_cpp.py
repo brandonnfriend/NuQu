@@ -582,7 +582,7 @@ def _adaptive_ladder_solve(H, A, ladder_start, n_rungs, solver, pt2_diag,
 def growing_ladder(H, A, rungs, phase0_runs=64, seed=0, pt2_diag=None,
                    verbose=True, on_rung=None, max_rung_seconds=None, pt2_max_core=None,
                    select_core=None, init_strategy="random", novel_ferm_frac=0.0,
-                   novel_keep_frac=0.0, phase0_workers=None):
+                   novel_keep_frac=0.0, phase0_workers=None, resume=None):
     """The 'grow, don't redo' core ladder (TrimCI / COO 3-phase workflow):
 
       Phase 0 — heavy ENSEMBLE at the smallest rung: `phase0_runs` independent random
@@ -609,7 +609,18 @@ def growing_ladder(H, A, rungs, phase0_runs=64, seed=0, pt2_diag=None,
                         configurations in every selection round (more hopping);
       phase0_workers -- fork workers for the select stage (None = the ensemble rule).
     The select stage's rungs are recorded with phase "0-select"; the first carries
-    `phase0_select` = [(seed, [E per select rung]), ...] for every init."""
+    `phase0_select` = [(seed, [E per select rung]), ...] for every init.
+
+    RESUME (2026-10-08, infrastructure C1). `resume={"core": (ferm, bos), "start_index": k}`
+    restarts the ladder at rung index k from a SAVED core (the core finished at rung k-1,
+    see `classical.trimci.checkpoint`), skipping the select / ensemble stage. Rung k is
+    grown exactly as an uninterrupted run would grow it -- warm-started from that core
+    with seed `seed + k` -- so a killed-then-resumed ladder is BIT-IDENTICAL to one that
+    never stopped (`tests/test_resume_ladder.py`). A select-stage rung is only a valid
+    resume point once the whole select stage is finished (its rungs are grown from the
+    winning init's seed, not `seed + i`), which is why `resumable` is False on every
+    select rung but the last. Each rung dict carries `rung_index` and `resumable` for the
+    caller's checkpoint hook. `resume=None` (default) is the unchanged ladder."""
     from .pt2 import pt2_from_result
     from .graph_arrays import (ground_state_arrays, ground_state_ensemble_arrays,
                                select_phase0_arrays, nucleon_arrangement_starts,
@@ -623,7 +634,14 @@ def growing_ladder(H, A, rungs, phase0_runs=64, seed=0, pt2_diag=None,
     if novel_keep_frac:
         grow_kw["novel_keep_frac"] = float(novel_keep_frac)
     trail, summary, sel_wall = None, None, 0.0
-    if select_core is not None or init_strategy == "stratified":
+    start_index = 0
+    if resume is not None:
+        start_index = int(resume["start_index"])
+        if not 1 <= start_index <= len(rungs):
+            raise ValueError(f"resume start_index {start_index} outside 1..{len(rungs)}")
+        if start_index == len(rungs):
+            return []                                # every rung is already done
+    if resume is None and (select_core is not None or init_strategy == "stratified"):
         sel = [r for r in rungs if select_core is not None and r <= select_core] or rungs[:1]
         init_ferms = (nucleon_arrangement_starts(H, A, phase0_runs, np.random.default_rng(seed))
                       if init_strategy == "stratified" else None)
@@ -646,7 +664,15 @@ def growing_ladder(H, A, rungs, phase0_runs=64, seed=0, pt2_diag=None,
                                "partition": sorted(cnt.values(), reverse=True),
                                "sites": sorted(cnt), "occupancy": [cnt[x] for x in sorted(cnt)]})
     core, out = None, []
+    if resume is not None:
+        core = (np.ascontiguousarray(resume["core"][0], dtype=np.uint64),
+                np.ascontiguousarray(resume["core"][1], dtype=np.uint16))
+        if verbose:
+            print(f"  [resume] rung index {start_index} (core {rungs[start_index]}) from a "
+                  f"saved {core[0].shape[0]}-det core; seeds continue at {seed + start_index}")
     for i, r in enumerate(rungs):
+        if i < start_index:
+            continue                                 # finished before the restart
         t = time.time()
         if trail is not None and i < len(trail):     # Phase 0 via the select levers
             res = trail[i]
@@ -676,6 +702,8 @@ def growing_ladder(H, A, rungs, phase0_runs=64, seed=0, pt2_diag=None,
             rung["phase0_select"] = summary
             if init_ferms is not None:
                 rung["phase0_select_starts"] = starts
+        rung["rung_index"] = int(i)
+        rung["resumable"] = not (trail is not None and i < len(trail) - 1)
         out.append(rung)
         if verbose:
             pt2s = (f"dE_PT2={rung['dE_pt2']:+.4f}" if rung["dE_pt2"] is not None

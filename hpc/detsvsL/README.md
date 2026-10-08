@@ -23,6 +23,13 @@ sandbox and throws it away on exit:
 The repo is only **read** from `/nfs_scratch`; the venv/interpreter/build live in the
 sandbox and are discarded; only the small **rundir** (JSON + PNG + log) transfers back.
 
+> **2026-10-08 — frame shards (`run_frame_shard.sh`).** The self-provisioning above still holds,
+> but the frame-shard wrapper now prefers a pinned `uv`, managed CPython 3.10 and wheelhouse from
+> `/nfs_scratch/bfriend3/NuQu/tools` (populate once with `sh provision_tools.sh` on the submit
+> node), copied into the sandbox, with download fallbacks and retries; provisioning failures exit
+> 3 and are re-queued by the submit files, which also grow `request_memory` and self-release
+> after a memory hold. Jobs resume from per-rung core checkpoints. See `../HPC_WORKFLOW.md` §4/§6.
+
 ## Files
 
 | file | role | run on |

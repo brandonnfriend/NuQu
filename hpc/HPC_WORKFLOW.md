@@ -80,6 +80,21 @@ the pinned deps → compile the C++ hot path. Key points:
   shard that OOMs/times-out at a deep step keeps everything it finished.
 - Pin the minimal deps in `hpc/detsvsL/requirements-hpc.txt` (numpy/scipy/openfermion/cirq/
   matplotlib/pybind11). Comparison-only tooling (netket/pyscf/official-trimci) stays out.
+- **Pinned tools on `/nfs_scratch` (2026-10-08).** 294238 was a full resubmit because one job
+  could not reach astral.sh at start-up. `run_frame_shard.sh` now takes a pinned `uv`, a managed
+  CPython 3.10 and a wheelhouse from `/nfs_scratch/bfriend3/NuQu/tools` (`NUQU_TOOLS`), **copying**
+  them into the sandbox (nothing on NFS is written by a job), and only falls back to the
+  downloads, each wrapped in a 3-attempt retry. Populate the directory **once** on the submit
+  node: `cd hpc/detsvsL && sh provision_tools.sh` (re-run after bumping `requirements-hpc.txt`
+  or the uv pin; it stages and renames atomically, so it is safe while jobs start). Any
+  provisioning failure exits **3**, which the submit files re-queue (below); a C++ build or
+  solver failure exits 1 and leaves the queue.
+- **Resume (2026-10-08).** The warm-grow ladder checkpoints every finished rung's core beside the
+  shard JSON (`<stem>.core.npz`, `classical/trimci/checkpoint.py`), and the wrapper runs the
+  python with `--resume` (`NUQU_RESUME=0` to overwrite instead). A released or re-queued job
+  continues from the next rung, bit-identical to an uninterrupted run; a finished shard exits 0
+  at once; a checkpoint from different settings is refused (exit 2). Pull shards with
+  `rsync --exclude '*.npz'`; the checkpoints are a few hundred MB each at 512k dets.
 
 ---
 
@@ -124,6 +139,26 @@ Learned the hard way; don't repeat the detours.
   RequestMemory <MB>` then `condor_release` — incremental save means the resubmit only redoes
   the deep rung. (Current per-L defaults live in the submit scripts; bump only the dense/deep
   corners.)
+- **Automatic OOM recovery (2026-10-08, `submit_nb3_Asweep*.sh`).** The 293963 holds were
+  transient top-rung spikes 100–250 GB above Condor's last 5-minute `MemoryUsage` sample
+  (HoldReasonCode 34, cgroup limit), and took three manual qedit+release rounds. The submit
+  files now carry, validated with `condor_submit -dry-run` + `classad_eval` on HTCondor 25.0:
+  ```
+  MEMGROW_MB       = ($(MEM) * 1024 * (1 + NumHolds))          # MEM column is an integer in GB
+  request_memory   = min(MEMGROW_MB, MEMCAP_MB)                # cap 768 GB (MEMCAP_GB env)
+  periodic_release = (HoldReasonCode == 34) && (NumHolds < 4)  # MAXHOLDS env
+  on_exit_remove   = !((ExitBySignal == False) && (ExitCode == 3) && (NumJobStarts < 3))
+  ```
+  So L=4 goes 384 → 768 GB on the first hold; L=3 128 → 256 → 384 → 512. After the fourth hold
+  the job stays held for a person. `NumHolds`, not `NumSystemHolds` (the cgroup holds left it
+  at 0 in 293963's history). Paired with resume (§4) a hold costs one rung. Smoke it with
+  `sh submit_nb3_Asweep_squeeze.sh oomtest` (one 1 GB L=2 shard: expect holds, doubling, exit 0).
+- **Per-rung memory records.** Every rung now stores `mem` = peak RSS of the process and of
+  its fork workers plus the solver's pool-size/RSS trace (`graph_arrays.ground_state_arrays`),
+  so the spike the samples miss is on record. `python -m misc.analyze_shard_memory --data <dir>`
+  prints the peak per shard, the stage it happened in (expand pool vs trim+diag vs select
+  worker) and a suggested `MEM` per (frame, L) — use it after the smoke shards to set the
+  memory per row rather than per L.
 
 ---
 

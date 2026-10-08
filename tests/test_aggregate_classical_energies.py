@@ -143,8 +143,11 @@ def main():
             md = open(os.path.join(out, "classical_energy_aggregate.md")).read()
             if "Cutoff shift $n_b$: 2 → 3" not in md:
                 fails.append("paired n_b=2->3 shift table missing though both cutoffs present")
-            if "Error budget" not in md or "SHCI ½-dist" not in md:
-                fails.append("error-budget table missing or not on the SHCI convention")
+            # the default sigma convention is trimci-coo since 2026-10-06 (its budget table is
+            # the bootstrap one); the legacy SHCI table appears under --sigma-convention nuqu-2026-09
+            if "Error budget" not in md or not ("SHCI ½-dist" in md
+                                                or "TrimCI/COO literature convention" in md):
+                fails.append("error-budget table missing (neither the literature nor the SHCI table)")
             if "Search robustness" not in md:
                 fails.append("search-robustness table missing -- the seed spread must be "
                              "reported somewhere once it is out of sigma")

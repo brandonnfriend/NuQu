@@ -78,7 +78,7 @@ def _style(ax):
     ax.grid(True, color=GRID, lw=0.8, alpha=1.0); ax.set_axisbelow(True)
 
 
-def load(dirs, require_post_fix=True, convention=DEFAULT_CONVENTION, A=None):
+def load(dirs, require_post_fix=True, convention=DEFAULT_CONVENTION, A=None, frame="bare"):
     """Collect shards into {(n_b, L): {seed: rungs}} plus a per-group metadata record.
 
     Keeps the DEEPEST ladder when the same (n_b, L, seed) appears in more than one
@@ -87,6 +87,11 @@ def load(dirs, require_post_fix=True, convention=DEFAULT_CONVENTION, A=None):
     `A` keeps only shards at that nucleon number. Groups are keyed by (n_b, L), so a
     directory holding several A (the explicit-A sweep) MUST be loaded one A at a time;
     mixing them would pool different Hamiltonians as if they were seeds, so it raises.
+
+    `frame` selects the shard files `<frame>_*.json` (shards are named by their frame:
+    `bare_*`, `gaussian_*`, ...; the squeeze campaign writes both into one directory).
+    "*" loads every frame, but a group may still hold only ONE frame (same guard as A):
+    the squeezed truncated H is a different operator from the bare one.
 
     Every shard is moved from the convention it was RUN in (`shard_convention`: legacy
     unless tagged) into `convention`; 'wick' (default) is `+23.3725*A` MeV above legacy.
@@ -98,7 +103,7 @@ def load(dirs, require_post_fix=True, convention=DEFAULT_CONVENTION, A=None):
                                                      "2026-08-16", "2026-08-17")):
             skipped.append(d)
             continue
-        for f in sorted(glob.glob(f"{d}/bare_*.json")):
+        for f in sorted(glob.glob(f"{d}/{frame}_*.json")):
             j = json.load(open(f))
             if A is not None and int(j["A"]) != int(A):
                 continue
@@ -110,6 +115,9 @@ def load(dirs, require_post_fix=True, convention=DEFAULT_CONVENTION, A=None):
             if key in meta and int(meta[key]["A"]) != int(j["A"]):
                 raise ValueError(f"(n_b, L)={key} holds shards at A={meta[key]['A']} and "
                                  f"A={j['A']} ({f}); pass A= to load one nucleon number")
+            if key in meta and meta[key]["frame"] != j.get("frame", "bare"):
+                raise ValueError(f"(n_b, L)={key} holds {meta[key]['frame']} and "
+                                 f"{j.get('frame')} shards ({f}); pass frame= to load one frame")
             top = max(r["core"] for r in rungs)
             if depth.get((key, seed), -1) >= top:
                 continue
@@ -117,7 +125,8 @@ def load(dirs, require_post_fix=True, convention=DEFAULT_CONVENTION, A=None):
             groups[key][seed] = rungs
             meta[key] = {"L": j["L"], "n_b": int(j["n_b"]), "N_f": j.get("N_f"),
                          "sites": j["sites"], "A": j["A"], "dim": j.get("dim", 3),
-                         "filling": j.get("filling"), "n_terms": j.get("n_terms")}
+                         "filling": j.get("filling"), "n_terms": j.get("n_terms"),
+                         "frame": j.get("frame", "bare")}
     if skipped:
         print(f"[load] REFUSED {len(skipped)} pre-vertex-fix director{'y' if len(skipped)==1 else 'ies'}: {skipped}")
     return groups, meta
@@ -443,7 +452,9 @@ def make_table(recs, out_path, convention=DEFAULT_CONVENTION):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", nargs="+", required=True,
-                    help="shard directories (bare_*.json); several may be given")
+                    help="shard directories (<frame>_*.json); several may be given")
+    ap.add_argument("--frame", default="bare",
+                    help="shard frame prefix to load: bare (default) | gaussian | ... | '*'")
     ap.add_argument("--out-dir", required=True)
     ap.add_argument("--allow-pre-vertex-fix", action="store_true",
                     help="NOT for release: lift the pre-2026-08-18 data refusal")
@@ -456,8 +467,8 @@ def main():
     args = ap.parse_args()
     os.makedirs(args.out_dir, exist_ok=True)
     groups, meta = load(args.data, require_post_fix=not args.allow_pre_vertex_fix,
-                        convention=args.convention)
-    assert groups, "no bare_*.json found"
+                        convention=args.convention, frame=args.frame)
+    assert groups, f"no {args.frame}_*.json found"
     print(f"[conv] {figure_note(args.convention)}")
     recs = analyze(groups, meta, sigma_convention=args.sigma_convention)
     for r in recs:
