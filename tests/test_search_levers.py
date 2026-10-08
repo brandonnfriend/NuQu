@@ -108,6 +108,20 @@ def test_rung_budget_skips_select_stage():
     assert [r["phase"] for r in off] == ["0-ensemble"], "levers-off budget behaviour changed"
 
 
+def test_select_records_start_arrangements():
+    """Stratified select runs record each start's nucleon arrangement (output only)."""
+    out = growing_ladder(_H, _A, [100, 200, 400], phase0_runs=6, seed=3, verbose=False,
+                         select_core=200, init_strategy="stratified", phase0_workers=1)
+    st = out[0]["phase0_select_starts"]
+    assert [x["run"] for x in st] == list(range(6)) and [x["seed"] for x in st] == list(range(3, 9))
+    assert all(sum(x["partition"]) == _A and max(x["partition"]) <= 4 for x in st)
+    assert all(sorted(x["occupancy"], reverse=True) == x["partition"] for x in st)
+    assert [s_ for s_, _ in out[0]["phase0_select"]] == [x["seed"] for x in st]
+    rnd = growing_ladder(_H, _A, [100, 200], phase0_runs=3, seed=3, verbose=False,
+                         select_core=200, phase0_workers=1)
+    assert "phase0_select_starts" not in rnd[0], "random starts have no assigned arrangement"
+
+
 def test_lever_submit_grid():
     """submit_search_levers.sh: 6 arms x A{2,4,5,6,9} x 3 seeds, each arm's lever env."""
     import shutil
@@ -148,6 +162,7 @@ def main():
     test_novel_expand_and_reserved_trim()
     test_select_keeps_lowest_at_last_rung()
     test_rung_budget_skips_select_stage()
+    test_select_records_start_arrangements()
     test_lever_submit_grid()
     print("test_search_levers: PASS  (levers OFF == old solve; stratified starts cover every "
           "arrangement type evenly; novel pool/core reservation; select = lowest at last rung)")

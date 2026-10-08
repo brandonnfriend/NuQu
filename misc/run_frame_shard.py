@@ -305,7 +305,7 @@ def main():
 
     def on_rung(rung, res):
         r = {k: rung[k] for k in ("core", "E_var", "dE_pt2", "E_pt2", "n_ext", "wall_s", "phase",
-                                  "phase0_select")
+                                  "phase0_select", "phase0_select_starts")
              if k in rung}
         r["mean_occ"] = _mean_occupation(res, Hbare.n_bos_modes)
         # QPE warm-start overlap p0 = |c_dominant|^2 of this (framed) core — the

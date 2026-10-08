@@ -145,7 +145,14 @@ The A-sweep turns ON select-core 16000 plus stratified starts; novel stays OFF. 
 - **L=3:** E∞ ± 0.3–0.6, but the power-law cross-check sits 7–10 lower.
 - **L=4:** E∞ ± 0.5–0.7; the power law resolves no limit.
 - **L=5:** bound only.
-- **Missing shard:** L5 A3 s2, which failed on a network error and was resubmitted as 294238.
+- **CAMPAIGN COMPLETE (2026-10-08):** 108/108 shards are done and reach the top rung. The final shard was L5 A3 s2 (294238; the network failure was resubmitted). Everything is pulled to `data/classical/2026-09-25/bare_Asweep_nb3_293963/`.
+
+**NEXT (prepped 2026-10-08, awaiting push + go-ahead):** `hpc/detsvsL/submit_nb3_Asweep_squeeze.sh`.
+- **Arms:** squeeze frame A=0..10 × L=2..4 × 3 seeds (99), plus bare A=0/1 refs × L=2..4 × 3 (18). L=5 is opt-in via `LS`.
+- **Phase-0 starts:** 16L capped at 64 (32/48/64) in the squeeze arm; the refs keep 32, matching 293963.
+- **Start records:** shards now record each start's nucleon arrangement (`rungs[0].phase0_select_starts`, output only).
+- **Smoke first:** `test` mode, L=4 A=10, 64 starts.
+- **Remaining ideas:** calibration, larger A and infrastructure are written up in `docs/classical_next_studies_2026-10-08.md` (local).
 
 **Preliminary multi-A figures:** `docs/presentation/classical_baseline_{multiA,perA}_prelim.png`, from the 80 finished shards pulled to `data/classical/2026-09-25/bare_Asweep_nb3_293963/`.
 - L=2–4 extrapolate at every A. L=5 is genuinely bound-only (per-rung drops still growing).

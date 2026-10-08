@@ -612,7 +612,8 @@ def growing_ladder(H, A, rungs, phase0_runs=64, seed=0, pt2_diag=None,
     `phase0_select` = [(seed, [E per select rung]), ...] for every init."""
     from .pt2 import pt2_from_result
     from .graph_arrays import (ground_state_arrays, ground_state_ensemble_arrays,
-                               select_phase0_arrays, nucleon_arrangement_starts)
+                               select_phase0_arrays, nucleon_arrangement_starts,
+                               mode_sites)
     rungs = sorted(set(int(r) for r in rungs))
     if init_strategy not in ("random", "stratified"):
         raise ValueError(f"init_strategy {init_strategy!r}: use 'random' or 'stratified'")
@@ -631,6 +632,19 @@ def growing_ladder(H, A, rungs, phase0_runs=64, seed=0, pt2_diag=None,
                                               init_ferms=init_ferms,
                                               n_workers=phase0_workers, **grow_kw)
         sel_wall = time.time() - t
+        if init_ferms is not None:
+            # record each start's nucleon arrangement (output only -- the solve is unchanged),
+            # so the basin study can tie every select-stage trail to the arrangement it began in
+            msite = mode_sites(H)
+            starts = []
+            for k, occ in enumerate(init_ferms):
+                occ_sites = [int(msite[m]) for m in range(H.n_ferm_modes) if (int(occ) >> m) & 1]
+                cnt = {}
+                for st in occ_sites:
+                    cnt[st] = cnt.get(st, 0) + 1
+                starts.append({"run": k, "seed": int(seed) + k,
+                               "partition": sorted(cnt.values(), reverse=True),
+                               "sites": sorted(cnt), "occupancy": [cnt[x] for x in sorted(cnt)]})
     core, out = None, []
     for i, r in enumerate(rungs):
         t = time.time()
@@ -660,6 +674,8 @@ def growing_ladder(H, A, rungs, phase0_runs=64, seed=0, pt2_diag=None,
                     "n_ext": pr["n_ext"], "wall_s": wall, "phase": ph}
         if i == 0 and summary is not None:
             rung["phase0_select"] = summary
+            if init_ferms is not None:
+                rung["phase0_select_starts"] = starts
         out.append(rung)
         if verbose:
             pt2s = (f"dE_PT2={rung['dE_pt2']:+.4f}" if rung["dE_pt2"] is not None
