@@ -65,10 +65,12 @@ UV_PYTHON_INSTALL_DIR="$TOOLS/uvpy" UV_PYTHON_DOWNLOADS=never "$UV" venv --pytho
 VIRTUAL_ENV="$TMP/venv" "$UV" pip install -q pip
 rm -rf "$TOOLS/wheels.new"; mkdir -p "$TOOLS/wheels.new"
 # uv resolves the pin set (pip's resolver cannot: cirq==1.4.0 -> cirq-rigetti conflict under
-# --only-binary); pip then only FETCHES those exact wheels, no resolving (--no-deps).
+# --only-binary); pip then only FETCHES those exact pins, no resolving (--no-deps), and BUILDS
+# a wheel for any sdist-only pin (lark==0.11.3 has no wheel on PyPI) so jobs install from
+# wheels alone, offline. Same platform as qis, so a built wheel is valid there.
 LOCK="$TOOLS/wheels.new/requirements.lock"
 "$UV" pip compile -q --python "$TMP/venv/bin/python" "$REQ" -o "$LOCK"
-"$TMP/venv/bin/python" -m pip download -q --no-deps -r "$LOCK" -d "$TOOLS/wheels.new" --only-binary=:all:
+"$TMP/venv/bin/python" -m pip wheel -q --no-deps -r "$LOCK" -w "$TOOLS/wheels.new"
 # prove the wheelhouse is complete OFFLINE, exactly as a job will use it
 UV_PYTHON_INSTALL_DIR="$TOOLS/uvpy" UV_PYTHON_DOWNLOADS=never "$UV" venv --python 3.10 "$TMP/venv2" >/dev/null
 VIRTUAL_ENV="$TMP/venv2" "$UV" pip install -q --no-index --find-links "$TOOLS/wheels.new" -r "$LOCK"
