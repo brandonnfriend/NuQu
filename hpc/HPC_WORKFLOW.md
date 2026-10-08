@@ -253,6 +253,11 @@ of control, with where each one lives.
 - **Modes** — every submit script has `test` (one shard, the first thing to run on new code),
   `all`, and arm selectors (`squeeze`, `refs`, …); `submit_nb3_Asweep_squeeze.sh oomtest` is the
   1-shard smoke for the memory policy + resume, with `OOM_MEM` (GB, default 2) as its base.
+- **Independent reference** — `hpc/dmrg/submit_dmrg_calib.sh {test|all}` runs block2 DMRG on
+  the same truncated H the TrimCI shards ran (`AS`, `L`, `DIM`, `NB`, `CHIS`, `MAXCHISEC`,
+  `MEM`, `CPUS`, `DISK` env); shards save after every χ but have NO resume, so a memory hold
+  restarts the χ ladder. `python -m misc.compare_dmrg_trimci --dmrg <dir> --trimci <dir>`
+  reports TrimCI E∞ − DMRG E∞ in units of σ.
 - **Memory policy** — `MEMCAP_GB` (default 768) caps the auto-growing request; `MAXHOLDS`
   (default 4) is how many memory holds a job may release itself from. The per-L base lives in
   the `sizing_for_L` table (MEM column, integer GB) and is overridable per row by editing the

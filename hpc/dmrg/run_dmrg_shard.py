@@ -9,6 +9,10 @@ compares the extrapolated E_inf to the framed TrimCI energies (gaussian+lf must 
 below it -- the leading-order projector-LF go/no-go).
 
     python -m hpc.dmrg.run_dmrg_shard --L 3 --A 14 --N_f 4 --bond-dims 100,200,400,800 --out x.json
+
+Extrapolation CALIBRATION (2026-10-08, classical_next_studies A1): the same shard at the
+TrimCI sweep's cutoff (`--n_b 3`, N_f defaults to 2**n_b = 8) is the independent reference
+the PT2-linear E_inf is compared against (misc/compare_dmrg_trimci.py).
 """
 import argparse
 import json
@@ -26,8 +30,11 @@ def main():
     ap.add_argument("--L", type=int, required=True)
     ap.add_argument("--dim", type=int, default=3)
     ap.add_argument("--A", type=int, required=True)
-    ap.add_argument("--N_f", type=int, default=4, help="boson levels (match the frame runs: 4)")
-    ap.add_argument("--n_b", type=int, default=2, help="boson bits (match the frame runs: 2)")
+    ap.add_argument("--N_f", type=int, default=None,
+                    help="boson levels per pion mode; default 2**n_b (the TrimCI shards' cutoff)")
+    ap.add_argument("--n_b", type=int, default=2, help="boson bits (frame runs: 2; the n_b=3 sweeps: 3)")
+    ap.add_argument("--n-threads", type=int, default=None,
+                    help="block2 threads (default: the adapter's 4; pass the job's cpu count)")
     ap.add_argument("--bond-dims", default="100,200,400,800",
                     help="comma-separated chi schedule (warm-started in order)")
     ap.add_argument("--n-sweeps-per", type=int, default=6)
@@ -38,6 +45,8 @@ def main():
     args = ap.parse_args()
 
     bond_dims = tuple(int(x) for x in args.bond_dims.split(","))
+    if args.N_f is None:
+        args.N_f = 2 ** args.n_b
     sites = args.L ** args.dim
     t0 = time.time()
 
@@ -45,7 +54,7 @@ def main():
         "kind": "dmrg_shard", "L": args.L, "dim": args.dim, "A": args.A,
         "N_f": args.N_f, "n_b": args.n_b, "sites": sites,
         "bond_dims": list(bond_dims), "n_sweeps_per": args.n_sweeps_per,
-        "results": [], "done": False,
+        "n_threads": args.n_threads, "results": [], "done": False,
     }
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
 
@@ -64,10 +73,11 @@ def main():
         print(f"[dmrg] chi={rung['chi']:>5}  E={rung['E']:.4f}  "
               f"S_max={rung['S_max_bond']}  ({out['wall_s']:.0f}s)", flush=True)
 
-    run_dmrg(args.L, args.dim, args.A, N_f=args.N_f, n_b=args.n_b,
-             bond_dims=bond_dims, n_sweeps_per=args.n_sweeps_per, on_chi=on_chi,
-             max_chi_seconds=args.max_chi_seconds)
+    _, H = run_dmrg(args.L, args.dim, args.A, N_f=args.N_f, n_b=args.n_b,
+                    bond_dims=bond_dims, n_sweeps_per=args.n_sweeps_per, on_chi=on_chi,
+                    max_chi_seconds=args.max_chi_seconds, n_threads=args.n_threads)
 
+    out["contact_convention"] = H.meta.get("contact_convention")   # 'wick' since 2026-09-14
     out["done"] = True
     out["wall_s"] = time.time() - t0
     save()

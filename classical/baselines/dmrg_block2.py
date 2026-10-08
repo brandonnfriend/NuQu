@@ -45,8 +45,11 @@ def _boson_ops(N_f):
     return {"": I, "B": B, "A": A}
 
 
-def build_mpo(H, L, dim, A, N_f, driver=None, iprint=0):
-    """Construct (driver, mpo, constant) for the mixed H over the A-nucleon sector."""
+def build_mpo(H, L, dim, A, N_f, driver=None, iprint=0, n_threads=None):
+    """Construct (driver, mpo, constant) for the mixed H over the A-nucleon sector.
+
+    `n_threads` is block2's own thread count (None keeps the historical 4; an HPC shard
+    passes its cpu allocation -- 293938 ran 16-cpu jobs on a 4-thread driver)."""
     from pyblock2.driver.core import DMRGDriver, SymmetryTypes
     import os
     num_sites = L ** dim
@@ -58,7 +61,7 @@ def build_mpo(H, L, dim, A, N_f, driver=None, iprint=0):
         scratch = f"data/.block2_scratch/pid{os.getpid()}_{L}d{dim}_{_DRIVER_COUNT}"
         os.makedirs(scratch, exist_ok=True)
         driver = DMRGDriver(symm_type=SymmetryTypes.SAny | SymmetryTypes.CPX,
-                            n_threads=4, scratch=scratch, stack_mem=4 << 30)
+                            n_threads=int(n_threads or 4), scratch=scratch, stack_mem=4 << 30)
     driver.set_symmetry_groups("U1Fermi")
     Q = driver.bw.SX
 
@@ -98,7 +101,7 @@ def build_mpo(H, L, dim, A, N_f, driver=None, iprint=0):
 
 
 def run_dmrg(L, dim, A, N_f=2, n_b=1, bond_dims=(20, 40, 80, 160, 320),
-             n_sweeps_per=4, iprint=0, on_chi=None, max_chi_seconds=None):
+             n_sweeps_per=4, iprint=0, on_chi=None, max_chi_seconds=None, n_threads=None):
     """DMRG energy vs bond dimension chi for the mixed H. Returns list of dicts.
 
     `on_chi(dict)`, if given, fires after EACH bond dimension with that rung's
@@ -114,7 +117,7 @@ def run_dmrg(L, dim, A, N_f=2, n_b=1, bond_dims=(20, 40, 80, 160, 320),
     import time
     from classical.trimci import build_from_eft
     H = build_from_eft(L=L, dim=dim, n_b=n_b, N_f=N_f)
-    driver, mpo, const = build_mpo(H, L, dim, A, N_f, iprint=iprint)
+    driver, mpo, const = build_mpo(H, L, dim, A, N_f, iprint=iprint, n_threads=n_threads)
 
     out = []
     mps = driver.get_random_mps("KET", bond_dim=bond_dims[0], nroots=1)

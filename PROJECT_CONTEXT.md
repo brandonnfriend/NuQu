@@ -153,6 +153,13 @@ The A-sweep turns ON select-core 16000 plus stratified starts; novel stays OFF. 
 - **Start records:** shards now record each start's nucleon arrangement (`rungs[0].phase0_select_starts`, output only).
 - **Smoke first:** `test` mode, L=4 A=10, 64 starts.
 - **Remaining ideas:** calibration, larger A and infrastructure are written up in `docs/classical_next_studies_2026-10-08.md` (local).
+- **Extrapolation calibration (A1, prepped 2026-10-08, awaiting push + go-ahead):** `hpc/dmrg/submit_dmrg_calib.sh`
+  runs block2 DMRG on the identical bare n_b=3 (N_f=8) L=2 Hamiltonian (term-by-term equal to the
+  A-sweep's) at A∈{2,4,6,8,10}, χ 100→800 with a 4 h per-χ cap, 16 cpus / 48 GB / 48 GB disk, auto-OOM
+  policy; `misc/compare_dmrg_trimci.py` extrapolates E vs discarded weight and reports the gap to
+  the PT2-linear E∞ in σ. Preview from the 293938 A=2 shard (χ≤200 only): DMRG E∞ 288.375 ± 0.007
+  vs TrimCI 288.32 ± 0.01 MeV/site, gap −5σ, DMRG(χ=200) already 0.3/site below TrimCI's best
+  bound — the campaign decides whether the PT2-linear intercept over-corrects at L=2.
 - **Infrastructure for the squeeze campaign (2026-10-08, branch `infra/resume-oom-provisioning`):**
   (C1) per-rung core checkpoints + `--resume` (bit-identical, `tests/test_resume_ladder.py`);
   (C2) auto-growing `request_memory` + `periodic_release` on memory holds + provisioning
