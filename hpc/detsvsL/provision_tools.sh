@@ -23,7 +23,7 @@ set -eu
 TOOLS="${1:-/nfs_scratch/bfriend3/NuQu/tools}"
 UV_VERSION="${NUQU_UV_VERSION:-0.12.23}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
-REQ="$HERE/requirements-hpc.txt"
+REQ="${NUQU_REQ:-$HERE/requirements-hpc.txt}"     # override when run via `ssh ... sh -s`
 ARCH="x86_64-unknown-linux-gnu"
 [ -r "$REQ" ] || { echo "ERROR: $REQ not found" >&2; exit 1; }
 mkdir -p "$TOOLS"

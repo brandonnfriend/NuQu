@@ -241,6 +241,62 @@ scientifically neutral — the fork ensemble is bit-identical regardless of core
 
 ---
 
+## 8b. The control surface — every lever we have (2026-10-08)
+
+What an agent can turn, from the outside, without editing solver code. Specifics of the
+classical and quantum drivers live in their submit-file headers; this is the list of **kinds**
+of control, with where each one lives.
+
+**Before launch (submit-file env, read at `sh submit_*.sh <mode>` time)**
+- **Grid trims** — `AS`, `LS`, `SEEDS`, `REF_LS`, `ARMS` (space-separated lists) shrink or extend
+  the grid without editing the script; each submit prints the resulting cell count.
+- **Modes** — every submit script has `test` (one shard, the first thing to run on new code),
+  `all`, and arm selectors (`squeeze`, `refs`, …); `submit_nb3_Asweep_squeeze.sh oomtest` is the
+  1-shard smoke for the memory policy + resume, with `OOM_MEM` (GB, default 2) as its base.
+- **Memory policy** — `MEMCAP_GB` (default 768) caps the auto-growing request; `MAXHOLDS`
+  (default 4) is how many memory holds a job may release itself from. The per-L base lives in
+  the `sizing_for_L` table (MEM column, integer GB) and is overridable per row by editing the
+  grid file before `condor_submit` (or `NUQU_MEM_OVERRIDE` where a script offers it).
+- **Solver knobs via Condor `environment`** — `NUQU_*` variables the run script turns into
+  driver flags: depth/cutoff (`NUQU_N_B`, `NUQU_N_RUNGS`, `NUQU_PT2_MAX_CORE`, `NUQU_LADDER_START`),
+  search (`NUQU_PHASE0_RUNS`, `NUQU_PHASE0_SEED_STRIDE`, `NUQU_PHASE0_SELECT_CORE`,
+  `NUQU_PHASE0_INIT`, `NUQU_PHASE0_WORKERS`, `NUQU_NOVEL_*`), parallelism (`NUQU_DEEP_SOLVE`,
+  `NUQU_CPUS`), extras (`NUQU_BACK_EVAL`, `NUQU_EXACT_REF`, `NUQU_DIM`, …). The full set and
+  defaults are the `${NUQU_…:-}` lines at the top of `run_frame_shard.sh`; the campaign scripts
+  set the validated combination and a shard records what it ran with in its manifest.
+
+**Provisioning (per job, automatic)**
+- `NUQU_TOOLS` (default `/nfs_scratch/bfriend3/NuQu/tools`): pinned `uv`, managed Python 3.10
+  and a wheelhouse, copied into the sandbox; missing pieces fall back to downloads with a
+  3-attempt retry. `NUQU_UV_VERSION` pins uv (keep equal in `provision_tools.sh`). Repopulate
+  with `sh hpc/detsvsL/provision_tools.sh` after changing `requirements-hpc.txt` (`FORCE=1`
+  redoes the 5-minute interpreter unpack). Provisioning failures exit 3 and self-requeue.
+
+**Resume (per job, automatic)**
+- Every finished rung is checkpointed beside the shard JSON; a restarted job continues from it,
+  bit-identically. `NUQU_RESUME=0` forces a fresh run that overwrites. A finished shard re-run
+  exits 0; a checkpoint from different settings is refused (exit 2) rather than mixed.
+
+**In flight (condor_*, on the pinned submit node)**
+- `condor_qedit <id> RequestMemory <MB>` / `JobPrio <n>` / `Environment "<…>"` with `-constraint`
+  to reshape held or idle jobs in place (the auto-policy stacks on top of a manual bump).
+- `condor_hold` / `condor_release` with `-constraint` to share the pool between campaigns
+  (same-user jobs are FIFO by priority, not fair-shared); `condor_rm` only for batches we own.
+- Memory holds release themselves with more memory up to `MAXHOLDS`; a job still held with
+  `NumHolds` = `MAXHOLDS` is the signal for a person. Exit code 3 in the log = provisioning retry.
+
+**Watching**
+- `condor_q -af ClusterId ProcId JobStatus NumHolds RequestMemory NumJobStarts RemoteHost`
+  and `condor_q -better-analyze <id>` (disk/memory/cpus matchability, §6b).
+- `condor_history <cluster> -af ProcId ExitCode MemoryUsage NumJobStarts LastHoldReason` after.
+- Shard JSONs: `done`, `rungs[*].mem` (peak RSS per rung), `resumed` (restart records),
+  `checkpoint`. `python -m misc.analyze_shard_memory --data <dir>` summarizes memory per
+  (frame, L) and suggests the next MEM.
+
+**After**
+- `rsync -az --exclude '*.npz' hep:<campaign>/shards/ data/classical/<date>/<name>_<cluster>/`
+  (checkpoints stay on scratch), then the loaders with `--frame` where a campaign mixes frames.
+
 ## 9. The meta-lesson
 
 **Profile before optimizing.** The entire "we're only using one thread" thread turned out to be
