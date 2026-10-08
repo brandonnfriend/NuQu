@@ -153,6 +153,12 @@ The A-sweep turns ON select-core 16000 plus stratified starts; novel stays OFF. 
 - **Start records:** shards now record each start's nucleon arrangement (`rungs[0].phase0_select_starts`, output only).
 - **Smoke first:** `test` mode, L=4 A=10, 64 starts.
 - **Remaining ideas:** calibration, larger A and infrastructure are written up in `docs/classical_next_studies_2026-10-08.md` (local).
+- **Seed-sharing close-out re-runs (prepped 2026-10-08, awaiting push + go-ahead):** `hpc/detsvsL/submit_seedfix_rerun.sh`
+  re-runs 292477 (filling 1.0, seeds 1,2 × L=2..5; `SEEDS="0 1 2"` for the full set, `NB2=1` for 292478),
+  the n_b energy gate at L=2/3 (seeds 1-4) and volscaling primary+deep (seeds 1,2) under the production
+  search levers, everything else per legacy campaign; 88 shards, priorities below the squeeze campaign.
+  New shards carry `phase0_seed_stride`, so `analyze_search_levers --seed-audit` should show 0 collapsed
+  cells; central values may move at L≥3. Then re-aggregate + re-seal and retire the legacy artifacts.
 - **Extrapolation calibration (A1, prepped 2026-10-08, awaiting push + go-ahead):** `hpc/dmrg/submit_dmrg_calib.sh`
   runs block2 DMRG on the identical bare n_b=3 (N_f=8) L=2 Hamiltonian (term-by-term equal to the
   A-sweep's) at A∈{2,4,6,8,10}, χ 100→800 with a 4 h per-χ cap, 16 cpus / 48 GB / 48 GB disk, auto-OOM

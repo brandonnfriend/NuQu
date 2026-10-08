@@ -253,6 +253,9 @@ of control, with where each one lives.
 - **Modes** — every submit script has `test` (one shard, the first thing to run on new code),
   `all`, and arm selectors (`squeeze`, `refs`, …); `submit_nb3_Asweep_squeeze.sh oomtest` is the
   1-shard smoke for the memory policy + resume, with `OOM_MEM` (GB, default 2) as its base.
+- **Legacy re-runs** — `hpc/detsvsL/submit_seedfix_rerun.sh {test|baseline|gate|volscaling|all}`
+  re-runs the three seed-sharing-affected datasets under the production search (`SEEDS`,
+  `GATE_SEEDS`, `VOL_SEEDS`, `NB2=1` trims/extends); priorities below the squeeze campaign.
 - **Independent reference** — `hpc/dmrg/submit_dmrg_calib.sh {test|all}` runs block2 DMRG on
   the same truncated H the TrimCI shards ran (`AS`, `L`, `DIM`, `NB`, `CHIS`, `MAXCHISEC`,
   `MEM`, `CPUS`, `DISK` env); shards save after every χ but have NO resume, so a memory hold
