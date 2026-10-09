@@ -84,12 +84,31 @@ def test_seed_spread_not_in_sigma_and_legacy_switch():
     assert old["sigma"] == ref["sigma"] and old["E_inf"] == ref["E_inf"]
 
 
+def test_late_window_and_tie_break():
+    """Seeds with IDENTICAL top rungs but different early drops must give the same E_inf
+    (late window), and a bound tie picks the lowest extrapolating seed, not float noise
+    (squeeze L=2 A=4/8, 2026-10-09)."""
+    dE = [-12.0, -10.0, -8.5, -7.2, -6.1, -5.2, -4.5, -3.9, -3.4, -3.0]
+    late = [{"core": 1000 * 2 ** k, "E_var": 50.0 - 0.6 * d, "dE_pt2": d} for k, d in enumerate(dE)]
+    a = [dict(r) for r in late]
+    a[3]["E_var"] += 5.0; a[2]["E_var"] += 5.5; a[1]["E_var"] += 6.0; a[0]["E_var"] += 6.5
+    b = [dict(r) for r in late]
+    b[0]["E_var"] += 9.0                          # largest drop at the very first rung
+    va, vb = einf_literature(a, sites=8), einf_literature(b, sites=8)
+    assert va["post_cores"] == vb["post_cores"] == [r["core"] for r in late[-6:]]
+    assert va["ok"] and vb["ok"] and abs(va["E_inf"] - vb["E_inf"]) < 1e-12
+    assert "window_shift" in va
+    pooled = combine_seeds({2: b, 0: a, 1: b}, sites=8)
+    assert pooled["best_seed"] == 0
+
+
 def main():
     test_r2scan_recovers_planted_limit()
     test_no_curvature_is_refused()
     test_pt2_bootstrap_recovers_intercept()
     test_primary_crosscheck_and_pool_rung()
     test_seed_spread_not_in_sigma_and_legacy_switch()
+    test_late_window_and_tie_break()
     print("test_sigma_literature: PASS  (R2-scan limit + c.i.; no-curvature refusal; PT2 bootstrap; "
           "PT2 primary / power cross-check; pool rung = bound only; legacy switch intact)")
 

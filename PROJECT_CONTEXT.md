@@ -140,6 +140,15 @@ The A-sweep turns ON select-core 16000 plus stratified starts; novel stays OFF. 
 - **Legacy:** `nuqu-2026-09` is still selectable and reproduces the accepted JSON exactly.
 - **Retired:** last-doubling ΔE as an uncertainty indicator.
 
+**Fit window + tie-break (2026-10-09, literature convention only):**
+- **The change:** E∞ is fit on the last 6 post-collapse core-energy rungs (`LITERATURE_FIT_WINDOW`). The ±1-rung window shift is reported beside σ, never added.
+- **Tie-break:** equal-bound seeds (within 1e-6 MeV) prefer one that extrapolates, then the lowest seed number.
+- **Why:** seeds with identical tops had got different windows from the largest-drop split (squeeze L=2 A=4/8: σ ~35 MeV/site from a power-law fallback).
+- **A/B over all data:** legacy is bit-identical. Under the literature convention, 59/150 cells move. The squeeze cells move ≤0.5, and A=4/8 L=2 are fixed to 275.54 / 248.02 ± 0.00. Bare L=3 moves down 0.5–1.0 MeV/site with σ 0.4–1.5. 292477 L=3 goes 314.55±0.63 → 315.44±1.00.
+- **Exact A=0 pion vacuum** (multimode Bogoliubov): 304.149 / 331.461 / 344.596 MeV/site at L=2/3/4.
+  - Squeeze E∞ matches to 0.01.
+  - Bare L=3 E∞ is 332.73, 1.3 too high, so the bare L≥3 extrapolations are biased high.
+
 **Full A-sweep:** `misc/make_Asweep_figures.py` → `docs/presentation/classical_baseline_{multiA,perA}.png` + `_table.md`.
 - **L=2:** E∞ ± ≤0.13 MeV/site, apart from A=9 at 0.45. The cross-check agrees to ≤0.15.
 - **L=3:** E∞ ± 0.3–0.6, but the power-law cross-check sits 7–10 lower.
@@ -147,7 +156,7 @@ The A-sweep turns ON select-core 16000 plus stratified starts; novel stays OFF. 
 - **L=5:** bound only.
 - **CAMPAIGN COMPLETE (2026-10-08):** 108/108 shards are done and reach the top rung. The final shard was L5 A3 s2 (294238; the network failure was resubmitted). Everything is pulled to `data/classical/2026-09-25/bare_Asweep_nb3_293963/`.
 
-**NEXT (prepped 2026-10-08, awaiting push + go-ahead):** `hpc/detsvsL/submit_nb3_Asweep_squeeze.sh`.
+**LIVE (launched 2026-10-08): cluster 294246** (`CAMPAIGN=20261008-184336-nb3AsweepSq`, 117 shards, from 2ee6e93; smoke 294243 passed). Script: `hpc/detsvsL/submit_nb3_Asweep_squeeze.sh`.
 - **Arms:** squeeze frame A=0..10 × L=2..4 × 3 seeds (99), plus bare A=0/1 refs × L=2..4 × 3 (18). L=5 is opt-in via `LS`.
 - **Phase-0 starts:** 16L capped at 64 (32/48/64) in the squeeze arm; the refs keep 32, matching 293963.
 - **Start records:** shards now record each start's nucleon arrangement (`rungs[0].phase0_select_starts`, output only).

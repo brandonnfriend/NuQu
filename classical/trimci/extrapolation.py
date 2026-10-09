@@ -629,35 +629,12 @@ def fit_einf_pt2_bootstrap(E_vars, dE_pt2s, n_boot=500, seed=0, min_points=4):
     return out
 
 
-def einf_literature(rungs, sites=None, min_post=5, n_scan=5000, n_boot=500, seed=0,
-                    min_pt2=4):
-    """E_infinity +- sigma on the TrimCI/COO literature convention, for ONE ladder.
+LITERATURE_FIT_WINDOW = 6   # last N post-collapse core-energy rungs (COO fits a late window)
 
-    Same record shape as `einf_with_uncertainty` (so `combine_seeds`, the aggregators and
-    the release gate read either). `dE_last_doubling` is still computed for backward
-    compatibility but is NOT an error term: late drops can be the search moving to a better
-    nucleon arrangement, so it is not comparable across seeds (2026-10-06)."""
-    rungs = sorted([r for r in rungs if r.get("E_var") is not None], key=lambda r: r["core"])
-    per = lambda x: (x / sites) if (x is not None and sites) else None
-    E_var_bound = rungs[-1]["E_var"] if rungs else None
-    fit_rungs = core_energy_ladder(rungs)
-    pool_cores = [r["core"] for r in rungs if r not in fit_rungs]
-    post, basin = split_at_collapse(fit_rungs, sites=sites)
-    dE_last = (abs(fit_rungs[-1]["E_var"] - fit_rungs[-2]["E_var"])
-               if len(fit_rungs) >= 2 else None)
+
+def _literature_fits(post, E_var_bound, n_scan, n_boot, seed, min_post, min_pt2):
+    """Both literature estimators on one fit window, with the variational guard."""
     pt2_post = [r for r in post if r.get("dE_pt2") is not None]
-    E_pt2_deepest = (pt2_post[-1]["E_var"] + pt2_post[-1]["dE_pt2"]) if pt2_post else None
-    out = {
-        "convention": LITERATURE_CONVENTION,
-        "n_rungs": len(rungs), "n_post": len(post),
-        "pool_rungs_excluded_from_fit": pool_cores,
-        "cores": [r["core"] for r in rungs], "post_cores": [r["core"] for r in post],
-        "n_pt2_post": len(pt2_post),
-        "E_var_bound": E_var_bound, "E_var_bound_ps": per(E_var_bound),
-        "dE_last_doubling": dE_last, "dE_last_doubling_ps": per(dE_last),
-        "E_var_plus_pt2": E_pt2_deepest, "E_var_plus_pt2_ps": per(E_pt2_deepest),
-        "sites": sites, **basin,
-    }
     power = fit_einf_power_r2scan([r["core"] for r in post], [r["E_var"] for r in post],
                                   E_bound=E_var_bound, n_scan=n_scan, n_boot=n_boot,
                                   seed=seed, min_points=min_post)
@@ -672,6 +649,46 @@ def einf_literature(rungs, sites=None, min_post=5, n_scan=5000, n_boot=500, seed
         if est.get("ok") and E_var_bound is not None and est["E_inf"] > E_var_bound + 1e-9:
             est.update(ok=False, reason=f"extrapolation {est['E_inf']:.3f} lies ABOVE the "
                                          f"variational bound {E_var_bound:.3f}")
+    return pt2, power
+
+
+def einf_literature(rungs, sites=None, min_post=5, n_scan=5000, n_boot=500, seed=0,
+                    min_pt2=4, window=LITERATURE_FIT_WINDOW):
+    """E_infinity +- sigma on the TrimCI/COO literature convention, for ONE ladder.
+
+    Same record shape as `einf_with_uncertainty` (so `combine_seeds`, the aggregators and
+    the release gate read either). `dE_last_doubling` is still computed for backward
+    compatibility but is NOT an error term: late drops can be the search moving to a better
+    nucleon arrangement, so it is not comparable across seeds (2026-10-06)."""
+    rungs = sorted([r for r in rungs if r.get("E_var") is not None], key=lambda r: r["core"])
+    per = lambda x: (x / sites) if (x is not None and sites) else None
+    E_var_bound = rungs[-1]["E_var"] if rungs else None
+    fit_rungs = core_energy_ladder(rungs)
+    pool_cores = [r["core"] for r in rungs if r not in fit_rungs]
+    post_all, basin = split_at_collapse(fit_rungs, sites=sites)
+    # LATE WINDOW (2026-10-09): fit only the last `window` post-collapse core-energy rungs,
+    # as COO fits a late window and reports its sensitivity. Without it the window began at
+    # the largest single drop, so seeds with IDENTICAL top rungs got different windows
+    # (squeeze L=2 A=4/8: one seed fit 32k-1M, two fit 2k-1M over curved early rungs, the
+    # PT2 line overshot the bound and the power-law fallback gave sigma ~35 MeV/site).
+    post = post_all[-window:] if window and len(post_all) > window else list(post_all)
+    dE_last = (abs(fit_rungs[-1]["E_var"] - fit_rungs[-2]["E_var"])
+               if len(fit_rungs) >= 2 else None)
+    pt2_post = [r for r in post if r.get("dE_pt2") is not None]
+    E_pt2_deepest = (pt2_post[-1]["E_var"] + pt2_post[-1]["dE_pt2"]) if pt2_post else None
+    out = {
+        "convention": LITERATURE_CONVENTION, "fit_window": window,
+        "n_post_all": len(post_all),
+        "n_rungs": len(rungs), "n_post": len(post),
+        "pool_rungs_excluded_from_fit": pool_cores,
+        "cores": [r["core"] for r in rungs], "post_cores": [r["core"] for r in post],
+        "n_pt2_post": len(pt2_post),
+        "E_var_bound": E_var_bound, "E_var_bound_ps": per(E_var_bound),
+        "dE_last_doubling": dE_last, "dE_last_doubling_ps": per(dE_last),
+        "E_var_plus_pt2": E_pt2_deepest, "E_var_plus_pt2_ps": per(E_pt2_deepest),
+        "sites": sites, **basin,
+    }
+    pt2, power = _literature_fits(post, E_var_bound, n_scan, n_boot, seed, min_post, min_pt2)
     out["power"], out["pt2"] = power, pt2
     # PRIMARY: the TrimCI paper's own estimator (its Table II extrapolations are PT2-linear)
     # when available; the COO power law otherwise. The other one is the cross-check, as in
@@ -688,6 +705,20 @@ def einf_literature(rungs, sites=None, min_post=5, n_scan=5000, n_boot=500, seed
         return out
     E_inf, sig = prim["E_inf"], prim["sigma"]
     gap = abs(other["E_inf"] - E_inf) if other.get("ok") else None
+    # window sensitivity: refit the SAME estimator one rung narrower / wider (reported, not
+    # added -- COO varies its fit window the same way)
+    shifts = {}
+    for w in (window - 1, window + 1):
+        if not window or w < 1 or w > len(post_all) or w == len(post):
+            continue
+        p2, pw = _literature_fits(post_all[-w:], E_var_bound, n_scan, n_boot, seed,
+                                  min_post, min_pt2)
+        e = (p2 if name == "pt2_linear" else pw)
+        if e.get("ok"):
+            shifts[w] = abs(e["E_inf"] - E_inf)
+    out["window_shift"] = max(shifts.values()) if shifts else None
+    out["window_shift_ps"] = per(out["window_shift"])
+    out["window_shift_by_w"] = {str(k): v for k, v in shifts.items()}
     out.update(ok=True, primary=name, reason=prim["reason"], E_inf=E_inf, E_inf_ps=per(E_inf),
                sigma=sig, sigma_ps=per(sig), sigma_source="bootstrap",
                ci90=prim["ci90"], ci90_ps=[per(x) for x in prim["ci90"]],
@@ -768,7 +799,16 @@ def combine_seeds(per_seed, sites=None, min_post=3, convention=None):
     # yielded a number: seen at L=5, where seed 0 (bound 46289.1, 7 rungs to core 64,000)
     # could not extrapolate and seed 1 (bound 46776.5, 5 rungs to core 16,000) was reported
     # in its place -- a shallower trajectory standing in for the deepest one.
-    best_seed = min(final, key=lambda s: final[s]["E_var_bound"])
+    # Tie-break (2026-10-09): seeds whose bounds agree to 1e-6 MeV ARE equally deep, so among
+    # them prefer one that extrapolated, then the lowest seed number -- deterministic, never a
+    # float-noise pick (squeeze L=2 A=4/8: three identical ladders, seed chosen by 1e-12).
+    # The legacy convention keeps its original pick, so it stays a frozen comparison path.
+    if convention == LITERATURE_CONVENTION:
+        bmin = min(final[s_]["E_var_bound"] for s_ in final)
+        tied = [s_ for s_ in final if final[s_]["E_var_bound"] <= bmin + 1e-6]
+        best_seed = min(tied, key=lambda s_: (s_ not in ok, s_))
+    else:
+        best_seed = min(final, key=lambda s: final[s]["E_var_bound"])
     if best_seed not in ok:
         alt = min(ok, key=lambda s: ok[s]["E_var_bound"])
         pooled["seed_robustness"] = {
