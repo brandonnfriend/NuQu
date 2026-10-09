@@ -69,7 +69,7 @@ MEMGROW_MB              = (\$(MEM) * 1024 * (1 + \$(NHOLDS)))
 request_memory          = ifThenElse(\$(MEMGROW_MB) < \$(MEMCAP_MB), \$(MEMGROW_MB), \$(MEMCAP_MB))
 periodic_release        = (HoldReasonCode == 34) && (NumHolds < ${MAXHOLDS})
 on_exit_remove          = !((ExitBySignal == False) && (ExitCode == 3) && (NumJobStarts < 3))
-request_disk            = 10G
+request_disk            = 2560M
 JobPrio                 = \$(PRIO)
 Output                  = campaign_${BASE}/logs/\$(ARM)_nb\$(NB)_L\$(L)_A\$(A)\$(FILL)_s\$(SEED).out
 Error                   = campaign_${BASE}/logs/\$(ARM)_nb\$(NB)_L\$(L)_A\$(A)\$(FILL)_s\$(SEED).err

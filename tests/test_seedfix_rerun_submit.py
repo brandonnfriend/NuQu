@@ -59,6 +59,7 @@ def _check_sub(sub):
     for line in _POLICY:
         assert line in sub, line
     assert "qis3.hep.wisc.edu" in sub and "qis4" not in sub
+    assert "request_disk            = 2560M" in sub      # qis1/qis3 have ~3 GB execute disk (HPC_WORKFLOW 6b)
     assert "$(L) $(SEED) " in sub and "-$(ARM)-nb$(NB) bare $(A) $(FILL) $(MAXCORE) independent 4 3 1000 $(MAXRUNGSEC)" in sub
 
 
