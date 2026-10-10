@@ -50,8 +50,11 @@ import numpy as np
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
-from classical.trimci.extrapolation import (combine_seeds, core_energy_ladder,  # noqa: E402
-                                            fit_einf_pt2, split_at_collapse)
+from classical.trimci.extrapolation import (GATED_CONVENTION, LITERATURE_CONVENTION,  # noqa: E402
+                                            SIGMA_CONVENTIONS, combine_seeds,
+                                            core_energy_ladder, fit_einf_pt2,
+                                            split_at_collapse)
+from classical.trimci.external_bounds import lookup as external_lookup  # noqa: E402
 from misc.apply_wick_correction import (  # noqa: E402
     DEFAULT_CONVENTION, add_convention_arg, annotate, apply_to_rungs, figure_note,
     shard_convention)
@@ -132,13 +135,21 @@ def load(dirs, require_post_fix=True, convention=DEFAULT_CONVENTION, A=None, fra
     return groups, meta
 
 
-def analyze(groups, meta, sigma_convention=None):
-    """One record per (n_b, L): the pooled extrapolation + the pre-basin cross-check."""
+def analyze(groups, meta, sigma_convention=None, contact_convention=DEFAULT_CONVENTION,
+            external=True):
+    """One record per (n_b, L): the pooled extrapolation + the pre-basin cross-check.
+
+    `external`: consult `classical/trimci/external_bounds.json` for same-operator variational
+    references (block2 DMRG) and the exact A=0 vacuum of the cell. Every convention records
+    the comparison; only `nuqu-2026-10` lets it refuse a limit (gate 2)."""
     recs = []
     for key in sorted(groups, key=lambda k: (k[0], k[1])):
         n_b, L = key
         m = meta[key]
-        pooled = combine_seeds(groups[key], sites=m["sites"], convention=sigma_convention)
+        ext = (external_lookup(m.get("frame", "bare"), n_b, L, m["A"], m.get("dim", 3),
+                               contact_convention) if external else None)
+        pooled = combine_seeds(groups[key], sites=m["sites"], convention=sigma_convention,
+                               external=ext)
         # the failing diagnostic: PT2 extrapolated from the PRE-collapse basin, which is
         # where 290832's PT2 cap forced every PT2 point to live.
         seed0 = sorted(groups[key])[0]
@@ -265,7 +276,18 @@ def _pm(x, s):
     return f"{x:,.1f}" + (f" ± {s:,.1f}" if s is not None else " (no σ)")
 
 
+def _bk(r):
+    """'275.573 (block2 DMRG chi=400)' when an external same-operator bound is tighter than
+    ours, else our own bound -- the tightest known bound on that truncated H (s11c)."""
+    if r.get("E_bound_best_known_ps") is None:
+        return "—"
+    src = r.get("E_bound_best_known_source")
+    tag = "TrimCI" if src == "trimci" else (src or "").split(" (")[0]
+    return f"{r['E_bound_best_known_ps']:.3f} ({tag})"
+
+
 def make_table(recs, out_path, convention=DEFAULT_CONVENTION):
+    gated = bool(recs) and recs[0].get("sigma_convention") == GATED_CONVENTION
     md = [
         "# Classical energy aggregate — variational bound and extrapolated $E_\\infty$ ± σ\n",
         (f"> **CONTACT-TERM CONVENTION: Wick-ordered (Watson Eqs. 54/55)** — absolute energies "
@@ -282,7 +304,18 @@ def make_table(recs, out_path, convention=DEFAULT_CONVENTION):
         "own right. `E_var+PT2` is Epstein–Nesbet (non-variational). $E_\\infty$ is the "
         "$N\\to\\infty$ Full-CI-within-truncation limit, ESTIMATED by extrapolation over the "
         "POST-collapse rungs, never measured._\n",
-        ("**What σ covers (TrimCI/COO literature convention):** the bootstrap standard "
+        ("**What σ covers (`nuqu-2026-10`, gated):** the LARGEST of three lower bounds on three "
+         "ways to be wrong, each also reported alone — the bootstrap std of the primary estimator "
+         "on the best-bound seed (COO SM S5.2), half the extrapolation distance from the tightest "
+         "bound (Holmes, Tubman & Umrigar 2016), and the spread of $E_\\infty$ over seeds that "
+         "reached the same top core. **A limit is reported only if it passes the gate:** post-"
+         "collapse rungs exist; it lies at or below EVERY known variational bound on the same "
+         "truncated Hamiltonian (our seeds' and the external registry's — block2 DMRG at L=2) and "
+         "not below the exact untruncated energy by more than σ; the cross-check gap is within σ; "
+         "the seed spread is within σ. Otherwise only the bound is quoted. Same-operator references "
+         "only: a squeezed bound never judges a bare limit. "
+         if recs and recs[0].get("sigma_convention") == GATED_CONVENTION else
+         "**What σ covers (TrimCI/COO literature convention):** the bootstrap standard "
          "deviation (500 replicates, COO SM S5.2) of the primary estimator on the **best-bound "
          "seed** — TrimCI's PT2-linear intercept where PT2 rungs exist, COO's R²-scan power "
          "law otherwise. The gap to the other estimator is reported beside σ, never added. "
@@ -291,14 +324,21 @@ def make_table(recs, out_path, convention=DEFAULT_CONVENTION):
          "trajectory taken furthest, which supplies the central value — taken as the larger of the "
          "SHCI convention (half the extrapolation distance) and the internal quadrature of fit ⊕ "
          "method (PT2/SHCI vs power-law disagreement) ⊕ stability (leave-one-out refit). ") +
-        "**The seed spread is NOT in σ**: multiple random starts are a search device, so run-to-run "
-        "agreement is reported separately as a robustness check (next table but one). "
+        ("**The matched-depth seed spread IS a σ term** (the only internal proxy for basin error); "
+         "the PASS/FAIL seed verdict is retired because it is true by construction. "
+         if recs and recs[0].get("sigma_convention") == GATED_CONVENTION else
+         "**The seed spread is NOT in σ**: multiple random starts are a search device, so run-to-run "
+         "agreement is reported separately as a robustness check (next table but one). ") +
         "**What σ does NOT cover:** the boson cutoff $n_b$, lattice spacing / finite volume, the "
         "EFT truncation, or the possibility that the selected-CI search never found the right "
-        "basin. Those are separate budget lines and are not folded in here.\n",
+        "basin" + (" — except where an external same-operator bound exposes it, which refuses the "
+                   "limit rather than widening σ" if recs and recs[0].get("sigma_convention") == GATED_CONVENTION
+                   else "") +
+        ". Those are separate budget lines and are not folded in here.\n",
         "| $n_b$ | L | sites | seeds | $E_\\mathrm{var}$/site (bound) | ΔE last doubling | "
-        "$E_\\mathrm{var}$+PT2/site | **$E_\\infty$/site ± σ (reported)** | extrapolator | post-basin rungs |",
-        "|--:|--:|--:|--:|--:|--:|--:|--:|:--|--:|",
+        "$E_\\mathrm{var}$+PT2/site | **$E_\\infty$/site ± σ (reported)** | extrapolator | post-basin rungs |"
+        + (" tightest known bound (method) |" if gated else ""),
+        "|--:|--:|--:|--:|--:|--:|--:|--:|:--|--:|" + ("--:|" if gated else ""),
     ]
     for r in recs:
         # show the BEST (tightest-bound) seed's ladder stats -- the one the reported
@@ -314,7 +354,40 @@ def make_table(recs, out_path, convention=DEFAULT_CONVENTION):
                 .get(v0.get("primary"), "—"))
         md.append(f"| {r['n_b']} | {r['L']} | {r['sites']} | {r['n_seeds']} | "
                   f"{r['E_var_bound_ps']:.1f} | {'—' if dE is None else f'{dE:.2f}'} | "
-                  f"{'—' if pt2 is None else f'{pt2:.1f}'} | {rep} | {prim} | {v0.get('n_post', 0)} |")
+                  f"{'—' if pt2 is None else f'{pt2:.1f}'} | {rep} | {prim} | {v0.get('n_post', 0)} |"
+                  + (f" {_bk(r)} |" if gated else ""))
+
+    if gated:
+        md += ["", "### Error budget (MeV/site) — `nuqu-2026-10`: σ = max of three terms, then the gate", "",
+               "_Each term is a lower bound on a different failure: the bootstrap on the fit's scatter, "
+               "the half-distance on the extrapolation's reach, the matched-depth seed spread on the "
+               "search. The largest is σ. The window shift, the cross-check gap and the deviation from "
+               "external references are reported beside it. Refused rows keep the limit the gate "
+               "rejected, for the record._", "",
+               "| $n_b$ | L | best seed | σ boot | ½ extrap. dist. | seed spread (matched) | **σ (source)** | "
+               "window shift | cross-check gap | vs external (dev) | gate |",
+               "|--:|--:|--:|--:|--:|--:|--:|--:|--:|:--|:--|"]
+        f3 = lambda x: "—" if x is None else f"{x:.3f}"
+        for r in recs:
+            g = r.get("gate") or {}
+            t = r.get("sigma_terms_ps") or {}
+            if not t and not g:
+                continue
+            sig = r.get("sigma_ps") if r["ok"] else g.get("sigma_if_reported_ps")
+            src = {"bootstrap": "boot", "extrap_half_distance": "½-dist", "seed_spread": "seed"}.get(
+                r.get("sigma_source"), "—")
+            cc = (g.get("checks") or {}).get("cross_check") or {}
+            ext = r.get("external_reference") or {}
+            devs = [f"{(u.get('method') or '').split(' (')[0]} {u['dev_ps']:+.3f}" for u in ext.get("upper") or []]
+            if ext.get("exact"):
+                devs.append(f"exact {ext['exact']['dev_ps']:+.3f}")
+            gate = ("**passed**" if g.get("passed") else
+                    ("refused: " + ", ".join(g.get("refused_by") or []) +
+                     (f" (limit {g['E_inf_refused_ps']:.3f})" if g.get("E_inf_refused_ps") is not None else "")))
+            md.append(f"| {r['n_b']} | {r['L']} | {r.get('best_seed', '—')} | {f3(t.get('bootstrap'))} | "
+                      f"{f3(t.get('extrap_half_distance'))} | {f3(t.get('seed_spread'))} | "
+                      f"**{f3(sig)}** ({src}) | {f3(r.get('window_shift_ps'))} | {f3(cc.get('gap_ps'))} | "
+                      f"{'; '.join(devs) or '—'} | {gate} |")
 
     if recs and recs[0].get("sigma_convention") == "trimci-coo":
         md += ["", "### Error budget (MeV/site) — TrimCI/COO literature convention", "",
@@ -323,8 +396,8 @@ def make_table(recs, out_path, convention=DEFAULT_CONVENTION):
                "of the ladder about that estimator only. The cross-check gap (PT2-linear vs the "
                "R²-scan power law) and the seed spread are the two independent checks, reported "
                "here and never folded into σ — as COO reports its TrimCI-vs-UDMRG gap._", "",
-               "| $n_b$ | L | best seed | primary | **σ** | 90% c.i. | cross-check $E_\\infty$ | gap | seed spread |",
-               "|--:|--:|--:|:--|--:|:--|--:|--:|--:|"]
+               "| $n_b$ | L | best seed | primary | **σ** | 90% c.i. | cross-check $E_\\infty$ | gap | seed spread | window shift |",
+               "|--:|--:|--:|:--|--:|:--|--:|--:|--:|--:|"]
         for r in recs:
             if not r["ok"]:
                 continue
@@ -337,8 +410,9 @@ def make_table(recs, out_path, convention=DEFAULT_CONVENTION):
             md.append(f"| {r['n_b']} | {r['L']} | {best} | {v.get('primary')} | "
                       f"**{f2(r.get('sigma_ps'))}** | "
                       f"{'—' if not ci else f'[{ci[0]:.2f}, {ci[1]:.2f}]'} | "
-                      f"{f2(cc.get('E_inf_ps'))} | {f2(cc.get('gap_ps'))} | {f2(sp)} |")
-    if not (recs and recs[0].get("sigma_convention") == "trimci-coo"):
+                      f"{f2(cc.get('E_inf_ps'))} | {f2(cc.get('gap_ps'))} | {f2(sp)} | "
+                      f"{f2(r.get('window_shift_ps'))} |")
+    if not (recs and recs[0].get("sigma_convention") in ("trimci-coo", GATED_CONVENTION)):
         md += ["", "### Error budget (MeV/site)", "",
                "_σ is an **extrapolation** uncertainty: the larger of the **SHCI convention** "
                "(Holmes, Tubman & Umrigar 2016 — \"the uncertainty in our extrapolated energy is "
@@ -369,27 +443,48 @@ def make_table(recs, out_path, convention=DEFAULT_CONVENTION):
             md.append(f"| {r['n_b']} | {r['L']} | {best} | " + " | ".join(row) +
                       f" | **{tot}** ({src}) |")
 
-    md += ["", "### Search robustness — did independent random starts find the same state?", "",
-           "_TrimCI's own robustness argument is that independent random starts converge to the "
-           "same final state. This table reports whether ours did. **A failed check does not "
-           "widen σ** — σ measures how far we extrapolated, and is structurally blind to landing "
-           "in the wrong basin. It is a caveat on the central value, stated rather than "
-           "absorbed._", "",
-           "**Standing caveat.** This is a variational heuristic and it can sit in a local "
-           "minimum; no error bar here would detect that. What we can say is that the result is "
-           "*self-consistent* — the reported value comes from the deepest, tightest-bound "
-           "trajectory, and every `E_var` is a rigorous upper bound whatever basin it found — "
-           "and that the agreement check below is reported honestly, including where it fails.", "",
-           "| $n_b$ | L | seeds | extrapolated | agree with best (within σ) | spread of $E_\\infty$ /site | verdict |",
-           "|--:|--:|--:|--:|--:|--:|:--|"]
-    for r in recs:
-        rob = r.get("seed_robustness") or {}
-        if not rob:
-            continue
-        sp = rob.get("spread_ps")
-        md.append(f"| {r['n_b']} | {r['L']} | {rob.get('n_seeds')} | {rob.get('n_extrapolated')} | "
-                  f"{rob.get('n_agreeing_with_best')} | "
-                  f"{'—' if sp is None else f'{sp:.2f}'} | {rob.get('check')} |")
+    if gated:
+        md += ["", "### Seeds at matched depth (replaces the PASS/FAIL verdict)", "",
+               "_Under `nuqu-2026-10` the matched-depth spread of $E_\\infty$ is a σ term, so "
+               "'do the seeds agree within σ' holds by construction and is no longer a verdict. "
+               "What remains informative: how many seeds reached the reported depth, how far apart "
+               "they landed, and which term set σ. Agreement is still NOT basin correctness — at "
+               "L=2, A=4 three agreeing seeds sat 0.9 MeV/site above the DMRG energy (294249)._", "",
+               "| $n_b$ | L | seeds | extrapolated | at reported depth | top core | spread of $E_\\infty$ /site | bound spread /site | statement |",
+               "|--:|--:|--:|--:|--:|--:|--:|--:|:--|"]
+        for r in recs:
+            rob = r.get("seed_robustness") or {}
+            if not rob:
+                continue
+            sp, bs = rob.get("spread_ps"), rob.get("bound_spread")
+            bs = (bs / r["sites"]) if (bs is not None and r.get("sites")) else None
+            tc = rob.get("matched_top_core")
+            md.append(f"| {r['n_b']} | {r['L']} | {rob.get('n_seeds')} | {rob.get('n_extrapolated')} | "
+                      f"{rob.get('n_matched_depth')} | {'—' if tc is None else f'{tc:,}'} | "
+                      f"{'—' if sp is None else f'{sp:.3f}'} | {'—' if bs is None else f'{bs:.3f}'} | "
+                      f"{rob.get('check')} |")
+    else:
+      md += ["", "### Search robustness — did independent random starts find the same state?", "",
+             "_TrimCI's own robustness argument is that independent random starts converge to the "
+             "same final state. This table reports whether ours did. **A failed check does not "
+             "widen σ** — σ measures how far we extrapolated, and is structurally blind to landing "
+             "in the wrong basin. It is a caveat on the central value, stated rather than "
+             "absorbed._", "",
+             "**Standing caveat.** This is a variational heuristic and it can sit in a local "
+             "minimum; no error bar here would detect that. What we can say is that the result is "
+             "*self-consistent* — the reported value comes from the deepest, tightest-bound "
+             "trajectory, and every `E_var` is a rigorous upper bound whatever basin it found — "
+             "and that the agreement check below is reported honestly, including where it fails.", "",
+             "| $n_b$ | L | seeds | extrapolated | agree with best (within σ) | spread of $E_\\infty$ /site | verdict |",
+             "|--:|--:|--:|--:|--:|--:|:--|"]
+      for r in recs:
+          rob = r.get("seed_robustness") or {}
+          if not rob:
+              continue
+          sp = rob.get("spread_ps")
+          md.append(f"| {r['n_b']} | {r['L']} | {rob.get('n_seeds')} | {rob.get('n_extrapolated')} | "
+                    f"{rob.get('n_agreeing_with_best')} | "
+                    f"{'—' if sp is None else f'{sp:.2f}'} | {rob.get('check')} |")
 
     md += ["", "### Why we fit the POST-collapse basin (the failing diagnostic)", "",
            "The warm-grown ladder escapes a delocalized exploration basin onto the compact "
@@ -459,18 +554,23 @@ def main():
     ap.add_argument("--allow-pre-vertex-fix", action="store_true",
                     help="NOT for release: lift the pre-2026-08-18 data refusal")
     add_convention_arg(ap)
-    ap.add_argument("--sigma-convention", default=None,
-                    choices=["trimci-coo", "nuqu-2026-09"],
+    ap.add_argument("--sigma-convention", default=None, choices=list(SIGMA_CONVENTIONS),
                     help="E_inf error-bar convention (default: trimci-coo, the TrimCI/COO "
-                         "papers' R^2-scan power law + bootstrap sigma; nuqu-2026-09 = the "
+                         "papers' R^2-scan power law + bootstrap sigma; nuqu-2026-10 = the "
+                         "gated convention after the DMRG calibration: sigma = max(bootstrap, "
+                         "half extrapolation distance, matched-depth seed spread) and a limit "
+                         "is reported only if it passes the four-part gate; nuqu-2026-09 = the "
                          "previous max(SHCI half-distance, internal quadrature))")
+    ap.add_argument("--no-external", action="store_true",
+                    help="ignore classical/trimci/external_bounds.json (A/B only)")
     args = ap.parse_args()
     os.makedirs(args.out_dir, exist_ok=True)
     groups, meta = load(args.data, require_post_fix=not args.allow_pre_vertex_fix,
                         convention=args.convention, frame=args.frame)
     assert groups, f"no {args.frame}_*.json found"
     print(f"[conv] {figure_note(args.convention)}")
-    recs = analyze(groups, meta, sigma_convention=args.sigma_convention)
+    recs = analyze(groups, meta, sigma_convention=args.sigma_convention,
+                   contact_convention=args.convention, external=not args.no_external)
     for r in recs:
         r["contact_convention"] = args.convention
     make_figure(recs, f"{args.out_dir}/classical_energy_aggregate", args.convention)

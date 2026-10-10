@@ -67,6 +67,10 @@ def collect(data_dirs, sigma_convention=None, frame="bare", As=None):
             rob = r.get("seed_robustness") or {}
             bounds = [x["E_var_bound_ps"] for x in r["per_seed"].values()
                       if x.get("E_var_bound_ps") is not None]
+            g = r.get("gate") or {}
+            ext = r.get("external_reference") or {}
+            ext_dev = ([u["dev_ps"] for u in ext.get("upper") or []] +
+                       ([ext["exact"]["dev_ps"]] if ext.get("exact") else []))
             rec[(A, r["L"])] = dict(
                 A=A, L=r["L"], sites=r["sites"], n_seeds=r["n_seeds"], ok=bool(r["ok"]),
                 bound=r["E_var_bound_ps"], E_inf=r.get("E_inf_ps"), sigma=r.get("sigma_ps"),
@@ -75,6 +79,14 @@ def collect(data_dirs, sigma_convention=None, frame="bare", As=None):
                 seed_spread=rob.get("spread_ps"),
                 bound_spread=(max(bounds) - min(bounds)) if len(bounds) >= 2 else None,
                 n_agree=rob.get("n_agreeing_with_best"),
+                window_shift=r.get("window_shift_ps"),          # +-1-rung refit (2026-10-10)
+                sigma_source=r.get("sigma_source"),
+                sigma_terms=r.get("sigma_terms_ps"),
+                gate_refused_by=g.get("refused_by"),
+                E_inf_refused=g.get("E_inf_refused_ps"),
+                best_known_bound=r.get("E_bound_best_known_ps"),
+                best_known_source=r.get("E_bound_best_known_source"),
+                ext_dev=(ext_dev[0] if ext_dev else None),
                 reason=None if r["ok"] else r.get("reason"),
                 convention=r.get("sigma_convention"), frame=frame)
     return rec
@@ -260,23 +272,44 @@ def figure_binding(rows, out, frame):
 
 def table(rec, path, frame="bare"):
     f = lambda x, d=2: "—" if x is None else f"{x:.{d}f}"
+    conv = next((r["convention"] for r in rec.values() if r.get("convention")), None)
+    gated = conv == "nuqu-2026-10"
     md = [f"# Fixed-A n_b=3 classical sweep — per-(A, L) summary (MeV/site, Wick convention, {frame} frame)", "",
-          "_σ: TrimCI/COO literature convention (bootstrap std of the primary estimator). "
-          "Cross-check gap and seed spread are reported beside σ, never added. The bound is the "
-          "tightest over seeds._", "",
-          "| A | L | seeds | bound | **E∞ ± σ** | 90% c.i. | primary | cross-check E∞ | gap | seed spread (E∞) | bound spread |",
-          "|--:|--:|--:|--:|--:|:--|:--|--:|--:|--:|--:|"]
+          ("_σ: `nuqu-2026-10` — max(bootstrap, half extrapolation distance, matched-depth seed "
+           "spread), reported only when the four-part gate passes (post-collapse rungs; limit at or "
+           "below every same-operator variational bound incl. block2 DMRG; cross-check gap ≤ σ; seed "
+           "spread ≤ σ), else bound only. The σ source and the gate verdict are in the last columns; "
+           "'vs ext.' is the deviation from the registered external reference (DMRG at L=2, exact "
+           "vacuum at A=0), positive = our limit is higher._"
+           if gated else
+           "_σ: TrimCI/COO literature convention (bootstrap std of the primary estimator). "
+           "Cross-check gap and seed spread are reported beside σ, never added. The bound is the "
+           "tightest over seeds._"), "",
+          "| A | L | seeds | bound | **E∞ ± σ** | 90% c.i. | primary | cross-check E∞ | gap | seed spread (E∞) | bound spread | window shift |"
+          + (" σ source | gate | vs ext. |" if gated else ""),
+          "|--:|--:|--:|--:|--:|:--|:--|--:|--:|--:|--:|--:|" + ("|:--|:--|--:|" if gated else "")]
     for A in _As(rec):
         for L in LS:
             r = rec.get((A, L))
             if r is None:
-                md.append(f"| {A} | {L} | 0 | — | — | — | — | — | — | — | — |")
+                md.append(f"| {A} | {L} | 0 | — | — | — | — | — | — | — | — | — |" + (" — | — | — |" if gated else ""))
                 continue
             ci = r["ci90"]
+            tail = ""
+            if gated:
+                src = {"bootstrap": "boot", "extrap_half_distance": "½-dist", "seed_spread": "seed"}.get(
+                    r.get("sigma_source"), "—")
+                rb = r.get("gate_refused_by")
+                gate = ("passed" if r["ok"] else
+                        ("refused: " + ", ".join(rb) + (f" (limit {f(r['E_inf_refused'])})"
+                                                        if r.get("E_inf_refused") is not None else "")
+                         if rb else "no limit"))
+                tail = f" {src} | {gate} | {f(r.get('ext_dev'), 3)} |"
             md.append(f"| {A} | {L} | {r['n_seeds']} | {f(r['bound'])} | "
                       + (f"**{f(r['E_inf'])} ± {f(r['sigma'])}**" if r["ok"] else "bound only")
                       + f" | {'—' if not ci else f'[{ci[0]:.2f}, {ci[1]:.2f}]'} | {r['primary'] or '—'} | "
-                      f"{f(r['xc_E'])} | {f(r['xc_gap'])} | {f(r['seed_spread'])} | {f(r['bound_spread'])} |")
+                      f"{f(r['xc_E'])} | {f(r['xc_gap'])} | {f(r['seed_spread'])} | {f(r['bound_spread'])} | "
+                      f"{f(r.get('window_shift'))} |" + tail)
     Path(path).write_text("\n".join(md) + "\n")
 
 
@@ -286,7 +319,8 @@ def main():
                     default=[str(ROOT / "data/classical/2026-09-25/bare_Asweep_nb3_293963")],
                     help="shard directories (several allowed; deepest ladder per seed wins)")
     ap.add_argument("--out", default=str(ROOT / "docs" / "presentation"))
-    ap.add_argument("--sigma-convention", default=None, choices=["trimci-coo", "nuqu-2026-09"])
+    ap.add_argument("--sigma-convention", default=None,
+                    choices=["trimci-coo", "nuqu-2026-09", "nuqu-2026-10"])
     ap.add_argument("--frame", default="bare", help="shard frame to plot (bare | gaussian | ...)")
     ap.add_argument("--compare-frame", default=None,
                     help="a second frame to overlay (e.g. --frame gaussian --compare-frame bare)")

@@ -55,6 +55,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 from classical.trimci.extrapolation import combine_seeds  # noqa: E402
+from classical.trimci.external_bounds import lookup as external_lookup  # noqa: E402
 
 VERTEX_FIX_COMMIT = "9404fac4edf20646cb9862045159667a43e095a8"
 VERTEX_FIX_DATE = "2026-08-18"
@@ -266,8 +267,12 @@ def _validate_backeval(files, expect_dim, allowed_n_b, max_dropped_weight=0.05):
 def validate(data_dirs, expect_n_b, expect_dim=3, expect_frame="bare",
              min_rungs=4, min_pt2_post=0, allow_unmanifested=False,
              assert_commit=None, allow_mixed_commits=False, kind="frame_shard",
-             n_b_hi=None, allow_n_b=None, repo=_ROOT):
-    """Gate the shards and return (records, shard_info, provenance). Raises RejectedError."""
+             n_b_hi=None, allow_n_b=None, repo=_ROOT, sigma_convention=None):
+    """Gate the shards and return (records, shard_info, provenance). Raises RejectedError.
+
+    `sigma_convention`: the E_inf error-bar convention `combine_seeds` pools under (default:
+    its default). Under `nuqu-2026-10` the external-bound registry is consulted and the
+    four-part gate decides the extrapolated / bound_only label."""
     files = []
     for d in data_dirs:
         hit = [t for t in RETIRED_DIR_TOKENS if t in d]
@@ -384,7 +389,9 @@ def validate(data_dirs, expect_n_b, expect_dim=3, expect_frame="bare",
     records = records if kind in ("nb_nested_shard", "backeval_shard") else []
     for (n_b, L), per_seed in (sorted(groups.items()) if kind == "frame_shard" else []):
         sites = next(s["sites"] for s in shard_info if (s["n_b"], s["L"]) == (n_b, L))
-        pooled = combine_seeds(per_seed, sites=sites)
+        A_cell = next(s["A"] for s in shard_info if (s["n_b"], s["L"]) == (n_b, L))
+        ext = external_lookup(expect_frame, n_b, L, A_cell, expect_dim, "wick")
+        pooled = combine_seeds(per_seed, sites=sites, convention=sigma_convention, external=ext)
         label = "extrapolated" if pooled["ok"] else "bound_only"
         if label == "extrapolated" and pooled.get("sigma") is None:
             raise RejectedError(f"REJECTED (n_b={n_b}, L={L}): labelled 'extrapolated' but carries "
@@ -406,6 +413,12 @@ def validate(data_dirs, expect_n_b, expect_dim=3, expect_frame="bare",
             "E_inf": pooled.get("E_inf"), "E_inf_per_site": pooled.get("E_inf_ps"),
             "sigma": pooled.get("sigma"), "sigma_per_site": pooled.get("sigma_ps"),
             "sigma_seed": pooled.get("sigma_seed"), "reason": pooled.get("reason"),
+            "sigma_convention": pooled.get("sigma_convention"),
+            "sigma_source": pooled.get("sigma_source"), "sigma_terms": pooled.get("sigma_terms"),
+            "window_shift": pooled.get("window_shift"), "gate": pooled.get("gate"),
+            "external_reference": pooled.get("external_reference"),
+            "E_bound_best_known": pooled.get("E_bound_best_known"),
+            "E_bound_best_known_source": pooled.get("E_bound_best_known_source"),
             "core_ladders": {str(s): [r["core"] for r in rr] for s, rr in per_seed.items()},
         })
 
@@ -520,10 +533,38 @@ def aggregation_rules(min_rungs=4, min_pt2_post=0, sigma_convention=None):
     """The policy text emitted into every manifest. Exposed so a test can compare it to
     what `combine_seeds` actually does -- these strings had gone stale once. The
     extrapolator/uncertainty text follows the sigma convention in force."""
-    from classical.trimci.extrapolation import DEFAULT_SIGMA_CONVENTION, LITERATURE_CONVENTION
+    from classical.trimci.extrapolation import (DEFAULT_SIGMA_CONVENTION, GATED_CONVENTION,
+                                                LITERATURE_CONVENTION)
     conv = sigma_convention or DEFAULT_SIGMA_CONVENTION
     rules = _legacy_rules(min_rungs, min_pt2_post)
     rules["sigma_convention"] = conv
+    if conv == GATED_CONVENTION:
+        rules["extrapolators"] = (
+            "nuqu-2026-10 (after the block2 DMRG calibration, 294249): per-seed fits as "
+            "trimci-coo -- PRIMARY = TrimCI's PT2-linear intercept on the last 6 post-collapse "
+            "core-energy rungs when >=4 PT2 rungs exist, else COO's R^2-scan power law; the other "
+            "is the cross-check")
+        rules["uncertainty"] = (
+            "sigma = the LARGEST of three terms, each recorded alone: the 500-replicate bootstrap "
+            "std of the primary (COO SM S5.2); half the extrapolation distance from the tightest "
+            "Ritz bound (Holmes/Tubman/Umrigar 2016); the spread of E_inf over seeds that reached "
+            "the same top core. Largest, not quadrature -- lower bounds on three failure modes. "
+            "The +-1-rung window shift, the cross-check gap and the deviation from external "
+            "references are reported beside sigma, never added")
+        rules["gate"] = (
+            "a limit is reported ONLY if: post-collapse rungs exist; it lies at or below EVERY "
+            "known variational bound on the SAME truncated Hamiltonian (our seeds' and "
+            "classical/trimci/external_bounds.json -- block2 DMRG at bare n_b=3 L=2) and not "
+            "below the exact untruncated energy by more than sigma; the cross-check gap (where "
+            "resolved) is <= sigma; the seed spread is <= sigma. Otherwise bound_only. "
+            "Same-operator references only: a squeezed bound never judges a bare limit")
+        rules["seed_rule"] = (
+            "the tightest E_var across seeds is the quoted bound and that seed supplies E_inf "
+            "(equal bounds within 1e-6 MeV prefer an extrapolating seed, then the lowest number); "
+            "a shallower seed is never promoted. The matched-depth seed spread IS a sigma term; "
+            "the PASS/FAIL agreement verdict is retired (true by construction)")
+        rules["reported_bound"] = ("the tightest known bound on the truncated H over all methods "
+                                   "(E_bound_best_known) is recorded beside our own")
     rules["pool_rungs"] = ("rungs above the PT2 cap store the survivor-POOL energy; they stay "
                            "the variational bound but are excluded from the collapse split "
                            "and every fit (2026-09-28)")
@@ -607,6 +648,10 @@ def main():
                          "the shard entry point and its imports to confirm the solver is "
                          "unchanged; the commit set is recorded in the manifest.")
     ap.add_argument("--out", default=None, help="manifest path (default: <first data dir>/accepted_data_manifest.json)")
+    ap.add_argument("--sigma-convention", default=None,
+                    choices=["trimci-coo", "nuqu-2026-09", "nuqu-2026-10"],
+                    help="E_inf error-bar convention for the extrapolated/bound_only label "
+                         "(default: the extrapolation module's default)")
     args = ap.parse_args()
 
     try:
@@ -615,14 +660,15 @@ def main():
             min_rungs=args.min_rungs, min_pt2_post=args.min_pt2_post,
             allow_unmanifested=args.allow_unmanifested, assert_commit=args.assert_commit,
             allow_mixed_commits=args.allow_mixed_commits, kind=args.kind,
-            n_b_hi=args.n_b_hi, allow_n_b=args.allow_n_b)
+            n_b_hi=args.n_b_hi, allow_n_b=args.allow_n_b,
+            sigma_convention=args.sigma_convention)
     except RejectedError as e:
         # A gate refusal is an expected outcome, not a crash -- print it plainly and exit 2
         # so a release script can distinguish "rejected" (2) from "broken" (1).
         print(f"[validate classical] FAIL\n  {e}", file=sys.stderr)
         sys.exit(2)
 
-    gates = aggregation_rules(args.min_rungs, args.min_pt2_post)
+    gates = aggregation_rules(args.min_rungs, args.min_pt2_post, args.sigma_convention)
     man = build_manifest(args.label, args.data, records, shard_info, prov, args.expect_n_b,
                          analysis=args.analysis, outputs=args.outputs, gates=gates)
     if len(man["files"]) != len(shard_info):

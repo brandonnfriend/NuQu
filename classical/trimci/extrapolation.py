@@ -525,6 +525,14 @@ def einf_with_uncertainty(rungs, sites=None, min_post=3):
 # ---------------------------------------------------------------------------------------
 LITERATURE_CONVENTION = "trimci-coo"
 LEGACY_CONVENTION = "nuqu-2026-09"
+# nuqu-2026-10 (2026-10-10): the DMRG calibration refuted trimci-coo's sigma on the identical
+# bare L=2 Hamiltonian (docs/classical_error_convention_2026-10-08.md s11). Same per-seed fits
+# as trimci-coo; the POOLED layer changes: sigma = max(bootstrap, half the extrapolation
+# distance [Holmes/Tubman/Umrigar 2016], seed spread at matched depth), and a four-part gate
+# (post-collapse rungs; limit <= EVERY same-operator variational bound incl. external ones;
+# cross-check gap <= sigma; seed spread <= sigma) decides whether a limit is reported at all.
+GATED_CONVENTION = "nuqu-2026-10"
+SIGMA_CONVENTIONS = (LITERATURE_CONVENTION, LEGACY_CONVENTION, GATED_CONVENTION)
 DEFAULT_SIGMA_CONVENTION = LITERATURE_CONVENTION
 
 
@@ -736,8 +744,12 @@ def einf_literature(rungs, sites=None, min_post=5, n_scan=5000, n_boot=500, seed
     return out
 
 
-def combine_seeds(per_seed, sites=None, min_post=3, convention=None):
+def combine_seeds(per_seed, sites=None, min_post=3, convention=None, external=None):
     """Aggregate independent solver trajectories (seeds) for one (L, n_b) point.
+
+    `external`: the cell's `external_bounds.lookup(...)` result ({'upper': [...], 'exact': ...})
+    in the SAME contact convention as the rungs. Only the `nuqu-2026-10` convention lets it
+    decide anything; every convention records the comparison (`external_reference`).
 
     Each seed is its own warm-grow ladder, so the seed-to-seed spread of E_infinity is a
     genuine systematic of the SEARCH, not just of the fit -- it is fed back into every
@@ -752,6 +764,8 @@ def combine_seeds(per_seed, sites=None, min_post=3, convention=None):
     # POOL, so folding it into every per-seed sigma and then averaging those sigmas would
     # double-count it. It enters once, below.
     convention = convention or DEFAULT_SIGMA_CONVENTION
+    if convention == GATED_CONVENTION:
+        return _pool_gated(per_seed, sites=sites, external=external)
     if convention == LITERATURE_CONVENTION:
         final = {s: einf_literature(r, sites=sites) for s, r in per_seed.items()}
     elif convention == LEGACY_CONVENTION:
@@ -827,6 +841,8 @@ def combine_seeds(per_seed, sites=None, min_post=3, convention=None):
                              f"substitute a worse trajectory for the best one. Quote the bound.")
         return pooled
     E = float(ok[best_seed]["E_inf"])
+    _carry_window_shift(pooled, ok[best_seed])
+    pooled["external_reference"] = _external_comparison(E, sites, external)
     # sigma is the best seed's EXTRAPOLATION uncertainty only. The seed spread is a search
     # diagnostic, not an uncertainty on this quantity (see the module note): E_var is
     # variational, so a seed that landed higher searched worse -- it is not a second
@@ -870,3 +886,204 @@ def combine_seeds(per_seed, sites=None, min_post=3, convention=None):
                          f"extrapolated -- the trajectory taken furthest; sigma is its "
                          f"extrapolation uncertainty (seed spread reported separately)")
     return pooled
+
+
+# ---------------------------------------------------------------------------------------
+# nuqu-2026-10: the gated convention (see the note above GATED_CONVENTION)
+# ---------------------------------------------------------------------------------------
+def _carry_window_shift(pooled, best):
+    """Plumb the +-1-rung window sensitivity from the best seed to the pooled record
+    (2026-10-10): `einf_literature` sets it, the pooled record used to drop it. Reported
+    beside sigma, never added; None on the legacy path, which has no window."""
+    for k in ("window_shift", "window_shift_ps", "window_shift_by_w"):
+        pooled[k] = best.get(k)
+
+
+def _external_comparison(E_inf, sites, external):
+    """Deviation of a limit from every registered external reference for the cell (MeV and
+    per site, positive = our limit is higher). Pure reporting; the gate reads `upper`."""
+    per = lambda x: (x / sites) if (x is not None and sites) else None
+    ext = external or {}
+    out = {"upper": [], "exact": None}
+    for e in ext.get("upper") or []:
+        out["upper"].append({"method": e.get("method"), "E": e["E"], "E_ps": per(e["E"]),
+                             "dev": E_inf - e["E"], "dev_ps": per(E_inf - e["E"]),
+                             "source": e.get("source")})
+    if ext.get("exact"):
+        e = ext["exact"]
+        out["exact"] = {"method": e.get("method"), "E": e["E"], "E_ps": per(e["E"]),
+                        "dev": E_inf - e["E"], "dev_ps": per(E_inf - e["E"]),
+                        "source": e.get("source")}
+    return out
+
+
+def _pool_gated(per_seed, sites=None, external=None):
+    """`nuqu-2026-10` pooling for one (frame, n_b, L, A) cell.
+
+    Per-seed fits are `einf_literature` (unchanged). Then:
+      * the bound is the tightest Ritz bound over seeds, and the limit comes from that seed
+        (same deepest-trajectory rule and tie-break as trimci-coo);
+      * sigma = MAX of three lower bounds on three ways to be wrong, each reported alone:
+          bootstrap            -- COO SM S5.2, the best seed's 500-replicate std (unchanged);
+          extrap_half_distance -- (E_bound - E_inf)/2, Holmes/Tubman/Umrigar 2016;
+          seed_spread          -- max - min of E_inf over seeds that reached the SAME top core
+                                  as the best seed (a shallower seed would inflate it);
+      * the gate: a limit is reported only if (1) it exists (post-collapse rungs), (2) it lies
+        at or below EVERY known variational bound on the same truncated H -- our seeds' and the
+        registry's -- and not below the exact untruncated energy by more than sigma, (3) the
+        cross-check gap, where the cross-check resolved, is <= sigma, (4) the seed spread is
+        <= sigma (true by construction, asserted). Otherwise the bound alone is quoted and the
+        refused limit is kept in `gate` for the record.
+    """
+    per = lambda x: (x / sites) if (x is not None and sites) else None
+    final = {s_: einf_literature(r, sites=sites) for s_, r in per_seed.items()}
+    ok = {s_: v for s_, v in final.items() if v.get("ok")}
+    E_infs = np.array([v["E_inf"] for v in ok.values()], dtype=float)
+    sigma_seed_std = float(E_infs.std(ddof=1)) if len(E_infs) >= 2 else None
+    bounds = {s_: v["E_var_bound"] for s_, v in final.items() if v.get("E_var_bound") is not None}
+    bound = min(bounds.values()) if bounds else None
+    tops = {s_: max(r["core"] for r in rr) for s_, rr in per_seed.items()}
+    ext = external or {}
+    ext_upper = [(e["E"], e) for e in (ext.get("upper") or [])]
+    best_known = min([bound] * (bound is not None) + [E for E, _ in ext_upper]) if (bound is not None or ext_upper) else None
+    best_known_src = ("trimci" if (best_known is not None and bound is not None and best_known == bound)
+                      else (ext_upper[0][1].get("method") if ext_upper and best_known is not None else None))
+    pooled = {
+        "sigma_convention": GATED_CONVENTION,
+        "seeds": sorted(per_seed), "n_seeds": len(per_seed), "n_seeds_extrapolated": len(ok),
+        "sites": sites,
+        "E_var_bound": bound, "E_var_bound_ps": per(bound),
+        "E_bound_best_known": best_known, "E_bound_best_known_ps": per(best_known),
+        "E_bound_best_known_source": best_known_src,
+        "sigma_seed": sigma_seed_std, "sigma_seed_ps": per(sigma_seed_std),
+        "top_core_by_seed": {str(k): int(v) for k, v in tops.items()},
+        "per_seed": final,
+        "external_bounds": {"upper": [{"method": e.get("method"), "E": e["E"], "E_ps": per(e["E"])}
+                                      for _, e in ext_upper],
+                            "exact": ({"method": ext["exact"].get("method"), "E": ext["exact"]["E"],
+                                       "E_ps": per(ext["exact"]["E"])} if ext.get("exact") else None)},
+    }
+
+    def refuse(reason, gate, best=None):
+        pooled.update(ok=False, E_inf=None, E_inf_ps=None, sigma=None, sigma_ps=None,
+                      reason=reason, gate=gate)
+        if best is not None:
+            pooled["best_seed"] = best
+        pooled["seed_robustness"] = _spread_record(pooled, ok, tops, best, per, None)
+        return pooled
+
+    if not ok:
+        return refuse("no seed produced a defensible extrapolation; only the variational "
+                      "upper bound may be quoted",
+                      {"passed": False, "refused_by": ["post_collapse_rungs"], "checks": {}})
+    bmin = min(bounds.values())
+    tied = [s_ for s_ in bounds if bounds[s_] <= bmin + 1e-6]
+    best = min(tied, key=lambda s_: (s_ not in ok, s_))
+    if best not in ok:
+        return refuse(f"the tightest-bound seed ({best}, bound {bounds[best]:.3f}) could not "
+                      f"extrapolate ({final[best]['reason']}); a shallower seed is never "
+                      f"promoted. Quote the bound.",
+                      {"passed": False, "refused_by": ["post_collapse_rungs"], "checks": {}}, best)
+    v = ok[best]
+    E = float(v["E_inf"])
+    _carry_window_shift(pooled, v)
+    pooled["best_seed"] = best
+    pooled["external_reference"] = _external_comparison(E, sites, external)
+
+    # --- the three sigma terms -----------------------------------------------------------
+    s_boot = v.get("sigma")
+    s_half = 0.5 * (bound - E) if bound is not None else None
+    matched = [s_ for s_ in ok if tops[s_] == tops[best]]
+    s_seed = (float(max(ok[s_]["E_inf"] for s_ in matched) - min(ok[s_]["E_inf"] for s_ in matched))
+              if len(matched) >= 2 else None)
+    terms = {"bootstrap": s_boot, "extrap_half_distance": s_half, "seed_spread": s_seed}
+    have = {k: t for k, t in terms.items() if t is not None}
+    sigma = max(have.values()) if have else None
+    source = max(have, key=have.get) if have else None
+    pooled.update(sigma_terms={k: (float(t) if t is not None else None) for k, t in terms.items()},
+                  sigma_terms_ps={k: per(t) for k, t in terms.items()},
+                  sigma_source=source, n_seeds_matched_depth=len(matched),
+                  matched_top_core=int(tops[best]))
+    cc = v.get("cross_check") or {}
+    gap = cc.get("gap") if cc.get("ok") else None
+
+    # --- the gate -------------------------------------------------------------------------
+    checks = {"post_collapse_rungs": {"passed": True, "n_post": v.get("n_post")}}
+    viol = []
+    if bound is not None and E > bound + 1e-9:
+        viol.append(f"our own tightest Ritz bound {bound:.3f} (seed {min(bounds, key=bounds.get)})")
+    for E_ext, e in ext_upper:
+        if E > E_ext + 1e-9:
+            viol.append(f"{e.get('method')} variational energy {E_ext:.3f} on the same truncated H")
+    floor = ext.get("exact")
+    below_exact = (floor is not None and sigma is not None and E < floor["E"] - sigma)
+    if below_exact:
+        viol.append(f"the exact untruncated energy {floor['E']:.3f} by more than sigma "
+                    f"({(floor['E'] - E):.3f} > {sigma:.3f})")
+    checks["variational"] = {"passed": not viol, "violations": viol,
+                             "n_external_upper": len(ext_upper), "exact_floor": bool(floor)}
+    checks["cross_check"] = {"passed": (gap is None) or (sigma is not None and gap <= sigma),
+                             "gap": gap, "gap_ps": per(gap), "resolved": gap is not None,
+                             "estimator": cc.get("estimator")}
+    checks["seed_spread"] = {"passed": (s_seed is None) or (sigma is not None and s_seed <= sigma + 1e-12),
+                             "spread": s_seed, "spread_ps": per(s_seed), "n_matched": len(matched)}
+    refused_by = [k for k, c in checks.items() if not c["passed"]]
+    gate = {"passed": not refused_by, "refused_by": refused_by, "checks": checks,
+            "E_inf_refused": None if not refused_by else E,
+            "E_inf_refused_ps": None if not refused_by else per(E),
+            "sigma_if_reported": sigma, "sigma_if_reported_ps": per(sigma)}
+    if refused_by:
+        # reasons read per site when sites are known (the tables are per site); the gate dict
+        # keeps the totals
+        u = "/site" if sites else ""
+        ps = lambda x: (x / sites) if sites else x
+        viol_ps = [w for w in viol]
+        if sites:
+            viol_ps = []
+            if bound is not None and E > bound + 1e-9:
+                viol_ps.append(f"our own tightest Ritz bound {ps(bound):.3f}{u}")
+            for E_ext, e in ext_upper:
+                if E > E_ext + 1e-9:
+                    viol_ps.append(f"{e.get('method')} variational energy {ps(E_ext):.3f}{u} on the "
+                                   f"same truncated H")
+            if below_exact:
+                viol_ps.append(f"the exact untruncated energy {ps(floor['E']):.3f}{u} by more than "
+                               f"sigma ({ps(floor['E'] - E):.3f} > {ps(sigma):.3f})")
+        why = {"variational": (f"the limit {ps(E):.3f}{u} lies ABOVE " + "; ".join(viol_ps)
+                               if viol_ps else ""),
+               "cross_check": (f"the cross-check ({cc.get('estimator')}) lands {ps(gap):.3f}{u} away, "
+                               f"more than sigma {ps(sigma):.3f}{u}" if gap is not None else ""),
+               "seed_spread": f"seed spread {s_seed} exceeds sigma {sigma}"}
+        return refuse("gate refused the limit (" + "; ".join(why[k] for k in refused_by) +
+                      "); quote the bound", gate, best)
+    pooled["seed_robustness"] = _spread_record(pooled, ok, tops, best, per, source)
+    pooled.update(ok=True, gate=gate, E_inf=E, E_inf_ps=per(E), sigma=sigma, sigma_ps=per(sigma),
+                  reason=f"best (tightest-bound) seed {best} of {len(ok)}/{len(per_seed)} "
+                         f"extrapolated; sigma = max(bootstrap, half extrapolation distance, "
+                         f"seed spread at matched depth) = {source}; gate passed")
+    return pooled
+
+
+def _spread_record(pooled, ok, tops, best, per, source):
+    """The seed statement that replaces the PASS/FAIL verdict under nuqu-2026-10: the spread
+    at matched top core is a sigma term, so 'do the seeds agree within sigma' is true by
+    construction and no longer says anything. State the spread and which term set sigma."""
+    n_seeds = pooled["n_seeds"]
+    if best is None or best not in ok:
+        return {"n_seeds": n_seeds, "n_extrapolated": len(ok), "n_matched_depth": 0,
+                "matched_top_core": None, "spread": None, "spread_ps": None,
+                "bound_spread": None, "sigma_source": None,
+                "check": "no limit reported (bound only)"}
+    matched = [s_ for s_ in ok if tops[s_] == tops[best]]
+    spread = (float(max(ok[s_]["E_inf"] for s_ in matched) - min(ok[s_]["E_inf"] for s_ in matched))
+              if len(matched) >= 2 else None)
+    bounds = [v["E_var_bound"] for v in pooled["per_seed"].values() if v.get("E_var_bound") is not None]
+    sp = per(spread)
+    return {"n_seeds": n_seeds, "n_extrapolated": len(ok), "n_matched_depth": len(matched),
+            "matched_top_core": int(tops[best]), "spread": spread, "spread_ps": sp,
+            "bound_spread": (float(max(bounds) - min(bounds)) if len(bounds) >= 2 else None),
+            "sigma_source": source,
+            "check": (f"{len(matched)} of {n_seeds} seeds reached top core {tops[best]:,}; E_inf "
+                      f"spread {sp:.3f}/site" if spread is not None else
+                      f"only the best seed reached top core {tops[best]:,}; no matched-depth spread")
+                     + (f"; sigma set by {source}" if source else "")}

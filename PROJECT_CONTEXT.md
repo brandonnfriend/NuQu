@@ -171,6 +171,20 @@ The A-sweep turns ON select-core 16000 plus stratified starts; novel stays OFF. 
   (299.5 at 512k, unfinished)** — the dense L=3 search is still basin-limited by ~5/site between seeds (C9's
   L≥3 reliability was measured at A≤10, not at filling 1.0). L=4/L=5 (8 shards, 384 GB) idle behind the squeeze
   campaign. C2 at L≥3 needs NEW CLAIMS_FROZEN rows; re-seal + retire legacy artifacts once the rest lands.
+- **Gated error convention `nuqu-2026-10` (implemented 2026-10-10, selectable, NOT yet the default):**
+  `docs/classical_error_convention_2026-10-08.md` §11. Per-seed fits unchanged (trimci-coo); the pooled
+  layer (`extrapolation._pool_gated`) sets σ = max(bootstrap, half the extrapolation distance
+  [Holmes/Tubman/Umrigar 2016], E∞ spread over seeds at matched top core), each term recorded, and
+  reports a limit only if it passes four gates: post-collapse rungs; at or below EVERY same-operator
+  variational bound (own seeds + `classical/trimci/external_bounds.json`: the five block2 DMRG energies
+  at bare n_b=3 L=2, plus the exact A=0 vacuum as a floor); cross-check gap ≤ σ where resolved; seed
+  spread ≤ σ. Refused cells quote the bound and keep the refused limit in `gate`. `window_shift` is now
+  carried to the pooled record and shown in every table; the seed PASS/FAIL verdict is retired under the
+  new convention (spread is a σ term). `--sigma-convention nuqu-2026-10` on `aggregate_classical_energies`,
+  `make_Asweep_figures`, `validate_classical_accepted`; `misc/ab_sigma_conventions.py` writes the
+  old-vs-new A/B (`docs/sigma_convention_ab_2026-10-10.md`). trimci-coo and nuqu-2026-09 bit-identical
+  (`tests/test_sigma_gated.py`, incl. the real-data acceptance: bare L=2 A=4/8 refused, A=2/6/10 covered).
+  Open: at L=4 the power law resolves no limit, so gate 3 is vacuous and ±6/site half-distance bars pass.
 - **Extrapolation calibration (A1, DONE 2026-10-10, cluster 294249):** `hpc/dmrg/submit_dmrg_calib.sh`
   ran block2 DMRG on the identical bare n_b=3 (N_f=8) L=2 Hamiltonian at A∈{2,4,6,8,10}; table/figure
   `docs/presentation/dmrg_calibration_nb3_L2_*` from `misc/compare_dmrg_trimci.py`. **DMRG's variational
