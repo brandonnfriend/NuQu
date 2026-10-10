@@ -36,26 +36,54 @@ from misc.aggregate_classical_energies import analyze, load as load_trimci_shard
 FLAG_SIGMA = 2.0
 
 
+def monotone_tail(pts):
+    """Deepest run of (dw, E, chi) rungs, sorted by chi, over which BOTH E and the discarded
+    weight decrease with chi. A warm-started DMRG can sit in a near-product state at the first
+    chi (tiny dw, high E, low S_max) and only find the entangled state at the next one; that
+    rung lies off the E-vs-dw line and must not enter the fit (294249 A=8: chi=100 had
+    dw 6e-6 / E +6.5 MeV above chi=200 at dw 3e-5)."""
+    tail = [pts[-1]]
+    for p in reversed(pts[:-1]):
+        nxt = tail[0]
+        if p[0] > nxt[0] and p[1] > nxt[1]:
+            tail.insert(0, p)
+        else:
+            break
+    return tail
+
+
 def dmrg_extrapolate(rungs, n_fit=3):
     """Linear E-vs-discarded-weight extrapolation over the deepest `n_fit` rungs.
 
-    Returns dict(E_chi_max, chi_max, dw_min, E_inf, delta, n_pts, slope). With fewer than two
-    usable rungs E_inf is None (bound only). Rungs without a discarded weight are skipped.
+    Returns dict(E_chi_max, chi_max, dw_min, E_inf, delta, n_pts, slope, n_dropped). Only the
+    monotone tail (see `monotone_tail`) is eligible; `n_dropped` counts rungs excluded by that
+    rule. With fewer than two usable rungs E_inf is None (bound only). Rungs without a
+    discarded weight are skipped.
     """
     pts = [(float(r["discarded_weight"]), float(r["E"]), int(r["chi"]))
            for r in rungs if r.get("discarded_weight") is not None and r.get("E") is not None]
     if not pts:
         return {"E_chi_max": None, "chi_max": None, "dw_min": None, "E_inf": None,
-                "delta": None, "n_pts": 0, "slope": None}
+                "delta": None, "n_pts": 0, "slope": None, "n_dropped": 0}
     pts.sort(key=lambda p: p[2])                  # by chi, deepest last
     last = pts[-1]
     out = {"E_chi_max": last[1], "chi_max": last[2], "dw_min": last[0],
-           "E_inf": None, "delta": None, "n_pts": 0, "slope": None}
-    fit = pts[-n_fit:] if n_fit else pts
+           "E_inf": None, "delta": None, "n_pts": 0, "slope": None, "n_dropped": 0}
+    usable = monotone_tail(pts)
+    out["n_dropped"] = len(pts) - len(usable)
+    fit = usable[-n_fit:] if n_fit else usable
     if len(fit) < 2:
         return out
     dw = np.array([p[0] for p in fit]); E = np.array([p[1] for p in fit])
     slope, intercept = np.polyfit(dw, E, 1)
+    if intercept > last[1] and len(fit) > 2:
+        # The line through the shallow rungs lands ABOVE the deepest variational energy: E(dw)
+        # is still curving (294249 A=4: dw 4.5e-4 -> 3e-5), so the far rung is off the linear
+        # regime. Fall back to the chord through the two deepest rungs (always <= E(chi_max)).
+        fit = fit[-2:]
+        dw = np.array([p[0] for p in fit]); E = np.array([p[1] for p in fit])
+        slope, intercept = np.polyfit(dw, E, 1)
+        out["fallback_2pt"] = True
     out.update(E_inf=float(intercept), delta=float(abs(last[1] - intercept)),
                n_pts=len(fit), slope=float(slope))
     return out

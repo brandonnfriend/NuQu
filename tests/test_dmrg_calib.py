@@ -182,3 +182,27 @@ def test_shard_runner_defaults_N_f_to_2_pow_n_b(monkeypatch, tmp_path):
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-q"]))
+
+
+def test_extrapolate_drops_near_product_first_rung():
+    """294249 A=8: chi=100 sat in a near-product state (tiny dw, high E); it must not enter
+    the fit, which then uses the two monotone rungs above it."""
+    from misc.compare_dmrg_trimci import dmrg_extrapolate, monotone_tail
+    rungs = [{"chi": 100, "E": 1992.8752, "discarded_weight": 6.023e-06},
+             {"chi": 200, "E": 1986.3053, "discarded_weight": 3.132e-05},
+             {"chi": 400, "E": 1985.9736, "discarded_weight": 1.135e-05}]
+    assert [p[2] for p in monotone_tail(sorted(
+        [(r["discarded_weight"], r["E"], r["chi"]) for r in rungs], key=lambda p: p[2]))] == [200, 400]
+    r = dmrg_extrapolate(rungs, n_fit=3)
+    assert r["n_pts"] == 2 and r["n_dropped"] == 1
+    assert r["E_inf"] < r["E_chi_max"] and r["delta"] < 0.5       # 2-point chord (0.19 MeV total), not a 5.4 MeV jump
+    # 294249 A=4: the 3-rung line lands ABOVE E(chi_max) (dw still curving) -> deepest-two chord
+    curving = [{"chi": 100, "E": 2206.1555, "discarded_weight": 4.550e-04},
+               {"chi": 200, "E": 2204.9505, "discarded_weight": 5.542e-05},
+               {"chi": 400, "E": 2204.5838, "discarded_weight": 3.088e-05}]
+    r4 = dmrg_extrapolate(curving, n_fit=3)
+    assert r4.get("fallback_2pt") and r4["n_pts"] == 2 and r4["E_inf"] < r4["E_chi_max"]
+    # a clean monotone ladder is untouched
+    clean = [{"chi": c, "E": 10 + 1e3 * w, "discarded_weight": w} for c, w in ((100, 3e-5), (200, 1e-5), (400, 3e-6))]
+    r2 = dmrg_extrapolate(clean, n_fit=3)
+    assert r2["n_pts"] == 3 and r2["n_dropped"] == 0 and abs(r2["E_inf"] - 10) < 1e-9

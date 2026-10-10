@@ -162,19 +162,28 @@ The A-sweep turns ON select-core 16000 plus stratified starts; novel stays OFF. 
 - **Start records:** shards now record each start's nucleon arrangement (`rungs[0].phase0_select_starts`, output only).
 - **Smoke first:** `test` mode, L=4 A=10, 64 starts.
 - **Remaining ideas:** calibration, larger A and infrastructure are written up in `docs/classical_next_studies_2026-10-08.md` (local).
-- **Seed-sharing close-out re-runs (prepped 2026-10-08, awaiting push + go-ahead):** `hpc/detsvsL/submit_seedfix_rerun.sh`
-  re-runs 292477 (filling 1.0, seeds 1,2 × L=2..5; `SEEDS="0 1 2"` for the full set, `NB2=1` for 292478),
-  the n_b energy gate at L=2/3 (seeds 1-4) and volscaling primary+deep (seeds 1,2) under the production
-  search levers, everything else per legacy campaign; 88 shards, priorities below the squeeze campaign.
-  New shards carry `phase0_seed_stride`, so `analyze_search_levers --seed-audit` should show 0 collapsed
-  cells; central values may move at L≥3. Then re-aggregate + re-seal and retire the legacy artifacts.
-- **Extrapolation calibration (A1, prepped 2026-10-08, awaiting push + go-ahead):** `hpc/dmrg/submit_dmrg_calib.sh`
-  runs block2 DMRG on the identical bare n_b=3 (N_f=8) L=2 Hamiltonian (term-by-term equal to the
-  A-sweep's) at A∈{2,4,6,8,10}, χ 100→800 with a 4 h per-χ cap, 16 cpus / 48 GB / 48 GB disk, auto-OOM
-  policy; `misc/compare_dmrg_trimci.py` extrapolates E vs discarded weight and reports the gap to
-  the PT2-linear E∞ in σ. Preview from the 293938 A=2 shard (χ≤200 only): DMRG E∞ 288.375 ± 0.007
-  vs TrimCI 288.32 ± 0.01 MeV/site, gap −5σ, DMRG(χ=200) already 0.3/site below TrimCI's best
-  bound — the campaign decides whether the PT2-linear intercept over-corrects at L=2.
+- **Seed-sharing close-out re-runs (LAUNCHED 2026-10-08 as 294250 baseline / 294251 gate / 294252 volscaling, `SEEDS="0 1 2" NB2=1`, 95 shards):** `hpc/detsvsL/submit_seedfix_rerun.sh`.
+  **First read 2026-10-10** (`docs/classical_calibration_results_2026-10-10.md`, data in `data/classical/2026-10-10/`):
+  seed audit 26 cells / 0 collapsed / all stride 1000 — the defect is closed. Gate table reproduces the
+  legacy one digit for digit; volscaling verdict unchanged (CONDITIONAL retained; the L=4 @512k deep pair
+  is still running). Baseline: L=2 bit-identical (249.0680 at 1024k); **L=3 n_b=3 E∞ 279.7 ± 0.6 vs legacy
+  315.4 ± 1.0 MeV/site (−36), bound 285.6 vs 329.4, but the three independent seeds reach 285.6 / 290.8 /
+  (299.5 at 512k, unfinished)** — the dense L=3 search is still basin-limited by ~5/site between seeds (C9's
+  L≥3 reliability was measured at A≤10, not at filling 1.0). L=4/L=5 (8 shards, 384 GB) idle behind the squeeze
+  campaign. C2 at L≥3 needs NEW CLAIMS_FROZEN rows; re-seal + retire legacy artifacts once the rest lands.
+- **Extrapolation calibration (A1, DONE 2026-10-10, cluster 294249):** `hpc/dmrg/submit_dmrg_calib.sh`
+  ran block2 DMRG on the identical bare n_b=3 (N_f=8) L=2 Hamiltonian at A∈{2,4,6,8,10}; table/figure
+  `docs/presentation/dmrg_calibration_nb3_L2_*` from `misc/compare_dmrg_trimci.py`. **DMRG's variational
+  E(χ=400) is below TrimCI's best bound at every A (0.2–1.0/site). At A=4 and A=8 it is also 0.9 / 0.7
+  MeV/site below TrimCI's *extrapolated* E∞ (σ ≤ 0.01): the search missed a lower basin (DMRG S_max 2.2 / 1.96
+  vs the pion-vacuum 1.685 at A=2,6,10 — arrangement superposition TrimCI cannot reach). At A=2,6,10 TrimCI's
+  E∞ lands 0.04–0.24/site BELOW DMRG's (4–16σ): over-extrapolation or a DMRG arrangement basin, not yet
+  separable.** So the literature σ under-covers by ≥4× where small and misses ~1/site basin errors. Caveats:
+  A=4/8 not χ-converged (χ=800 blocked by the 4 h per-χ cap), 48 GB base OOM-held 1–3× per shard (peak
+  73–98 GB, no DMRG checkpoint → 19–29 h wall). The extrapolator fits only the monotone tail of rungs and
+  falls back to the deepest-two chord when the line lands above E(χ_max) (A=8 near-product χ=100 rung; A=4
+  curving ladder). Follow-ups proposed in `docs/classical_calibration_results_2026-10-10.md` §4 (χ=800 at
+  A=4,8 with MEM=128; second DMRG start; L=3 A=27 anchor).
 - **Infrastructure for the squeeze campaign (2026-10-08, branch `infra/resume-oom-provisioning`):**
   (C1) per-rung core checkpoints + `--resume` (bit-identical, `tests/test_resume_ladder.py`);
   (C2) auto-growing `request_memory` + `periodic_release` on memory holds + provisioning
