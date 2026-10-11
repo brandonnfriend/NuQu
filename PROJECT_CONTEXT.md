@@ -163,7 +163,8 @@ The A-sweep turns ON select-core 16000 plus stratified starts; novel stays OFF. 
 - **Start records:** shards now record each start's nucleon arrangement (`rungs[0].phase0_select_starts`, output only).
 - **Smoke first:** `test` mode, L=4 A=10, 64 starts.
 - **Remaining ideas:** calibration, larger A and infrastructure are written up in `docs/classical_next_studies_2026-10-08.md` (local).
-- **Seed-sharing close-out re-runs (LAUNCHED 2026-10-08 as 294250 baseline / 294251 gate / 294252 volscaling, `SEEDS="0 1 2" NB2=1`, 95 shards):** `hpc/detsvsL/submit_seedfix_rerun.sh`.
+- **Progress (2026-10-11 17:30): 94/117 done, 5 running, 18 idle (384 GB, the remaining L=4 squeeze seeds).** The squeeze L=4 A-sweep landed (A=0..10, 1–2 seeds): under `nuqu-2026-10` **8 of 11 cells are bound-only** (a 0.3/site step at 64k–128k leaves 2–3 PT2 rungs; PT2-linear needs 4), A=2/6/10 report ±0.24–0.28/site on the half-distance. L=4 ladders stop at 512k with PT2 to 256k (the 512k rung is a pool rung, bound only); squeeze L=4 limits need `sizing_for_L(4)` → 1024k/512k (the 512k pool cost 119–166 GB, so ~250–350 GB) and a re-run of the L=4 arm — not launched. Squeeze L=4 A=0 bound 345.034 vs exact 344.596 (+0.44, still falling 0.09/doubling). Binding tables (`docs/presentation/2026-10-11_asweep_squeeze/`): L=2 all A with σ 0.04–0.5 MeV, L=3 σ 6–29 MeV (A × σ(E(1)) at the L=3 half-distance), L=4 bounds only.
+- **Seed-sharing close-out re-runs (LAUNCHED 2026-10-08 as 294250 baseline / 294251 gate / 294252 volscaling, `SEEDS="0 1 2" NB2=1`, 95 shards):** `hpc/detsvsL/submit_seedfix_rerun.sh`. **294251 and 294252 are DONE (2026-10-11):** volume scaling with the deep L=4 pair at 512k → median Δ34/site +0.00014 (L=4), −0.00151 (L=3), +0.00019 (L=2): CONDITIONAL (retained), identical reading to the legacy study. 294250: 7 done, 8 idle at 384 GB (behind the squeeze on JobPrio).
   **First read 2026-10-10** (`docs/classical_calibration_results_2026-10-10.md`, data in `data/classical/2026-10-10/`):
   seed audit 26 cells / 0 collapsed / all stride 1000 — the defect is closed. Gate table reproduces the
   legacy one digit for digit; volscaling verdict unchanged (CONDITIONAL retained; the L=4 @512k deep pair
@@ -187,8 +188,15 @@ The A-sweep turns ON select-core 16000 plus stratified starts; novel stays OFF. 
   the seed spread (bare L=3 ±2.6–3.6, filling-1.0 ±2.4–7.0, squeeze L=3 ±0.03–0.42/site) — the brief's
   own expected magnitudes; bare L=4 ±13; the four variational refusals (bare L=2 A=4/8 and both
   filling-1.0 L=2 baselines, refuted by DMRG) stand. §11e's one run — bare A=0 L=3 **n_b=4** at the 294246
-  refs' settings — is **cluster 294253** (launched 2026-10-10, 3 seeds, 128 GB; pull to
-  `data/classical/<date>/Asweep_squeeze_nb4_294253/`, compare to n_b=3's 332.73 ± 2.64 and the exact 331.461).
+  refs' settings — was **cluster 294253** (3 seeds, 128 GB; DONE 2026-10-11, 4.1–4.9 h, 73 GB peak;
+  `data/classical/2026-10-11/Asweep_squeeze_nb4_294253/`): **n_b=4 gives 332.722 ± 2.638 vs n_b=3's
+  332.728 ± 2.636, |Δ34| ≤ 0.0015/site at every rung — the +1.27/site bare L=3 vacuum miss is fit/search
+  bias, not cutoff, and sits at 0.48σ.** A=0 calibration now passes at bare L=2/3 and squeeze L=2/3 (≤ 0.5σ)
+  and **FAILS at bare L=4: 356.68 ± 5.77 vs exact 344.596, +12.1/site = 2.1σ** (256k cores on 64 sites; the
+  PT2-linear fit closes half the gap and the exact-floor gate only catches undershoot). Proposed, not
+  implemented: a fifth gate (family calibration — if the A=0 cell of a (frame, n_b, L) family misses the
+  exact vacuum by > σ, the family is bound-only; would turn every bare L=4 cell bound-only, nothing else),
+  or the deeper L=4 ladder (1024k, PT2 512k, ~300 GB). Details: `docs/classical_calibration_results_2026-10-10.md` §5.
   Refused cells quote the bound and keep the refused limit in `gate`. `window_shift` is now
   carried to the pooled record and shown in every table; the seed PASS/FAIL verdict is retired under the
   new convention (spread is a σ term). `--sigma-convention nuqu-2026-10` on `aggregate_classical_energies`,
