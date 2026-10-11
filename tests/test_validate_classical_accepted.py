@@ -286,18 +286,41 @@ def main():
             if abs(r4["E_inf"] - pooled["per_seed"][best]["E_inf"]) > 1e-9:
                 fails.append("manifest E_inf is not the best-bound seed's -- stated seed_rule "
                              "does not match combine_seeds")
-            # POLICY 2: sigma is that seed's OWN uncertainty; the spread is not folded in
-            if abs(r4["sigma"] - pooled["per_seed"][best]["sigma"]) > 1e-9:
-                fails.append("manifest sigma differs from the best seed's own -- the seed spread "
-                             "appears to be folded in, contradicting the stated uncertainty rule")
+            gated = r4.get("sigma_convention") == "nuqu-2026-10"
+            if gated:
+                # POLICY 2 (nuqu-2026-10, default since 2026-10-10): sigma is the LARGEST of the
+                # recorded terms -- the matched-depth seed spread among them -- and the manifest
+                # equals what combine_seeds says
+                if abs(r4["sigma"] - pooled["sigma"]) > 1e-9:
+                    fails.append("manifest sigma differs from combine_seeds' pooled sigma")
+                terms = {k: v for k, v in (pooled.get("sigma_terms") or {}).items() if v is not None}
+                if not terms or abs(r4["sigma"] - max(terms.values())) > 1e-9:
+                    fails.append(f"gated sigma {r4['sigma']} is not the max of its terms {terms}")
+                if r4.get("sigma_source") not in terms:
+                    fails.append(f"sigma_source {r4.get('sigma_source')} is not one of the terms")
+            else:
+                # POLICY 2 (trimci-coo): sigma is that seed's OWN uncertainty; the spread is not folded in
+                if abs(r4["sigma"] - pooled["per_seed"][best]["sigma"]) > 1e-9:
+                    fails.append("manifest sigma differs from the best seed's own -- the seed spread "
+                                 "appears to be folded in, contradicting the stated uncertainty rule")
             if r4.get("sigma_seed") is None:
                 fails.append("seed spread not reported alongside as a diagnostic")
         # POLICY TEXT: the strings must say those two things, so they cannot go stale silently
         rules = _agg_rules()
-        if "best-bound seed" not in rules["seed_rule"] or "never an error-bar term" not in rules["seed_rule"]:
-            fails.append(f"seed_rule text no longer states the best-bound/diagnostic policy: {rules['seed_rule']}")
-        if "SEED SPREAD IS NOT IN SIGMA" not in rules["uncertainty"]:
-            fails.append(f"uncertainty text no longer excludes the seed spread: {rules['uncertainty']}")
+        if rules["sigma_convention"] == "nuqu-2026-10":
+            if "tightest E_var across seeds" not in rules["seed_rule"]:
+                fails.append(f"seed_rule text no longer states the best-bound policy: {rules['seed_rule']}")
+            for must in ("LARGEST", "half the extrapolation distance", "same top core",
+                         "cross-check gap"):
+                if must not in rules["uncertainty"]:
+                    fails.append(f"gated uncertainty text lost '{must}': {rules['uncertainty']}")
+            if "RESOLVED cross-check" not in rules["gate"] or "sigma + sigma_cc" not in rules["gate"]:
+                fails.append(f"gate text no longer states the resolved-cross-check rule: {rules['gate']}")
+        else:
+            if "best-bound seed" not in rules["seed_rule"] or "never an error-bar term" not in rules["seed_rule"]:
+                fails.append(f"seed_rule text no longer states the best-bound/diagnostic policy: {rules['seed_rule']}")
+            if "SEED SPREAD IS NOT IN SIGMA" not in rules["uncertainty"]:
+                fails.append(f"uncertainty text no longer excludes the seed spread: {rules['uncertainty']}")
         if "mean" in rules["seed_rule"].lower():
             fails.append("seed_rule still describes a mean over seeds")
 

@@ -131,7 +131,17 @@ def main():
                     fails.append(f"{k}: robustness record missing/wrong ({rob})")
                 if rob.get("spread") is None or rob["spread"] < 1.0:
                     fails.append(f"{k}: seed spread {rob.get('spread')} not reported")
-                if r["sigma"] is not None and rob.get("spread") is not None \
+                gated = r.get("sigma_convention") == "nuqu-2026-10"
+                if gated:
+                    # nuqu-2026-10 (default since 2026-10-10): the matched-depth spread IS a
+                    # sigma term, so sigma must cover it and the record must say which term bound
+                    if r["sigma"] is not None and rob.get("spread") is not None \
+                            and r["sigma"] < rob["spread"] - 1e-9:
+                        fails.append(f"{k}: gated sigma {r['sigma']:.3f} below the matched-depth "
+                                     f"seed spread {rob['spread']:.3f}")
+                    if r.get("sigma_source") not in (r.get("sigma_terms") or {}):
+                        fails.append(f"{k}: sigma_source {r.get('sigma_source')} not one of the terms")
+                elif r["sigma"] is not None and rob.get("spread") is not None \
                         and abs(r["sigma"] - rob["spread"]) < 1e-9:
                     fails.append(f"{k}: sigma equals the seed spread -- it leaked into sigma")
             short = by.get((3, 5))
@@ -143,14 +153,17 @@ def main():
             md = open(os.path.join(out, "classical_energy_aggregate.md")).read()
             if "Cutoff shift $n_b$: 2 → 3" not in md:
                 fails.append("paired n_b=2->3 shift table missing though both cutoffs present")
-            # the default sigma convention is trimci-coo since 2026-10-06 (its budget table is
-            # the bootstrap one); the legacy SHCI table appears under --sigma-convention nuqu-2026-09
+            # the default sigma convention is nuqu-2026-10 since 2026-10-10 (its budget table
+            # names the gate); trimci-coo's bootstrap table and the legacy SHCI table appear
+            # under --sigma-convention trimci-coo / nuqu-2026-09
             if "Error budget" not in md or not ("SHCI ½-dist" in md
-                                                or "TrimCI/COO literature convention" in md):
-                fails.append("error-budget table missing (neither the literature nor the SHCI table)")
-            if "Search robustness" not in md:
-                fails.append("search-robustness table missing -- the seed spread must be "
-                             "reported somewhere once it is out of sigma")
+                                                or "TrimCI/COO literature convention" in md
+                                                or "`nuqu-2026-10`" in md):
+                fails.append("error-budget table missing (neither the gated, the literature nor "
+                             "the SHCI table)")
+            if "Search robustness" not in md and "Seeds at matched depth" not in md:
+                fails.append("seed-spread table missing -- the seed spread must be reported "
+                             "somewhere (robustness table, or the matched-depth statement)")
             # the seed spread must not be presented as an uncertainty
             if "σ seed" in md:
                 fails.append("'σ seed' column still present -- seed spread is a search "

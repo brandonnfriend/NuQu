@@ -51,7 +51,8 @@ def _run(mode, env_extra=None):
         stub = os.path.join(binp, "condor_submit")
         open(stub, "w").write("#!/bin/sh\necho fake-submit $*\n")
         os.chmod(stub, 0o755)
-        env = {k: v for k, v in os.environ.items() if k not in ("AS", "LS", "SEEDS", "REF_LS")}
+        env = {k: v for k, v in os.environ.items()
+               if k not in ("AS", "LS", "SEEDS", "REF_LS", "REF_AS", "NB")}
         env.update(env_extra or {})
         env["PATH"] = binp + os.pathsep + env["PATH"]
         p = subprocess.run(["sh", os.path.basename(_SCRIPT), mode], cwd=tmp, env=env,
@@ -118,10 +119,27 @@ def test_modes_and_trims():
     assert len(g["smoke"]) == 1 and g["smoke"][0][0] == "gaussian" and g["smoke"][0][-1] == "64"
 
 
+def test_nb4_vacuum_point():
+    """s11e's one run (2026-10-10): bare, A=0, L=3, n_b=4 at the refs' exact settings.
+    `NB` and `REF_AS` thread through every row and the campaign suffix; nothing else moves."""
+    g, s = _run("refs", {"NB": "4", "REF_LS": "3", "REF_AS": "0"})
+    rows = g["grid"]
+    assert len(rows) == 3 and {r[0] for r in rows} == {"bare"}
+    assert {r[1] for r in rows} == {"4"} and {r[2] for r in rows} == {"3"} and {r[3] for r in rows} == {"0"}
+    assert sorted(r[4] for r in rows) == ["0", "1", "2"]
+    for r in rows:                                   # 293963 / 294246 L=3 sizing, 32 bare starts
+        assert tuple(r[5:10]) == ("1024000", "512000", "128", "8", "21600") and r[-1] == "32"
+    assert "-nb$(NB)" in s["Asweep"] and "NUQU_N_B=$(NB)" in s["Asweep"]
+    check_policy(s["Asweep"])
+    g, _ = _run("refs")                              # defaults unchanged: n_b=3, A={0,1}
+    assert len(g["grid"]) == 18 and {r[1] for r in g["grid"]} == {"3"}
+
+
 def main():
     test_full_grid()
     test_oomtest_mode()
     test_modes_and_trims()
+    test_nb4_vacuum_point()
     print("test_nb3_Asweep_squeeze_submit: PASS  (99 squeeze + 18 bare refs; starts 16L<=64 vs 32; "
           "293963 sizing; frame threaded; auto-OOM policy; oomtest; modes, trims, 1-shard smoke)")
 

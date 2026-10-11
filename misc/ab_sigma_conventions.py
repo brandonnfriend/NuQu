@@ -2,12 +2,13 @@
 
     python -m misc.ab_sigma_conventions --out docs/sigma_convention_ab_<date>.md
 
-Runs `combine_seeds` under `trimci-coo` (current default), `nuqu-2026-10` (gated) and, for the
-bit-identity check, `nuqu-2026-09`, on the same loaded shards, and tabulates per cell: the bound,
-each convention's E_inf +- sigma (or the refusal), the three nuqu-2026-10 terms, the gate verdict
-and the deviation from any registered external reference. The acceptance criterion in
-docs/classical_error_convention_2026-10-08.md s11e: the old conventions do not move, and the
-gate refuses exactly the cells an external same-operator bound refutes.
+Runs `combine_seeds` under `trimci-coo` (the default 2026-10-06..10), `nuqu-2026-10` (gated;
+the default since 2026-10-10) and, for the bit-identity check, `nuqu-2026-09`, on the same loaded
+shards, and tabulates per cell: the bound, each convention's E_inf +- sigma (or the refusal), the
+nuqu-2026-10 sigma terms, the cross-check gap with the cross-check's own sigma (n/r = unresolved,
+does not vote), the gate verdict and the deviation from any registered external reference. The
+acceptance criterion in docs/classical_error_convention_2026-10-08.md s11e: the old conventions
+do not move, and the gate refuses exactly the cells an external same-operator bound refutes.
 
 Cells are discovered from DATA_DIRS below (one Hamiltonian per (frame, A, L)); the A-sweep and
 squeeze directories are loaded one A at a time, the filling-1.0 baselines as they are.
@@ -57,6 +58,7 @@ def run(dirs=DATA_DIRS, conventions=(LITERATURE_CONVENTION, GATED_CONVENTION, LE
             r_new = recs[GATED_CONVENTION][key]
             r_old = recs[LEGACY_CONVENTION][key] if LEGACY_CONVENTION in recs else None
             gate = r_new.get("gate") or {}
+            cc = (gate.get("checks") or {}).get("cross_check") or {}
             ext = r_new.get("external_reference") or {}
             dev = [u["dev_ps"] for u in ext.get("upper") or []] + \
                   ([ext["exact"]["dev_ps"]] if ext.get("exact") else [])
@@ -71,6 +73,8 @@ def run(dirs=DATA_DIRS, conventions=(LITERATURE_CONVENTION, GATED_CONVENTION, LE
                 "new_E_refused": gate.get("E_inf_refused_ps"),
                 "new_sigma_if": gate.get("sigma_if_reported_ps"),
                 "terms": r_new.get("sigma_terms_ps") or {}, "source": r_new.get("sigma_source"),
+                "cc_gap": cc.get("gap_ps"), "cc_sigma": cc.get("sigma_cc_ps"),
+                "cc_resolved": cc.get("resolved"),
                 "refused_by": gate.get("refused_by") or [], "window_shift": r_new.get("window_shift_ps"),
                 "ext_dev": dev[0] if dev else None, "best_known": r_new.get("E_bound_best_known_source"),
             })
@@ -83,25 +87,31 @@ def table(rows, path):
     n_lit = sum(r["lit_ok"] for r in rows)
     n_new = sum(r["new_ok"] for r in rows)
     n_ref = sum(1 for r in rows if r["lit_ok"] and not r["new_ok"])
-    md = ["# σ-convention A/B: `trimci-coo` (current) vs `nuqu-2026-10` (gated) — every local cell\n",
+    md = ["# σ-convention A/B: `trimci-coo` (default 2026-10-06..10) vs `nuqu-2026-10` (gated, default "
+          "since 2026-10-10) — every local cell\n",
           f"_{len(rows)} (dir, frame, A, L) cells. trimci-coo reports {n_lit} limits; nuqu-2026-10 reports "
           f"{n_new} ({n_ref} of the trimci-coo limits are refused by the gate). Central values never "
-          f"move: the gated convention only widens σ (max of three terms) and refuses. `vs ext.` is "
+          f"move: the gated convention only widens σ (max of the terms) and refuses. `cross-check` is "
+          f"the gap to the other estimator with that estimator's own bootstrap σ in parentheses; "
+          f"`n/r` = unresolved (σ_cc beyond the extrapolation distance), which does not vote. `vs ext.` is "
           f"the deviation from a registered external reference (block2 DMRG at bare L=2, the exact "
           f"vacuum at A=0), positive = our limit is higher. MeV/site, Wick convention._\n",
           "| dir | frame | A | L | seeds | bound | trimci-coo E∞ ± σ | **nuqu-2026-10 E∞ ± σ** | "
-          "σ boot | ½-dist | seed spread | source | window shift | vs ext. | gate |",
-          "|:--|:--|--:|--:|--:|--:|--:|--:|--:|--:|--:|:--|--:|--:|:--|"]
+          "σ boot | ½-dist | seed spread | cross-check gap (σ_cc) | source | window shift | vs ext. | gate |",
+          "|:--|:--|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|:--|--:|--:|:--|"]
     for r in sorted(rows, key=lambda r: (r["dir"], r["frame"], r["L"], r["A"], r["n_b"])):
         t = r["terms"]
         new = (f"**{pm(True, r['new_E'], r['new_sigma'])}**" if r["new_ok"] else
                ("bound only" + (f" (refused {f(r['new_E_refused'])} ± {f(r['new_sigma_if'])})"
                                 if r["new_E_refused"] is not None else "")))
         gate = ("passed" if r["new_ok"] else (", ".join(r["refused_by"]) or "no limit"))
-        src = {"bootstrap": "boot", "extrap_half_distance": "½-dist", "seed_spread": "seed"}.get(r["source"], "—")
+        src = {"bootstrap": "boot", "extrap_half_distance": "½-dist", "seed_spread": "seed",
+               "cross_check_gap": "cross-check"}.get(r["source"], "—")
+        cc = ("—" if r["cc_gap"] is None else
+              f"{f(r['cc_gap'])} ({f(r['cc_sigma'])})" + ("" if r["cc_resolved"] else " n/r"))
         md.append(f"| {r['dir']} | {r['frame']} | {r['A']} | {r['L']} | {r['n_seeds']} | {f(r['bound'])} | "
                   f"{pm(r['lit_ok'], r['lit_E'], r['lit_sigma'])} | {new} | {f(t.get('bootstrap'))} | "
-                  f"{f(t.get('extrap_half_distance'))} | {f(t.get('seed_spread'))} | {src} | "
+                  f"{f(t.get('extrap_half_distance'))} | {f(t.get('seed_spread'))} | {cc} | {src} | "
                   f"{f(r['window_shift'])} | {f(r['ext_dev'])} | {gate} |")
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     open(path, "w").write("\n".join(md) + "\n")

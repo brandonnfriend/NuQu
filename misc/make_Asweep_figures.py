@@ -276,9 +276,11 @@ def table(rec, path, frame="bare"):
     gated = conv == "nuqu-2026-10"
     md = [f"# Fixed-A n_b=3 classical sweep — per-(A, L) summary (MeV/site, Wick convention, {frame} frame)", "",
           ("_σ: `nuqu-2026-10` — max(bootstrap, half extrapolation distance, matched-depth seed "
-           "spread), reported only when the four-part gate passes (post-collapse rungs; limit at or "
-           "below every same-operator variational bound incl. block2 DMRG; cross-check gap ≤ σ; seed "
-           "spread ≤ σ), else bound only. The σ source and the gate verdict are in the last columns; "
+           "spread, and the cross-check gap where the cross-check is resolved), reported only when "
+           "the four-part gate passes (post-collapse rungs; limit at or below every same-operator "
+           "variational bound incl. block2 DMRG; a resolved cross-check overlapping within σ + σ_cc, "
+           "an unresolved one — σ_cc beyond the extrapolation distance, all of L≥3 — does not vote; "
+           "seed spread ≤ σ), else bound only. The σ source and the gate verdict are in the last columns; "
            "'vs ext.' is the deviation from the registered external reference (DMRG at L=2, exact "
            "vacuum at A=0), positive = our limit is higher._"
            if gated else
@@ -297,8 +299,8 @@ def table(rec, path, frame="bare"):
             ci = r["ci90"]
             tail = ""
             if gated:
-                src = {"bootstrap": "boot", "extrap_half_distance": "½-dist", "seed_spread": "seed"}.get(
-                    r.get("sigma_source"), "—")
+                src = {"bootstrap": "boot", "extrap_half_distance": "½-dist", "seed_spread": "seed",
+                       "cross_check_gap": "cross-check"}.get(r.get("sigma_source"), "—")
                 rb = r.get("gate_refused_by")
                 gate = ("passed" if r["ok"] else
                         ("refused: " + ", ".join(rb) + (f" (limit {f(r['E_inf_refused'])})"

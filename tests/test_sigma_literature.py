@@ -76,7 +76,7 @@ def test_primary_crosscheck_and_pool_rung():
 
 def test_seed_spread_not_in_sigma_and_legacy_switch():
     per = {0: _ladder(), 1: [dict(r, E_var=r["E_var"] + 0.3) for r in _ladder()]}
-    lit = combine_seeds(per, sites=8)
+    lit = combine_seeds(per, sites=8, convention="trimci-coo")   # the default is nuqu-2026-10 since 2026-10-10
     assert lit["sigma_convention"] == "trimci-coo"
     assert lit["sigma"] == lit["per_seed"][lit["best_seed"]]["sigma"]
     old = combine_seeds(per, sites=8, convention="nuqu-2026-09")

@@ -33,7 +33,16 @@
 # from the bare sweep in TWO ways (frame and start count); L=2 is the clean frame comparison.
 #
 # GRID (defaults): squeeze A=0..10 x L=2..4 x 3 seeds = 99, refs A=0,1 x L=2..4 x 3 = 18.
-# Trim / extend with env: AS="0 1 2 4 6 8 10"  LS="2 3 4 5"  SEEDS="0"  REF_LS="2 3".
+# Trim / extend with env: AS="0 1 2 4 6 8 10"  LS="2 3 4 5"  SEEDS="0"  REF_LS="2 3"  REF_AS="0".
+# NB (default 3) sets the boson cutoff of every shard and the campaign suffix (-nb$NB). The
+# n_b=4 vacuum point docs/classical_error_convention_2026-10-08.md s11e asks for -- bare, A=0,
+# L=3, at exactly the refs' settings so it compares to 294246's bare_L3d3_A0 n_b=3 shards and to
+# the exact vacuum 331.461/site -- is therefore
+#     NB=4 REF_LS=3 REF_AS=0 sh submit_nb3_Asweep_squeeze.sh refs      # 3 shards (seeds 0 1 2)
+# Memory is unchanged from n_b=3: the per-rung records of 294252 (nb_volscaling nb3 vs nb4 at
+# L=3, A=0/1) peak at the same 17 GB @256k and 36.6 GB @512k for both cutoffs -- the pool size,
+# not the cutoff, sets the footprint -- and 294246's n_b=3 bare L=3 A=0 shards peaked at 69 GB
+# @1024k against the 128 GB base (auto-grows on a hold). Wall was 4.4-5.2 h at 8 cpus.
 #
 # COST (bare-frame wall-clocks as the guide; the squeezed H has ~0.65x the bare term count):
 # L=2 ~3-5 h/4c, L=3 ~6-8 h/8c, L=4 ~16-22 h/8c (+ ~1.5 h for the larger select stage);
@@ -56,7 +65,9 @@ RUNNER="./run_frame_shard.sh"
 AS="${AS:-0 1 2 3 4 5 6 7 8 9 10}"
 LS="${LS:-2 3 4}"
 REF_LS="${REF_LS:-2 3 4}"
+REF_AS="${REF_AS:-0 1}"
 SEEDS="${SEEDS:-0 1 2}"
+NB="${NB:-3}"
 
 # args to run_frame_shard.sh: L seed campaign frame A filling max_core ladder_mode
 #                             frame_runs orbopt_cycles phase0_core max_rung_seconds
@@ -130,7 +141,7 @@ add_rows() {   # $1=frame  $2=list of L  $3=list of A  $4=starts mode (squeeze|r
     for A in $As; do
       # seed-major priority: seed 0 everywhere first; refs a notch above the sweep at equal L
       for S in $SEEDS; do
-        row "$fr" 3 "$LL" "$A" "$S" "$1" "$2" "$3" "$4" "$5" $(( $6 + 100 * (2 - S) + bump )) "$7" "$nr" >> "$g"
+        row "$fr" "$NB" "$LL" "$A" "$S" "$1" "$2" "$3" "$4" "$5" $(( $6 + 100 * (2 - S) + bump )) "$7" "$nr" >> "$g"
       done
     done
   done
@@ -163,14 +174,14 @@ fi
 
 G="campaign_${BASE}/grid.txt"; : > "$G"
 case "$MODE" in
-  all)     add_rows gaussian "$LS" "$AS" squeeze "$G"; add_rows bare "$REF_LS" "0 1" ref "$G" ;;
+  all)     add_rows gaussian "$LS" "$AS" squeeze "$G"; add_rows bare "$REF_LS" "$REF_AS" ref "$G" ;;
   squeeze) add_rows gaussian "$LS" "$AS" squeeze "$G" ;;
-  refs)    add_rows bare "$REF_LS" "0 1" ref "$G" ;;
+  refs)    add_rows bare "$REF_LS" "$REF_AS" ref "$G" ;;
   *) echo "usage: sh submit_nb3_Asweep_squeeze.sh {test|oomtest|all|squeeze|refs}" >&2; exit 2 ;;
 esac
 submit_grid Asweep "$G"
-echo "  -> squeeze A={${AS}} x L={${LS}} and/or bare refs A={0 1} x L={${REF_LS}}, seeds {${SEEDS}}"
+echo "  -> n_b=${NB}: squeeze A={${AS}} x L={${LS}} and/or bare refs A={${REF_AS}} x L={${REF_LS}}, seeds {${SEEDS}}"
 echo
-echo "Retrieve:  rsync -az --exclude '*.npz' hep:/nfs_scratch/bfriend3/NuQu/NuQu/hpc/detsvsL/campaign_${BASE}-nb3/shards/ \\"
-echo "               data/classical/\$(date +%F)/Asweep_squeeze_nb3_<cluster>/"
+echo "Retrieve:  rsync -az --exclude '*.npz' hep:/nfs_scratch/bfriend3/NuQu/NuQu/hpc/detsvsL/campaign_${BASE}-nb${NB}/shards/ \\"
+echo "               data/classical/\$(date +%F)/Asweep_squeeze_nb${NB}_<cluster>/"
 exit 0

@@ -311,9 +311,12 @@ def make_table(recs, out_path, convention=DEFAULT_CONVENTION):
          "reached the same top core. **A limit is reported only if it passes the gate:** post-"
          "collapse rungs exist; it lies at or below EVERY known variational bound on the same "
          "truncated Hamiltonian (our seeds' and the external registry's — block2 DMRG at L=2) and "
-         "not below the exact untruncated energy by more than σ; the cross-check gap is within σ; "
-         "the seed spread is within σ. Otherwise only the bound is quoted. Same-operator references "
-         "only: a squeezed bound never judges a bare limit. "
+         "not below the exact untruncated energy by more than σ; the cross-check, where it is "
+         "RESOLVED (its own bootstrap σ within the extrapolation distance), overlaps the limit within "
+         "one σ each way (|gap| ≤ σ + σ_cc) — a passing cross-check then widens σ to cover its value "
+         "(fourth term, `cross-check`); an unresolved one (L≥3: the power law's σ is 7–145 MeV/site) "
+         "does not vote, as a missing one does not; the seed spread is within σ. Otherwise only the "
+         "bound is quoted. Same-operator references only: a squeezed bound never judges a bare limit. "
          if recs and recs[0].get("sigma_convention") == GATED_CONVENTION else
          "**What σ covers (TrimCI/COO literature convention):** the bootstrap standard "
          "deviation (500 replicates, COO SM S5.2) of the primary estimator on the **best-bound "
@@ -358,14 +361,17 @@ def make_table(recs, out_path, convention=DEFAULT_CONVENTION):
                   + (f" {_bk(r)} |" if gated else ""))
 
     if gated:
-        md += ["", "### Error budget (MeV/site) — `nuqu-2026-10`: σ = max of three terms, then the gate", "",
+        md += ["", "### Error budget (MeV/site) — `nuqu-2026-10`: σ = max of the terms, then the gate", "",
                "_Each term is a lower bound on a different failure: the bootstrap on the fit's scatter, "
                "the half-distance on the extrapolation's reach, the matched-depth seed spread on the "
-               "search. The largest is σ. The window shift, the cross-check gap and the deviation from "
-               "external references are reported beside it. Refused rows keep the limit the gate "
-               "rejected, for the record._", "",
-               "| $n_b$ | L | best seed | σ boot | ½ extrap. dist. | seed spread (matched) | **σ (source)** | "
-               "window shift | cross-check gap | vs external (dev) | gate |",
+               "search, and — when the cross-check estimator is resolved (its own σ_cc within the "
+               "extrapolation distance) — the cross-check gap on the extrapolator's model dependence. "
+               "The largest is σ. The window shift and the deviation from external references are "
+               "reported beside it. `cross-check` reads gap (σ_cc); an unresolved cross-check is "
+               "marked `n/r` and does not vote. Refused rows keep the limit the gate rejected, for "
+               "the record._", "",
+               "| $n_b$ | L | best seed | σ boot | ½ extrap. dist. | seed spread (matched) | "
+               "cross-check gap (σ_cc) | **σ (source)** | window shift | vs external (dev) | gate |",
                "|--:|--:|--:|--:|--:|--:|--:|--:|--:|:--|:--|"]
         f3 = lambda x: "—" if x is None else f"{x:.3f}"
         for r in recs:
@@ -374,9 +380,12 @@ def make_table(recs, out_path, convention=DEFAULT_CONVENTION):
             if not t and not g:
                 continue
             sig = r.get("sigma_ps") if r["ok"] else g.get("sigma_if_reported_ps")
-            src = {"bootstrap": "boot", "extrap_half_distance": "½-dist", "seed_spread": "seed"}.get(
-                r.get("sigma_source"), "—")
+            src = {"bootstrap": "boot", "extrap_half_distance": "½-dist", "seed_spread": "seed",
+                   "cross_check_gap": "cross-check"}.get(r.get("sigma_source"), "—")
             cc = (g.get("checks") or {}).get("cross_check") or {}
+            cc_txt = ("—" if cc.get("gap_ps") is None else
+                      f"{cc['gap_ps']:.3f} ({f3(cc.get('sigma_cc_ps'))})" +
+                      ("" if cc.get("resolved") else " n/r"))
             ext = r.get("external_reference") or {}
             devs = [f"{(u.get('method') or '').split(' (')[0]} {u['dev_ps']:+.3f}" for u in ext.get("upper") or []]
             if ext.get("exact"):
@@ -385,8 +394,8 @@ def make_table(recs, out_path, convention=DEFAULT_CONVENTION):
                     ("refused: " + ", ".join(g.get("refused_by") or []) +
                      (f" (limit {g['E_inf_refused_ps']:.3f})" if g.get("E_inf_refused_ps") is not None else "")))
             md.append(f"| {r['n_b']} | {r['L']} | {r.get('best_seed', '—')} | {f3(t.get('bootstrap'))} | "
-                      f"{f3(t.get('extrap_half_distance'))} | {f3(t.get('seed_spread'))} | "
-                      f"**{f3(sig)}** ({src}) | {f3(r.get('window_shift_ps'))} | {f3(cc.get('gap_ps'))} | "
+                      f"{f3(t.get('extrap_half_distance'))} | {f3(t.get('seed_spread'))} | {cc_txt} | "
+                      f"**{f3(sig)}** ({src}) | {f3(r.get('window_shift_ps'))} | "
                       f"{'; '.join(devs) or '—'} | {gate} |")
 
     if recs and recs[0].get("sigma_convention") == "trimci-coo":
@@ -555,11 +564,12 @@ def main():
                     help="NOT for release: lift the pre-2026-08-18 data refusal")
     add_convention_arg(ap)
     ap.add_argument("--sigma-convention", default=None, choices=list(SIGMA_CONVENTIONS),
-                    help="E_inf error-bar convention (default: trimci-coo, the TrimCI/COO "
-                         "papers' R^2-scan power law + bootstrap sigma; nuqu-2026-10 = the "
-                         "gated convention after the DMRG calibration: sigma = max(bootstrap, "
-                         "half extrapolation distance, matched-depth seed spread) and a limit "
-                         "is reported only if it passes the four-part gate; nuqu-2026-09 = the "
+                    help="E_inf error-bar convention (default: nuqu-2026-10, the gated "
+                         "convention after the DMRG calibration: sigma = max(bootstrap, half "
+                         "extrapolation distance, matched-depth seed spread, resolved cross-check "
+                         "gap) and a limit is reported only if it passes the four-part gate; "
+                         "trimci-coo = the TrimCI/COO papers' PT2-linear / R^2-scan power law "
+                         "with bootstrap sigma alone (default 2026-10-06..10); nuqu-2026-09 = the "
                          "previous max(SHCI half-distance, internal quadrature))")
     ap.add_argument("--no-external", action="store_true",
                     help="ignore classical/trimci/external_bounds.json (A/B only)")

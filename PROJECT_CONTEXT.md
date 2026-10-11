@@ -133,9 +133,10 @@ The A-sweep turns ON select-core 16000 plus stratified starts; novel stays OFF. 
 - **Notes:** recorded in `results/README.md` §02, `basin_collapse_and_search_note.md` and `AUDIT_RESPONSE_2026-09-05.md` item 8.
 - **Manifests:** `verify_accepted_manifests` fails the same 6 classical manifests before and after, all on script/figure hashes. Re-seal is open.
 
-**σ convention = TrimCI/COO literature (2026-10-06, user decision):** `extrapolation.DEFAULT_SIGMA_CONVENTION = "trimci-coo"`.
+**σ convention = `nuqu-2026-10`, gated (DEFAULT since 2026-10-10, user decision after the A/B; `trimci-coo` was the default 2026-10-06..10 and stays selectable, bit-identical):** `extrapolation.DEFAULT_SIGMA_CONVENTION = GATED_CONVENTION`. Per-seed fits are still the literature ones:
 - **Primary:** PT2-linear (TrimCI) with bootstrap σ (COO SM S5.2).
-- **Cross-check:** the R²-scan power law, reported but never added.
+- **Cross-check:** the R²-scan power law, with its own bootstrap σ_cc.
+- **Pooled σ:** max(bootstrap, half extrapolation distance, matched-depth seed spread, and the cross-check gap where the cross-check is RESOLVED — σ_cc within the extrapolation distance; at L≥3 σ_cc is 7–145 MeV/site so it is unresolved and neither votes nor enters σ). **Gate:** post-collapse rungs; ≤ every same-operator variational bound (own seeds + `external_bounds.json`); a resolved cross-check overlapping within σ + σ_cc; seed spread ≤ σ. Otherwise bound only. See the live-state bullet below.
 - **Seed spread:** reported separately.
 - **Legacy:** `nuqu-2026-09` is still selectable and reproduces the accepted JSON exactly.
 - **Retired:** last-doubling ΔE as an uncertainty indicator.
@@ -171,14 +172,21 @@ The A-sweep turns ON select-core 16000 plus stratified starts; novel stays OFF. 
   (299.5 at 512k, unfinished)** — the dense L=3 search is still basin-limited by ~5/site between seeds (C9's
   L≥3 reliability was measured at A≤10, not at filling 1.0). L=4/L=5 (8 shards, 384 GB) idle behind the squeeze
   campaign. C2 at L≥3 needs NEW CLAIMS_FROZEN rows; re-seal + retire legacy artifacts once the rest lands.
-- **Gated error convention `nuqu-2026-10` (implemented 2026-10-10, selectable, NOT yet the default):**
-  `docs/classical_error_convention_2026-10-08.md` §11. Per-seed fits unchanged (trimci-coo); the pooled
-  layer (`extrapolation._pool_gated`) sets σ = max(bootstrap, half the extrapolation distance
-  [Holmes/Tubman/Umrigar 2016], E∞ spread over seeds at matched top core), each term recorded, and
-  reports a limit only if it passes four gates: post-collapse rungs; at or below EVERY same-operator
-  variational bound (own seeds + `classical/trimci/external_bounds.json`: the five block2 DMRG energies
-  at bare n_b=3 L=2, plus the exact A=0 vacuum as a floor); cross-check gap ≤ σ where resolved; seed
-  spread ≤ σ. Refused cells quote the bound and keep the refused limit in `gate`. `window_shift` is now
+- **Gated error convention `nuqu-2026-10` (implemented 2026-10-10; THE DEFAULT since 2026-10-10 after the
+  user reviewed the A/B):** `docs/classical_error_convention_2026-10-08.md` §11. Per-seed fits unchanged
+  (trimci-coo); the pooled layer (`extrapolation._pool_gated`) sets σ = max(bootstrap, half the extrapolation
+  distance [Holmes/Tubman/Umrigar 2016], E∞ spread over seeds at matched top core, and — second pass the
+  same day — the cross-check gap where the cross-check is RESOLVED), each term recorded, and reports a
+  limit only if it passes four gates: post-collapse rungs; at or below EVERY same-operator variational
+  bound (own seeds + `classical/trimci/external_bounds.json`: the five block2 DMRG energies at bare n_b=3
+  L=2, plus the exact A=0 vacuum as a floor); a resolved cross-check overlapping within σ + σ_cc
+  (`_cross_check_gate`: resolved = the cross-check's own bootstrap σ_cc within the extrapolation distance;
+  L=2 σ_cc 0.004–0.036/site → resolved; L=3 σ_cc 7–145/site with a 90% interval reaching the bound → unresolved,
+  does not vote, exactly as the absent L=4 power law); seed spread ≤ σ. Consequences: squeeze L=2 A=6/10
+  (gap 0.008/0.012 vs σ₃ 0.006/0.011) report with σ = gap; every L=3 cell reports on the half-distance or
+  the seed spread (bare L=3 ±2.6–3.6, filling-1.0 ±2.4–7.0, squeeze L=3 ±0.03–0.42/site) — the brief's
+  own expected magnitudes; bare L=4 ±13; the four variational refusals (bare L=2 A=4/8 and both
+  filling-1.0 L=2 baselines, refuted by DMRG) stand. Refused cells quote the bound and keep the refused limit in `gate`. `window_shift` is now
   carried to the pooled record and shown in every table; the seed PASS/FAIL verdict is retired under the
   new convention (spread is a σ term). `--sigma-convention nuqu-2026-10` on `aggregate_classical_energies`,
   `make_Asweep_figures`, `validate_classical_accepted`; `misc/ab_sigma_conventions.py` writes the
@@ -208,7 +216,7 @@ The A-sweep turns ON select-core 16000 plus stratified starts; novel stays OFF. 
   must still be run once on hep-submit**); (C5) `load(frame=)`, `make_Asweep_figures --frame
   --compare-frame --As` + binding tables. (C6) manifests NOT re-sealed: 6/8 classical manifests
   fail only on analysis-script/figure hashes, and whether to regenerate the accepted outputs under
-  the `trimci-coo` default is the user's call. See `hpc/HPC_WORKFLOW.md` §4/§6.
+  the `nuqu-2026-10` default (2026-10-10; `trimci-coo` before that) is the user's call. See `hpc/HPC_WORKFLOW.md` §4/§6.
 
 **Preliminary multi-A figures:** `docs/presentation/classical_baseline_{multiA,perA}_prelim.png`, from the 80 finished shards pulled to `data/classical/2026-09-25/bare_Asweep_nb3_293963/`.
 - L=2–4 extrapolate at every A. L=5 is genuinely bound-only (per-rung drops still growing).

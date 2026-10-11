@@ -22,12 +22,20 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
 
 from classical.trimci import external_bounds as xb  # noqa: E402
-from classical.trimci.extrapolation import (GATED_CONVENTION, LEGACY_CONVENTION,  # noqa: E402
-                                            LITERATURE_CONVENTION, combine_seeds,
+from classical.trimci.extrapolation import (DEFAULT_SIGMA_CONVENTION, GATED_CONVENTION,  # noqa: E402
+                                            LEGACY_CONVENTION, LITERATURE_CONVENTION,
+                                            _cross_check_gate, combine_seeds,
                                             einf_literature, einf_with_uncertainty)
 
 SWEEP = os.path.join(_ROOT, "data/classical/2026-09-25/bare_Asweep_nb3_293963")
+SQUEEZE = os.path.join(_ROOT, "data/classical/2026-10-08/Asweep_squeeze_nb3_294246")
 DMRG = os.path.join(_ROOT, "data/classical/2026-10-10/dmrg_calib_294249")
+
+
+def test_gated_convention_is_the_default_since_2026_10_10():
+    assert DEFAULT_SIGMA_CONVENTION == GATED_CONVENTION
+    p = combine_seeds({0: _ladder()}, sites=8)
+    assert p["sigma_convention"] == GATED_CONVENTION and "gate" in p
 
 
 def _ladder(offset=0.0, n=10, slope=0.6):
@@ -68,11 +76,19 @@ def test_sigma_is_max_of_three_terms_and_each_is_recorded():
     p = combine_seeds(per, sites=8, convention=GATED_CONVENTION)
     assert p["ok"] and p["sigma_convention"] == GATED_CONVENTION
     t = p["sigma_terms"]
-    assert set(t) == {"bootstrap", "extrap_half_distance", "seed_spread"}
+    assert set(t) == {"bootstrap", "extrap_half_distance", "seed_spread", "cross_check_gap"}
     assert abs(t["extrap_half_distance"] - 0.5 * (p["E_var_bound"] - p["E_inf"])) < 1e-12
     assert abs(t["seed_spread"] - 0.4) < 1e-9          # exact fits: spread = planted offsets
     assert p["sigma"] == max(v for v in t.values() if v is not None)
     assert p["sigma_source"] in t and t[p["sigma_source"]] == p["sigma"]
+    assert p["sigma_three_term"] == max(t[k] for k in ("bootstrap", "extrap_half_distance", "seed_spread")
+                                        if t[k] is not None)
+    cc = p["gate"]["checks"]["cross_check"]
+    assert {"resolved", "sigma_cc", "tolerance", "gap", "extrap_distance", "reason"} <= set(cc)
+    if cc["resolved"]:                                  # a resolved cross-check is a sigma term
+        assert t["cross_check_gap"] == cc["gap"] and cc["gap"] <= cc["tolerance"] + 1e-12
+    else:
+        assert t["cross_check_gap"] is None
     assert p["gate"]["passed"] and p["gate"]["refused_by"] == []
     assert p["seed_robustness"]["n_matched_depth"] == 3 and "PASS" not in p["seed_robustness"]["check"]
     assert "window_shift" in p and "window_shift_by_w" in p
@@ -121,17 +137,42 @@ def test_gate_refuses_a_limit_below_the_exact_floor_by_more_than_sigma():
     assert combine_seeds(per, sites=8, convention=GATED_CONVENTION, external=close)["ok"]
 
 
-def test_gate_refuses_when_the_cross_check_gap_exceeds_sigma():
+def test_cross_check_gate_rules():
+    """Gate 3, second pass (2026-10-10): resolved = sigma_cc within the extrapolation distance;
+    pass = the two 1-sigma intervals overlap (|gap| <= sigma3 + sigma_cc)."""
+    # squeeze L=2 A=6 (per site x 8 sites): gap 0.0079, sigma3 0.0058, sigma_cc 0.0043, d 0.0117
+    s = 8
+    c = _cross_check_gate(0.0079 * s, 0.0043 * s, 0.0058 * s, 0.0117 * s)
+    assert c["resolved"] and c["passed"] and abs(c["tolerance"] - 0.0101 * s) < 1e-9
+    # the same gap against a cross-check that is twice as sharp: disjoint -> refused
+    c2 = _cross_check_gate(0.0079 * s, 0.0010 * s, 0.0058 * s, 0.0117 * s)
+    assert c2["resolved"] and not c2["passed"]
+    # bare L=3 A=4: the power law's own sigma (145/site) dwarfs the 5.3/site correction -> n/r
+    c3 = _cross_check_gate(5.2947 * 27, 145.35 * 27, 2.6477 * 27, 5.2954 * 27)
+    assert not c3["resolved"] and c3["passed"] and "unresolved" in c3["reason"]
+    # no cross-check at all (L=4): passes, not resolved
+    c4 = _cross_check_gate(None, None, 12.9, 25.8)
+    assert c4["passed"] and not c4["resolved"]
+    # a cross-check without its own sigma is judged strictly (tolerance = sigma3)
+    c5 = _cross_check_gate(1.0, None, 0.9, 5.0)
+    assert c5["resolved"] and not c5["passed"] and c5["tolerance"] == 0.9
+
+
+def test_gate_refuses_when_two_resolved_estimators_disagree():
     # curve the ladder so the power-law cross-check lands far from the PT2 line
     rungs = _ladder()
     for k, r in enumerate(rungs):
         r["E_var"] += 3.0 * np.exp(-0.9 * k)
     p = combine_seeds({0: rungs}, sites=8, convention=GATED_CONVENTION)
     cc = p["gate"]["checks"]["cross_check"]
-    if cc["resolved"] and cc["gap"] > p["gate"]["sigma_if_reported"]:
+    if cc["resolved"] and cc["gap"] > cc["tolerance"]:
         assert not p["ok"] and "cross_check" in p["gate"]["refused_by"]
-    else:                                           # the fit happened to agree: then it passes
-        assert p["ok"] or "cross_check" not in p["gate"]["refused_by"]
+        assert "do not overlap" in p["reason"]
+    elif cc["resolved"]:                            # overlapping: passes and sigma covers the gap
+        assert p["ok"] and p["sigma"] >= cc["gap"] - 1e-12
+    else:                                           # unresolved: it does not vote
+        assert "cross_check" not in p["gate"]["refused_by"]
+        assert p["sigma_terms"]["cross_check_gap"] is None
 
 
 # ---------------------------------------------------------------------------- bit-identity
@@ -176,3 +217,28 @@ def test_calibration_table_reproduced_on_real_data():
             assert dev <= r["sigma_ps"] + x["delta"] / 8 + 1e-6, (A, dev, r["sigma_ps"])
             assert 0.15 <= r["sigma_ps"] <= 0.30, (A, r["sigma_ps"])     # s11e: bare L=2 0.19-0.24
             assert r["sigma_source"] == "extrap_half_distance"
+            assert r["gate"]["checks"]["cross_check"]["resolved"]          # L=2: sigma_cc <= 0.04/site
+
+
+@pytest.mark.skipif(not (os.path.isdir(SWEEP) and os.path.isdir(SQUEEZE)),
+                    reason="needs the data clone (293963 + 294246 sweeps)")
+def test_cross_check_second_pass_on_real_data():
+    """2026-10-10 second pass of gate 3. Squeeze L=2 A=6 / A=10 (gap 0.008 / 0.012 per site
+    against sigma3 0.006 / 0.011 and sigma_cc 0.004 / 0.009) are consistent and now report,
+    with sigma widened to the gap; bare L=3 reports on the half-distance (s11e expected
+    2.4-3.1/site) because the power law's own sigma there is 7-145/site -- unresolved, no vote."""
+    from misc.aggregate_classical_energies import analyze, load
+    for A, lo, hi in ((6, 0.005, 0.012), (10, 0.010, 0.016)):
+        g, m = load([SQUEEZE], A=A, frame="gaussian")
+        r = next(r for r in analyze(g, m, sigma_convention=GATED_CONVENTION) if r["L"] == 2)
+        cc = r["gate"]["checks"]["cross_check"]
+        assert r["ok"], (A, r["reason"])
+        assert cc["resolved"] and cc["gap"] > r["sigma_three_term"]        # the near miss
+        assert r["sigma_source"] == "cross_check_gap" and lo <= r["sigma_ps"] <= hi, (A, r["sigma_ps"])
+        assert abs(r["sigma"] - cc["gap"]) < 1e-12
+    g, m = load([SWEEP], A=4, frame="bare")
+    r = next(r for r in analyze(g, m, sigma_convention=GATED_CONVENTION) if r["L"] == 3)
+    cc = r["gate"]["checks"]["cross_check"]
+    assert not cc["resolved"] and cc["sigma_cc_ps"] > 5.0 and cc["gap_ps"] > 5.0
+    assert r["ok"] and r["sigma_source"] == "extrap_half_distance" and 2.4 <= r["sigma_ps"] <= 3.1
+    assert r["sigma_terms"]["cross_check_gap"] is None

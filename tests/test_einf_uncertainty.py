@@ -135,7 +135,7 @@ def main():
     per_seed = {0: _power_ladder(E_inf=1800.0),
                 1: _power_ladder(E_inf=1806.0),
                 2: _power_ladder(E_inf=1794.0)}
-    pooled = combine_seeds(per_seed, sites=SITES)
+    pooled = combine_seeds(per_seed, sites=SITES, convention="trimci-coo")
     if not pooled["ok"]:
         fails.append(f"pooled seeds failed: {pooled['reason']}")
     else:
@@ -173,7 +173,7 @@ def main():
             fails.append("pooled bound is not the tightest (lowest) seed bound")
         if pooled["E_inf"] > pooled["E_var_bound"] + 1e-9:
             fails.append("pooled E_inf above the pooled bound slipped through")
-    single = combine_seeds({0: _power_ladder()}, sites=SITES)
+    single = combine_seeds({0: _power_ladder()}, sites=SITES, convention="trimci-coo")
     if single["sigma_seed"] is not None:
         fails.append("a single seed must not claim a seed spread")
 
@@ -183,7 +183,7 @@ def main():
     # pooled 1809.25 vs tightest bound 1805.56); it is a contradiction, not a wide error bar.
     mixed = {0: _power_ladder(E_inf=1800.0),
              1: _power_ladder(E_inf=1860.0, drop=400.0)}   # seed 1: much worse ladder
-    pm = combine_seeds(mixed, sites=SITES)
+    pm = combine_seeds(mixed, sites=SITES, convention="trimci-coo")
     if pm["ok"] and pm["E_inf"] > pm["E_var_bound"] + 1e-9:
         fails.append(f"pooled E_inf {pm['E_inf']:.2f} exceeds the tightest bound "
                      f"{pm['E_var_bound']:.2f} and was still reported")
@@ -196,7 +196,7 @@ def main():
     deep_no_fit = _power_ladder(E_inf=1700.0, cores=(8000, 16000, 32000),
                                 collapse_at=2, drop=300.0)      # tightest bound, 1 post rung
     shallow_fits = _power_ladder(E_inf=1900.0)                    # worse bound, fits fine
-    pj = combine_seeds({0: deep_no_fit, 1: shallow_fits}, sites=SITES)
+    pj = combine_seeds({0: deep_no_fit, 1: shallow_fits}, sites=SITES, convention="trimci-coo")
     if pj["ok"]:
         fails.append(f"reported E_inf {pj['E_inf']:.1f} from a shallower seed while the "
                      f"tightest-bound seed could not extrapolate")

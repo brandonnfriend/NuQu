@@ -31,6 +31,7 @@ import os
 
 import numpy as np
 
+from classical.trimci.extrapolation import SIGMA_CONVENTIONS
 from misc.aggregate_classical_energies import analyze, load as load_trimci_shards
 
 FLAG_SIGMA = 2.0
@@ -105,10 +106,14 @@ def load_dmrg(dirs, L, dim, N_f):
     return recs
 
 
-def load_trimci(dirs, A, L, n_b):
-    """The pooled TrimCI record (wick convention) for one (A, L, n_b), or None."""
+def load_trimci(dirs, A, L, n_b, sigma_convention=None, external=True):
+    """The pooled TrimCI record (wick convention) for one (A, L, n_b), or None.
+    `sigma_convention`: the E_inf error-bar convention (None = the project default,
+    nuqu-2026-10 since 2026-10-10; the 294249 calibration table was made under trimci-coo,
+    the convention it refuted). `external=False` drops the external-bound registry (which
+    holds these very DMRG numbers for bare n_b=3 L=2) so a planted fixture is judged alone."""
     groups, meta = load_trimci_shards(dirs, A=A, frame="bare", convention="wick")
-    for rec in analyze(groups, meta):
+    for rec in analyze(groups, meta, sigma_convention=sigma_convention, external=external):
         if rec["L"] == L and rec["n_b"] == n_b:
             return rec
     return None
@@ -140,14 +145,16 @@ def compare_one(A, dmrg, trimci, n_fit=3):
     return row
 
 
-def compare(dmrg_dirs, trimci_dirs, L=2, dim=3, n_b=3, n_fit=3, As=None):
+def compare(dmrg_dirs, trimci_dirs, L=2, dim=3, n_b=3, n_fit=3, As=None, sigma_convention=None,
+            external=True):
     N_f = 2 ** n_b
     dm = load_dmrg(dmrg_dirs, L, dim, N_f)
     rows = []
     for A in sorted(dm):
         if As and A not in As:
             continue
-        rows.append(compare_one(A, dm[A], load_trimci(trimci_dirs, A, L, n_b), n_fit=n_fit))
+        rows.append(compare_one(A, dm[A], load_trimci(trimci_dirs, A, L, n_b, sigma_convention,
+                                                      external), n_fit=n_fit))
     return rows
 
 
@@ -218,10 +225,13 @@ def main():
     ap.add_argument("--As", nargs="*", type=int, default=None)
     ap.add_argument("--out-dir", default="docs/presentation")
     ap.add_argument("--json", default=None, help="also dump the rows here")
+    ap.add_argument("--sigma-convention", default=None, choices=list(SIGMA_CONVENTIONS),
+                    help="TrimCI E_inf error-bar convention (default: the project default, "
+                         "nuqu-2026-10; the 2026-10-10 calibration table used trimci-coo)")
     args = ap.parse_args()
 
     rows = compare(args.dmrg, args.trimci, L=args.L, dim=args.dim, n_b=args.n_b,
-                   n_fit=args.n_fit, As=args.As)
+                   n_fit=args.n_fit, As=args.As, sigma_convention=args.sigma_convention)
     if not rows:
         raise SystemExit(f"no DMRG shards at L={args.L} dim={args.dim} N_f={2 ** args.n_b} in {args.dmrg}")
     dm = load_dmrg(args.dmrg, args.L, args.dim, 2 ** args.n_b)

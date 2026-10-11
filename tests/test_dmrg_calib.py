@@ -77,9 +77,22 @@ def test_compare_on_planted_shards():
         _dmrg_shard(os.path.join(dd, "dmrg_L2d3_A6_Nf8.json"), 6, E[6], chis=(50,), dws=(1e-5,))
         json.dump({"L": 2, "dim": 3, "A": 2, "N_f": 4, "results": _dmrg_rungs(1.0)},
                   open(os.path.join(dd, "dmrg_L2d3_A2_Nf4.json"), "w"))          # other cutoff: ignored
-        rows = compare([dd], [td], L=2, dim=3, n_b=3)
+        # the planted ladder sits ~260 MeV above E_fci at its deepest rung, so under the gated
+        # default (nuqu-2026-10, 2026-10-10) the half-distance sigma is ~130 MeV and a 5 MeV
+        # DMRG disagreement is covered -- no flag, by design. The flag logic is exercised under
+        # trimci-coo, whose sigma is the bootstrap alone.
+        # (external=False: the registry holds the REAL bare L=2 DMRG bounds, which would
+        # refuse the planted A=4 limit on gate 2 -- correct on real data, noise here)
+        rows_default = compare([dd], [td], L=2, dim=3, n_b=3, external=False)
+        assert [r["A"] for r in rows_default] == [2, 4, 6]
+        rows = compare([dd], [td], L=2, dim=3, n_b=3, sigma_convention="trimci-coo", external=False)
         assert [r["A"] for r in rows] == [2, 4, 6]
         r2, r4, r6 = rows
+        # the gated sigma is never narrower than the literature bootstrap on the same ladder
+        for rd, rl in zip(rows_default, rows):
+            if rd["trimci_ok"] and rl["trimci_ok"]:
+                assert rd["trimci_sigma"] >= rl["trimci_sigma"] - 1e-9
+                assert abs(rd["trimci_E_inf"] - rl["trimci_E_inf"]) < 1e-9     # central value fixed
         assert r2["trimci_ok"] and abs(r2["gap"]) < 0.05 and abs(r2["gap_sigma"]) < 2.5
         # the planted TrimCI ladder sits ~260 MeV above E_fci at its deepest rung, DMRG far below it
         assert r2["flags"] == ["DMRG_BELOW_TRIMCI_BOUND"]

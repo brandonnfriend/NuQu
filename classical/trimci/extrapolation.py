@@ -530,10 +530,17 @@ LEGACY_CONVENTION = "nuqu-2026-09"
 # as trimci-coo; the POOLED layer changes: sigma = max(bootstrap, half the extrapolation
 # distance [Holmes/Tubman/Umrigar 2016], seed spread at matched depth), and a four-part gate
 # (post-collapse rungs; limit <= EVERY same-operator variational bound incl. external ones;
-# cross-check gap <= sigma; seed spread <= sigma) decides whether a limit is reported at all.
+# a RESOLVED cross-check consistent with that sigma; seed spread <= sigma) decides whether a
+# limit is reported at all. Gate 3 (second pass, same day): the cross-check estimator has its
+# own bootstrap sigma; it is resolved only when that sigma is within the extrapolation distance
+# it checks (at L=3 the power law's bootstrap sigma is 7-145 MeV/site against a 0.1-7 MeV/site
+# correction, so it says nothing and does not vote, as a missing one does not at L=4), and a
+# resolved cross-check passes when the two 1-sigma intervals overlap, |gap| <= sigma + sigma_cc,
+# after which sigma is widened to cover its central value (term `cross_check_gap`).
+# DEFAULT since 2026-10-10 (user decision after the A/B in docs/sigma_convention_ab_2026-10-10.md).
 GATED_CONVENTION = "nuqu-2026-10"
 SIGMA_CONVENTIONS = (LITERATURE_CONVENTION, LEGACY_CONVENTION, GATED_CONVENTION)
-DEFAULT_SIGMA_CONVENTION = LITERATURE_CONVENTION
+DEFAULT_SIGMA_CONVENTION = GATED_CONVENTION
 
 
 def _r2scan(logN, E, E_lo, span, n_scan):
@@ -931,9 +938,14 @@ def _pool_gated(per_seed, sites=None, external=None):
       * the gate: a limit is reported only if (1) it exists (post-collapse rungs), (2) it lies
         at or below EVERY known variational bound on the same truncated H -- our seeds' and the
         registry's -- and not below the exact untruncated energy by more than sigma, (3) the
-        cross-check gap, where the cross-check resolved, is <= sigma, (4) the seed spread is
-        <= sigma (true by construction, asserted). Otherwise the bound alone is quoted and the
-        refused limit is kept in `gate` for the record.
+        cross-check, where it is RESOLVED (its own bootstrap sigma within the extrapolation
+        distance), overlaps the limit within one sigma each way, |gap| <= sigma + sigma_cc
+        (`_cross_check_gate`), (4) the seed spread is <= sigma (true by construction,
+        asserted). Otherwise the bound alone is quoted and the refused limit is kept in `gate`
+        for the record.
+      * a resolved cross-check that passes widens sigma to cover its central value: the fourth
+        term `cross_check_gap` = |gap| (model dependence of the extrapolator is a fourth way to
+        be wrong; an unresolved cross-check contributes nothing, as at L=4 where there is none).
     """
     per = lambda x: (x / sites) if (x is not None and sites) else None
     final = {s_: einf_literature(r, sites=sites) for s_, r in per_seed.items()}
@@ -998,14 +1010,21 @@ def _pool_gated(per_seed, sites=None, external=None):
               if len(matched) >= 2 else None)
     terms = {"bootstrap": s_boot, "extrap_half_distance": s_half, "seed_spread": s_seed}
     have = {k: t for k, t in terms.items() if t is not None}
+    sigma3 = max(have.values()) if have else None            # the s11e three-term sigma
+    # --- the cross-check (gate 3) and its sigma term -------------------------------------
+    cc = v.get("cross_check") or {}
+    gap = cc.get("gap") if cc.get("ok") else None
+    other = v.get("power") if cc.get("estimator") == "power_r2scan" else v.get("pt2")
+    s_cc = (other or {}).get("sigma") if cc.get("ok") else None
+    cc_gate = _cross_check_gate(gap, s_cc, sigma3, (bound - E) if bound is not None else None)
+    terms["cross_check_gap"] = gap if cc_gate["resolved"] else None
+    have = {k: t for k, t in terms.items() if t is not None}
     sigma = max(have.values()) if have else None
     source = max(have, key=have.get) if have else None
     pooled.update(sigma_terms={k: (float(t) if t is not None else None) for k, t in terms.items()},
                   sigma_terms_ps={k: per(t) for k, t in terms.items()},
-                  sigma_source=source, n_seeds_matched_depth=len(matched),
-                  matched_top_core=int(tops[best]))
-    cc = v.get("cross_check") or {}
-    gap = cc.get("gap") if cc.get("ok") else None
+                  sigma_source=source, sigma_three_term=sigma3, sigma_three_term_ps=per(sigma3),
+                  n_seeds_matched_depth=len(matched), matched_top_core=int(tops[best]))
 
     # --- the gate -------------------------------------------------------------------------
     checks = {"post_collapse_rungs": {"passed": True, "n_post": v.get("n_post")}}
@@ -1022,9 +1041,10 @@ def _pool_gated(per_seed, sites=None, external=None):
                     f"({(floor['E'] - E):.3f} > {sigma:.3f})")
     checks["variational"] = {"passed": not viol, "violations": viol,
                              "n_external_upper": len(ext_upper), "exact_floor": bool(floor)}
-    checks["cross_check"] = {"passed": (gap is None) or (sigma is not None and gap <= sigma),
-                             "gap": gap, "gap_ps": per(gap), "resolved": gap is not None,
-                             "estimator": cc.get("estimator")}
+    checks["cross_check"] = {**cc_gate, "gap_ps": per(gap), "sigma_cc_ps": per(cc_gate["sigma_cc"]),
+                             "tolerance_ps": per(cc_gate["tolerance"]),
+                             "estimator": cc.get("estimator"), "E_inf": cc.get("E_inf"),
+                             "E_inf_ps": per(cc.get("E_inf"))}
     checks["seed_spread"] = {"passed": (s_seed is None) or (sigma is not None and s_seed <= sigma + 1e-12),
                              "spread": s_seed, "spread_ps": per(s_seed), "n_matched": len(matched)}
     refused_by = [k for k, c in checks.items() if not c["passed"]]
@@ -1051,8 +1071,10 @@ def _pool_gated(per_seed, sites=None, external=None):
                                f"sigma ({ps(floor['E'] - E):.3f} > {ps(sigma):.3f})")
         why = {"variational": (f"the limit {ps(E):.3f}{u} lies ABOVE " + "; ".join(viol_ps)
                                if viol_ps else ""),
-               "cross_check": (f"the cross-check ({cc.get('estimator')}) lands {ps(gap):.3f}{u} away, "
-                               f"more than sigma {ps(sigma):.3f}{u}" if gap is not None else ""),
+               "cross_check": (f"the cross-check ({cc.get('estimator')}, its own sigma "
+                               f"{ps(cc_gate['sigma_cc'] or 0.0):.3f}{u}) lands {ps(gap):.3f}{u} away: "
+                               f"the two 1-sigma intervals do not overlap (tolerance sigma + sigma_cc "
+                               f"= {ps(cc_gate['tolerance']):.3f}{u})" if gap is not None else ""),
                "seed_spread": f"seed spread {s_seed} exceeds sigma {sigma}"}
         return refuse("gate refused the limit (" + "; ".join(why[k] for k in refused_by) +
                       "); quote the bound", gate, best)
@@ -1062,6 +1084,44 @@ def _pool_gated(per_seed, sites=None, external=None):
                          f"extrapolated; sigma = max(bootstrap, half extrapolation distance, "
                          f"seed spread at matched depth) = {source}; gate passed")
     return pooled
+
+
+def _cross_check_gate(gap, sigma_cc, sigma3, extrap_distance):
+    """Gate 3 of nuqu-2026-10 (second pass, 2026-10-10): is the cross-check consistent?
+
+    The cross-check estimator (COO's R^2-scan power law when PT2-linear is primary, and vice
+    versa) carries its own bootstrap sigma, which the first pass ignored. Two rules:
+      * RESOLVED: the cross-check's sigma is within the extrapolation distance it is checking.
+        Measured 2026-10-10: at L=2 the power law's sigma is 0.004-0.036 MeV/site on corrections
+        of 0.01-1 (resolved everywhere); at L=3 it is 7-145 MeV/site on corrections of 0.07-7,
+        its 90% interval running from far below up to the bound itself. Such a cross-check
+        says nothing about the limit and does not vote -- exactly as a missing one (L=4,
+        where the power law finds no curvature at all) does not.
+      * PASS (resolved only): the two 1-sigma intervals overlap, |gap| <= sigma3 + sigma_cc,
+        with sigma3 the three-term s11e sigma. Squeeze L=2 A=6 / A=10 (gap 0.008 / 0.012
+        against sigma3 0.006 / 0.011 and sigma_cc 0.004 / 0.009 per site) pass; a 2-sigma
+        disagreement between two resolved estimators still refuses.
+    A passing resolved cross-check then becomes the sigma term `cross_check_gap` in the
+    caller, so the reported interval covers its central value.
+    """
+    out = {"gap": gap, "sigma_cc": sigma_cc, "extrap_distance": extrap_distance,
+           "tolerance": None, "resolved": False, "passed": True, "reason": None}
+    if gap is None:
+        out["reason"] = "the cross-check resolved no limit"
+        return out
+    s_cc = float(sigma_cc) if sigma_cc is not None else 0.0      # no sigma: judged strictly
+    out["sigma_cc"] = s_cc
+    if extrap_distance is not None and s_cc > extrap_distance + 1e-12:
+        out["reason"] = (f"unresolved: the cross-check's own sigma {s_cc:.4g} exceeds the "
+                         f"extrapolation distance {extrap_distance:.4g}; it does not vote")
+        return out
+    out["resolved"] = True
+    tol = (sigma3 if sigma3 is not None else 0.0) + s_cc
+    out["tolerance"] = tol
+    out["passed"] = bool(gap <= tol + 1e-12)
+    out["reason"] = (f"resolved; |gap| {gap:.4g} {'<=' if out['passed'] else '>'} sigma + sigma_cc "
+                     f"= {tol:.4g} (1-sigma intervals {'overlap' if out['passed'] else 'disjoint'})")
+    return out
 
 
 def _spread_record(pooled, ok, tops, best, per, source):

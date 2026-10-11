@@ -548,16 +548,20 @@ def aggregation_rules(min_rungs=4, min_pt2_post=0, sigma_convention=None):
             "sigma = the LARGEST of three terms, each recorded alone: the 500-replicate bootstrap "
             "std of the primary (COO SM S5.2); half the extrapolation distance from the tightest "
             "Ritz bound (Holmes/Tubman/Umrigar 2016); the spread of E_inf over seeds that reached "
-            "the same top core. Largest, not quadrature -- lower bounds on three failure modes. "
-            "The +-1-rung window shift, the cross-check gap and the deviation from external "
-            "references are reported beside sigma, never added")
+            "the same top core; and, where the cross-check estimator is RESOLVED (its own "
+            "bootstrap sigma within the extrapolation distance), the cross-check gap. Largest, "
+            "not quadrature -- lower bounds on four failure modes. The +-1-rung window shift and "
+            "the deviation from external references are reported beside sigma, never added")
         rules["gate"] = (
             "a limit is reported ONLY if: post-collapse rungs exist; it lies at or below EVERY "
             "known variational bound on the SAME truncated Hamiltonian (our seeds' and "
             "classical/trimci/external_bounds.json -- block2 DMRG at bare n_b=3 L=2) and not "
-            "below the exact untruncated energy by more than sigma; the cross-check gap (where "
-            "resolved) is <= sigma; the seed spread is <= sigma. Otherwise bound_only. "
-            "Same-operator references only: a squeezed bound never judges a bare limit")
+            "below the exact untruncated energy by more than sigma; a RESOLVED cross-check "
+            "overlaps the limit within one sigma each way (|gap| <= sigma + sigma_cc) -- an "
+            "unresolved cross-check (sigma_cc beyond the extrapolation distance; the L>=3 power "
+            "law) does not vote, as a missing one does not; the seed spread is <= sigma. "
+            "Otherwise bound_only. Same-operator references only: a squeezed bound never judges "
+            "a bare limit")
         rules["seed_rule"] = (
             "the tightest E_var across seeds is the quoted bound and that seed supplies E_inf "
             "(equal bounds within 1e-6 MeV prefer an extrapolating seed, then the lowest number); "
