@@ -186,7 +186,10 @@ The A-sweep turns ON select-core 16000 plus stratified starts; novel stays OFF. 
   (gap 0.008/0.012 vs σ₃ 0.006/0.011) report with σ = gap; every L=3 cell reports on the half-distance or
   the seed spread (bare L=3 ±2.6–3.6, filling-1.0 ±2.4–7.0, squeeze L=3 ±0.03–0.42/site) — the brief's
   own expected magnitudes; bare L=4 ±13; the four variational refusals (bare L=2 A=4/8 and both
-  filling-1.0 L=2 baselines, refuted by DMRG) stand. Refused cells quote the bound and keep the refused limit in `gate`. `window_shift` is now
+  filling-1.0 L=2 baselines, refuted by DMRG) stand. §11e's one run — bare A=0 L=3 **n_b=4** at the 294246
+  refs' settings — is **cluster 294253** (launched 2026-10-10, 3 seeds, 128 GB; pull to
+  `data/classical/<date>/Asweep_squeeze_nb4_294253/`, compare to n_b=3's 332.73 ± 2.64 and the exact 331.461).
+  Refused cells quote the bound and keep the refused limit in `gate`. `window_shift` is now
   carried to the pooled record and shown in every table; the seed PASS/FAIL verdict is retired under the
   new convention (spread is a σ term). `--sigma-convention nuqu-2026-10` on `aggregate_classical_energies`,
   `make_Asweep_figures`, `validate_classical_accepted`; `misc/ab_sigma_conventions.py` writes the
