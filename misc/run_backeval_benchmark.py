@@ -62,7 +62,7 @@ def run_benchmark(L, dim, n_b, frame, cores, A=1, seed=0, num_runs=16,
     # substitution; COO: finite fermionic rotation) are Ritz projections of a genuinely
     # isospectral operator, so E_frame is ALREADY a variational upper bound — no map-back needed
     # (and COO's boson-less rotation has no Fock leak). Only the truncated leading-order LF frame
-    # is non-isospectral and REQUIRES back-evaluation. See docs/lf_backevaluation.md.
+    # is non-isospectral and REQUIRES back-evaluation. See docs/frames/lf_backevaluation.md.
     needs_backeval = has_lf
     variational_directly = (frame == 'bare') or has_coo or (has_g and not has_lf)
 
@@ -124,7 +124,7 @@ def run_benchmark(L, dim, n_b, frame, cores, A=1, seed=0, num_runs=16,
     # ONLY LF frames back-evaluate. squeeze (gaussian) and COO are operator-identity builds, so
     # their E_frame is already a Ritz-valid variational bound — back-evaluating the squeeze would
     # also fan its Taylor map-back over EVERY boson mode up to N_f_ref (an all-modes combinatorial
-    # explosion that OOMs at d=3). See docs/lf_backevaluation.md + the theory verdict.
+    # explosion that OOMs at d=3). See docs/frames/lf_backevaluation.md + the theory verdict.
     do_backeval = has_lf
     for core in cores:
         t0 = time.time()

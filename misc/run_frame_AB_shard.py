@@ -1,6 +1,6 @@
 """Architecture A-vs-B resource shard — bare walk vs Gaussian-squeeze walk (task 34).
 
-The quantum half of the frame-architecture decision (`docs/frame_on_quantum_side.md`):
+The quantum half of the frame-architecture decision (`docs/frames/frame_on_quantum_side.md`):
 does qubitizing the SQUEEZED Hamiltonian (Architecture B) beat qubitizing the bare H
 (Architecture A, whose only frame lever is the warm-start p0)? This shard produces the
 walk-operator resource estimates for BOTH frames so they can be compared.

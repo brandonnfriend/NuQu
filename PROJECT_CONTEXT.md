@@ -162,10 +162,10 @@ The A-sweep turns ON select-core 16000 plus stratified starts; novel stays OFF. 
 - **Phase-0 starts:** 16L capped at 64 (32/48/64) in the squeeze arm; the refs keep 32, matching 293963.
 - **Start records:** shards now record each start's nucleon arrangement (`rungs[0].phase0_select_starts`, output only).
 - **Smoke first:** `test` mode, L=4 A=10, 64 starts.
-- **Remaining ideas:** calibration, larger A and infrastructure are written up in `docs/classical_next_studies_2026-10-08.md` (local).
+- **Remaining ideas:** calibration, larger A and infrastructure are written up in `docs/classical/classical_next_studies_2026-10-08.md` (local).
 - **Progress (2026-10-11 17:30): 94/117 done, 5 running, 18 idle (384 GB, the remaining L=4 squeeze seeds).** The squeeze L=4 A-sweep landed (A=0..10, 1–2 seeds): under `nuqu-2026-10` **8 of 11 cells are bound-only** (a 0.3/site step at 64k–128k leaves 2–3 PT2 rungs; PT2-linear needs 4), A=2/6/10 report ±0.24–0.28/site on the half-distance. L=4 ladders stop at 512k with PT2 to 256k (the 512k rung is a pool rung, bound only); squeeze L=4 limits need `sizing_for_L(4)` → 1024k/512k (the 512k pool cost 119–166 GB, so ~250–350 GB) and a re-run of the L=4 arm — not launched. Squeeze L=4 A=0 bound 345.034 vs exact 344.596 (+0.44, still falling 0.09/doubling). Binding tables (`docs/presentation/2026-10-11_asweep_squeeze/`): L=2 all A with σ 0.04–0.5 MeV, L=3 σ 6–29 MeV (A × σ(E(1)) at the L=3 half-distance), L=4 bounds only.
 - **Seed-sharing close-out re-runs (LAUNCHED 2026-10-08 as 294250 baseline / 294251 gate / 294252 volscaling, `SEEDS="0 1 2" NB2=1`, 95 shards):** `hpc/detsvsL/submit_seedfix_rerun.sh`. **294251 and 294252 are DONE (2026-10-11):** volume scaling with the deep L=4 pair at 512k → median Δ34/site +0.00014 (L=4), −0.00151 (L=3), +0.00019 (L=2): CONDITIONAL (retained), identical reading to the legacy study. 294250: 7 done, 8 idle at 384 GB (behind the squeeze on JobPrio).
-  **First read 2026-10-10** (`docs/classical_calibration_results_2026-10-10.md`, data in `data/classical/2026-10-10/`):
+  **First read 2026-10-10** (`docs/classical/classical_calibration_results_2026-10-10.md`, data in `data/classical/2026-10-10/`):
   seed audit 26 cells / 0 collapsed / all stride 1000 — the defect is closed. Gate table reproduces the
   legacy one digit for digit; volscaling verdict unchanged (CONDITIONAL retained; the L=4 @512k deep pair
   is still running). Baseline: L=2 bit-identical (249.0680 at 1024k); **L=3 n_b=3 E∞ 279.7 ± 0.6 vs legacy
@@ -174,7 +174,7 @@ The A-sweep turns ON select-core 16000 plus stratified starts; novel stays OFF. 
   L≥3 reliability was measured at A≤10, not at filling 1.0). L=4/L=5 (8 shards, 384 GB) idle behind the squeeze
   campaign. C2 at L≥3 needs NEW CLAIMS_FROZEN rows; re-seal + retire legacy artifacts once the rest lands.
 - **Gated error convention `nuqu-2026-10` (implemented 2026-10-10; THE DEFAULT since 2026-10-10 after the
-  user reviewed the A/B):** `docs/classical_error_convention_2026-10-08.md` §11. Per-seed fits unchanged
+  user reviewed the A/B):** `docs/classical/classical_error_convention_2026-10-08.md` §11. Per-seed fits unchanged
   (trimci-coo); the pooled layer (`extrapolation._pool_gated`) sets σ = max(bootstrap, half the extrapolation
   distance [Holmes/Tubman/Umrigar 2016], E∞ spread over seeds at matched top core, and — second pass the
   same day — the cross-check gap where the cross-check is RESOLVED), each term recorded, and reports a
@@ -196,12 +196,12 @@ The A-sweep turns ON select-core 16000 plus stratified starts; novel stays OFF. 
   PT2-linear fit closes half the gap and the exact-floor gate only catches undershoot). Proposed, not
   implemented: a fifth gate (family calibration — if the A=0 cell of a (frame, n_b, L) family misses the
   exact vacuum by > σ, the family is bound-only; would turn every bare L=4 cell bound-only, nothing else),
-  or the deeper L=4 ladder (1024k, PT2 512k, ~300 GB). Details: `docs/classical_calibration_results_2026-10-10.md` §5.
+  or the deeper L=4 ladder (1024k, PT2 512k, ~300 GB). Details: `docs/classical/classical_calibration_results_2026-10-10.md` §5.
   Refused cells quote the bound and keep the refused limit in `gate`. `window_shift` is now
   carried to the pooled record and shown in every table; the seed PASS/FAIL verdict is retired under the
   new convention (spread is a σ term). `--sigma-convention nuqu-2026-10` on `aggregate_classical_energies`,
   `make_Asweep_figures`, `validate_classical_accepted`; `misc/ab_sigma_conventions.py` writes the
-  old-vs-new A/B (`docs/sigma_convention_ab_2026-10-10.md`). trimci-coo and nuqu-2026-09 bit-identical
+  old-vs-new A/B (`docs/classical/sigma_convention_ab_2026-10-10.md`). trimci-coo and nuqu-2026-09 bit-identical
   (`tests/test_sigma_gated.py`, incl. the real-data acceptance: bare L=2 A=4/8 refused, A=2/6/10 covered).
   Open: at L=4 the power law resolves no limit, so gate 3 is vacuous and ±6/site half-distance bars pass.
 - **Extrapolation calibration (A1, DONE 2026-10-10, cluster 294249):** `hpc/dmrg/submit_dmrg_calib.sh`
@@ -215,7 +215,7 @@ The A-sweep turns ON select-core 16000 plus stratified starts; novel stays OFF. 
   A=4/8 not χ-converged (χ=800 blocked by the 4 h per-χ cap), 48 GB base OOM-held 1–3× per shard (peak
   73–98 GB, no DMRG checkpoint → 19–29 h wall). The extrapolator fits only the monotone tail of rungs and
   falls back to the deepest-two chord when the line lands above E(χ_max) (A=8 near-product χ=100 rung; A=4
-  curving ladder). Follow-ups proposed in `docs/classical_calibration_results_2026-10-10.md` §4 (χ=800 at
+  curving ladder). Follow-ups proposed in `docs/classical/classical_calibration_results_2026-10-10.md` §4 (χ=800 at
   A=4,8 with MEM=128; second DMRG start; L=3 A=27 anchor).
 - **Infrastructure for the squeeze campaign (2026-10-08, branch `infra/resume-oom-provisioning`):**
   (C1) per-rung core checkpoints + `--resume` (bit-identical, `tests/test_resume_ladder.py`);
@@ -234,7 +234,7 @@ The A-sweep turns ON select-core 16000 plus stratified starts; novel stays OFF. 
 - **Frame isospectrality / "similar-enough n_b" campaign staged (2026-09-02, `remediation/vertex-fix`).**
   Salvages the frame-optimization *energy* claims by quantifying the non-isospectrality error and
   the frame-adjusted boson cutoff. **Theory verdict** (mathematical-physicist + prior codex consult,
-  see `docs/lf_backevaluation.md`): the three frames are NOT on equal footing —
+  see `docs/frames/lf_backevaluation.md`): the three frames are NOT on equal footing —
   **squeeze and COO are operator-identity builds** (exact finite Bogoliubov substitution / finite
   fermionic rotation), so `H_frame = P_N(U†HU)P_N` is a Ritz projection of a *genuinely isospectral*
   operator ⇒ **`E_frame ≥ E₀ᵗʳᵘᵉ` already (no back-eval needed)**, and `E_frame < E_bare` is a real

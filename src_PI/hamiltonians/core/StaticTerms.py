@@ -34,7 +34,7 @@ from src_PI.utils.LatticeGeometry import site_to_nucleon_qubit, get_total_sites,
 # determinant selection, PT2, σ, compactness, every energy DIFFERENCE and the
 # binding energy are all exactly invariant, and legacy energies convert with
 #     E_wick = E_unordered − c·A = E_unordered + 23.3725·A  [MeV].
-# See `contact_self_energy_shift` below and `docs/theory_latex_reference.md` V1.
+# See `contact_self_energy_shift` below and `docs/manuscript/theory_latex_reference.md` V1.
 #
 # `wick_ordered=True` (default) is the corrected, Watson-matching Hamiltonian.
 # `wick_ordered=False` reproduces every pre-2026-09-14 number bit-identically

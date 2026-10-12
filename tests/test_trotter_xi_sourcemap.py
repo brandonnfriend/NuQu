@@ -13,7 +13,7 @@ suite pins EACH of the 14 nonzero Ξ terms with:
 NOTE (flagged for the next audit): the numerical COEFFICIENTS (30, 2592, 384, …) are Watson's,
 transcribed from the lemmas cited here. They are regression-pinned + lemma-mapped, but eyeball
 verification of each coefficient against arXiv:2312.05344 (Lemmas 40, 49–78) is a remaining
-human/domain check — see docs/trotter_xi_sourcemap.md.
+human/domain check — see docs/quantum/trotter_xi_sourcemap.md.
 
 Run: python -m pytest -q tests/test_trotter_xi_sourcemap.py
 """

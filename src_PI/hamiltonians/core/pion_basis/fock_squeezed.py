@@ -4,7 +4,7 @@ Gaussian-squeezed Fock basis — Architecture B of the frame study (task 34).
 This is the `fock` basis walked in the **squeeze frame** `H_sq = U†HU`, so QPE on
 this Hamiltonian returns `spec(H_sq) = spec(H)` (the squeeze is a canonical, exactly
 isospectral transform) while the walk register enjoys a smaller boson Fock cutoff —
-the certified `n_b` win (`docs/frame_on_quantum_side.md` §2). It is a "comparison
+the certified `n_b` win (`docs/frames/frame_on_quantum_side.md` §2). It is a "comparison
 switch" per `CLAUDE.md`: the bare `fock` path stays intact; this slots alongside it
 and is selected by `config.pion_basis='fock_squeezed'`.
 

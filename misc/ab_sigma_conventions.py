@@ -1,13 +1,13 @@
 """Old-versus-new A/B of the E_inf error-bar conventions over every local (dir, frame, A, L) cell.
 
-    python -m misc.ab_sigma_conventions --out docs/sigma_convention_ab_<date>.md
+    python -m misc.ab_sigma_conventions --out docs/classical/sigma_convention_ab_<date>.md
 
 Runs `combine_seeds` under `trimci-coo` (the default 2026-10-06..10), `nuqu-2026-10` (gated;
 the default since 2026-10-10) and, for the bit-identity check, `nuqu-2026-09`, on the same loaded
 shards, and tabulates per cell: the bound, each convention's E_inf +- sigma (or the refusal), the
 nuqu-2026-10 sigma terms, the cross-check gap with the cross-check's own sigma (n/r = unresolved,
 does not vote), the gate verdict and the deviation from any registered external reference. The
-acceptance criterion in docs/classical_error_convention_2026-10-08.md s11e: the old conventions
+acceptance criterion in docs/classical/classical_error_convention_2026-10-08.md s11e: the old conventions
 do not move, and the gate refuses exactly the cells an external same-operator bound refutes.
 
 Cells are discovered from DATA_DIRS below (one Hamiltonian per (frame, A, L)); the A-sweep and

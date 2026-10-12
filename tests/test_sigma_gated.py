@@ -1,6 +1,6 @@
 """The gated error convention `nuqu-2026-10` (2026-10-10) and the external-bound registry.
 
-docs/classical_error_convention_2026-10-08.md s11: the block2 DMRG calibration (294249) refuted
+docs/classical/classical_error_convention_2026-10-08.md s11: the block2 DMRG calibration (294249) refuted
 `trimci-coo`'s sigma on the identical bare L=2 Hamiltonian. Checks:
   * the registry loads, matches same-operator cells only, and moves between contact conventions;
   * sigma = max(bootstrap, half extrapolation distance, matched-depth seed spread), each recorded;

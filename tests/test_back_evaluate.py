@@ -1,4 +1,4 @@
-"""Original-H back-evaluation for the approximate LF / composed frames (docs/lf_backevaluation.md).
+"""Original-H back-evaluation for the approximate LF / composed frames (docs/frames/lf_backevaluation.md).
 
 pytest-collected (audit gap 5). TINY ED systems only (memory-bounded): L=2 d=1 n_b=1 A=1 is
 ~512 states. Covers: the non-isospectrality trap (E_frame below E_bare), the restored Ritz

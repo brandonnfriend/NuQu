@@ -9,7 +9,7 @@ The honest, current Old-vs-New (Watson analytic Trotter upper bound vs compiled 
 is `misc/make_trotter_comparison_figure.py` (uses `src_PI.trotter_theory.trotter_exact`, the exact
 Theorem-64 model with NO free coefficient) against the r3 anchor. See
 codex_audit/02_quantum_resources/trotter_comparison_status_2026-08-24.md and
-docs/trotter_xi_sourcemap.md.
+docs/quantum/trotter_xi_sourcemap.md.
 """
 
 import sys

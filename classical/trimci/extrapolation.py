@@ -526,7 +526,7 @@ def einf_with_uncertainty(rungs, sites=None, min_post=3):
 LITERATURE_CONVENTION = "trimci-coo"
 LEGACY_CONVENTION = "nuqu-2026-09"
 # nuqu-2026-10 (2026-10-10): the DMRG calibration refuted trimci-coo's sigma on the identical
-# bare L=2 Hamiltonian (docs/classical_error_convention_2026-10-08.md s11). Same per-seed fits
+# bare L=2 Hamiltonian (docs/classical/classical_error_convention_2026-10-08.md s11). Same per-seed fits
 # as trimci-coo; the POOLED layer changes: sigma = max(bootstrap, half the extrapolation
 # distance [Holmes/Tubman/Umrigar 2016], seed spread at matched depth), and a four-part gate
 # (post-collapse rungs; limit <= EVERY same-operator variational bound incl. external ones;
@@ -537,7 +537,7 @@ LEGACY_CONVENTION = "nuqu-2026-09"
 # correction, so it says nothing and does not vote, as a missing one does not at L=4), and a
 # resolved cross-check passes when the two 1-sigma intervals overlap, |gap| <= sigma + sigma_cc,
 # after which sigma is widened to cover its central value (term `cross_check_gap`).
-# DEFAULT since 2026-10-10 (user decision after the A/B in docs/sigma_convention_ab_2026-10-10.md).
+# DEFAULT since 2026-10-10 (user decision after the A/B in docs/classical/sigma_convention_ab_2026-10-10.md).
 GATED_CONVENTION = "nuqu-2026-10"
 SIGMA_CONVENTIONS = (LITERATURE_CONVENTION, LEGACY_CONVENTION, GATED_CONVENTION)
 DEFAULT_SIGMA_CONVENTION = GATED_CONVENTION

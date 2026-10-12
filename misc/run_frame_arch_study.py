@@ -2,7 +2,7 @@
 
 Reads the classical frame-core HPC shards (`p0`, `mean_occ` per rung), joins each
 `(L, A)` to a bare-H `src_PI` resource point (Λ, T_step, n_b), and folds them through
-the doc-faithful total-T (`docs/frame_on_quantum_side.md` §4) via
+the doc-faithful total-T (`docs/frames/frame_on_quantum_side.md` §4) via
 `classical.trimci.frame_arch_study`. No `src_PI` / walk changes — Architecture A
 qubitizes the BARE H; the frame is only a warm start.
 

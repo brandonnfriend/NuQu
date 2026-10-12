@@ -35,7 +35,7 @@
 # GRID (defaults): squeeze A=0..10 x L=2..4 x 3 seeds = 99, refs A=0,1 x L=2..4 x 3 = 18.
 # Trim / extend with env: AS="0 1 2 4 6 8 10"  LS="2 3 4 5"  SEEDS="0"  REF_LS="2 3"  REF_AS="0".
 # NB (default 3) sets the boson cutoff of every shard and the campaign suffix (-nb$NB). The
-# n_b=4 vacuum point docs/classical_error_convention_2026-10-08.md s11e asks for -- bare, A=0,
+# n_b=4 vacuum point docs/classical/classical_error_convention_2026-10-08.md s11e asks for -- bare, A=0,
 # L=3, at exactly the refs' settings so it compares to 294246's bare_L3d3_A0 n_b=3 shards and to
 # the exact vacuum 331.461/site -- is therefore
 #     NB=4 REF_LS=3 REF_AS=0 sh submit_nb3_Asweep_squeeze.sh refs      # 3 shards (seeds 0 1 2)

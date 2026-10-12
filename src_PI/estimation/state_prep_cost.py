@@ -1,6 +1,6 @@
 """Initial-state-preparation cost for the classically-informed QPE warm start (total_costs §3–4).
 
-The warm start `|ψ_init⟩ = U|ψ̃⟩` is built in two pieces (`docs/frame_warmstart_p0_fidelity.md`):
+The warm start `|ψ_init⟩ = U|ψ̃⟩` is built in two pieces (`docs/frames/frame_warmstart_p0_fidelity.md`):
 
   1. **Fermionic core load** — a superposition of `D` Slater determinants (the compact classical
      ground state) loaded by a QROAM / SelectSwap state-prep (Low–Kliuchnikov–Schaeffer 2018,

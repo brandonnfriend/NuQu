@@ -1,7 +1,7 @@
 #!/bin/sh
 # FRAME ISOSPECTRALITY / "similar-enough n_b" campaign (Track A + B).
 # Quantifies the frame non-isospectrality error and the frame-adjusted boson cutoff, per
-# docs/lf_backevaluation.md + the theory verdict (squeeze/COO = operator-identity -> E_frame
+# docs/frames/lf_backevaluation.md + the theory verdict (squeeze/COO = operator-identity -> E_frame
 # already variational; LF = the only frame needing back-evaluation). One shard = one
 # (L, dim, frame, A/filling, n_b, seed) over geometric cores; per core it records E_frame,
 # E_orig (LF back-eval, Ritz-valid), eps_leak = 1-||P_Nf U|psi~>||^2 (the exact tightness

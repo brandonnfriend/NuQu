@@ -1,6 +1,6 @@
 """Architecture-C admissibility gate — the LF transition-vertex residual ‖R_trans‖.
 
-Companion to `docs/frame_on_quantum_side.md` §3/§4-step-3 and `frame_arch_study.py`
+Companion to `docs/frames/frame_on_quantum_side.md` §3/§4-step-3 and `frame_arch_study.py`
 (Architecture A). Architecture C would qubitize the *walk* of the squeeze+LF frame
 `H̃ = squeeze ∘ LF_leadingorder(H)`, so QPE returns `spec(H̃)` — which is only
 admissible if `H̃` is close enough to `H` in spectrum. The truncated LF is NOT a

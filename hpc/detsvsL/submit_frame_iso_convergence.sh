@@ -4,7 +4,7 @@
 # COMPACTION / convergence-RATE effect (squeeze reaches a given accuracy with far fewer dets), not
 # a lower E-infinity. This run traces E(core) deep for bare vs squeeze (+LF curves) so the curves
 # can be shown converging, and adds seeds {0,1,2} on bare/squeeze for the scatter bars that §7.2
-# of docs/frame_isospectrality_results.md flags as missing. n_b=3 (converged). All d3 = ED-free.
+# of docs/frames/frame_isospectrality_results.md flags as missing. n_b=3 (converged). All d3 = ED-free.
 #
 # Overnight-friendly: deep cores at L3 f1.0 may not finish — incremental per-core save keeps every
 # rung, so cancel stragglers with `condor_rm <cluster>` any time and the shallow rungs survive.

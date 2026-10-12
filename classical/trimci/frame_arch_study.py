@@ -1,6 +1,6 @@
 """Architecture study — where a frame enters the quantum computation (task 34).
 
-Companion to `docs/frame_on_quantum_side.md`. That doc frames three architectures
+Companion to `docs/frames/frame_on_quantum_side.md`. That doc frames three architectures
 for how a classical frame `U` can meet the fault-tolerant QPE pipeline:
 
   * **A — warm-start only** (SAFE, no proof): qubitize the BARE H, use `U` only to
@@ -22,7 +22,7 @@ and `mean_occ` per rung. What was missing is the GLUE that (1) reads those shard
 [[project_frame_value_quantified]] / the D-DMRG n_runs>=16 finding), and (3) folds
 them through the doc-faithful total-T so the A-vs-bare verdict is a real number.
 
-**Doc-faithful total-T** (`docs/frame_on_quantum_side.md` §4):
+**Doc-faithful total-T** (`docs/frames/frame_on_quantum_side.md` §4):
 
     total_T = (T_prep + N_walk · T_step) · QPE_reps,   QPE_reps = 1/p0,
     N_walk  = π·Λ/ΔE   (the qubitized-walk query count; `src_PI.qpe_cost`).

@@ -109,7 +109,7 @@ cancelled to zero. **Fix:** each builder returns the single ordered `a†_α a_�
 reconstruct the Hermitian `Σ χ^I_{αβ} a†_α a_β` (χ = τ_I ⊗ σ_S Hermitian). Static-only sector was
 already clean. **Scientific consequence (paper-relevant):** both H_AV and H_WT are sign-problem
 sources (not H_WT alone) — the dynamical-pion coupling *as a whole* is the phase source, static sector
-stoquastic-real (`docs/sign_problem.md`). Everything touching H_AV/H_WT must be regenerated (N2).
+stoquastic-real (`docs/classical/sign_problem.md`). Everything touching H_AV/H_WT must be regenerated (N2).
 
 ---
 

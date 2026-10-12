@@ -1,6 +1,6 @@
 """Original-H back-evaluation — restore the Ritz upper bound for the approximate LF frame.
 
-See `docs/lf_backevaluation.md`. The truncated (leading-order) Lang-Firsov frame is NOT
+See `docs/frames/lf_backevaluation.md`. The truncated (leading-order) Lang-Firsov frame is NOT
 isospectral, so its frame-internal energy `E_frame = ⟨ψ̃|H̃_m|ψ̃⟩` has no variational relation
 to the physical spectrum. The fix: take the compact frame-solved state `|ψ̃⟩`, map it to the
 physical frame with the EXACT unitary `|ψ⟩ = exp(λS)|ψ̃⟩`, and score it against the reference

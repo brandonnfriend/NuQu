@@ -25,6 +25,7 @@ This file is the assistant's standing context for the NuQu project. Keep it shor
   - PDFs named `Author_Year_short_topic.pdf` — sortable, no spaces in the leading tokens.
   - A markdown synthesis file `00_literature_review.md` (or similar `00_*` prefix to sort first).
 - Use `pypdf` (already in the venv) for reading PDFs locally. arXiv papers can be downloaded with `curl -sLo <out> https://arxiv.org/pdf/<arxiv_id>` (the `-L` follows redirects).
+- Internal working documents live in `docs/` (gitignored), organized by workstream: `classical/`, `frames/`, `quantum/` for the record of the work, `manuscript/` for text destined for `paper/` (including `OPEN_FLAGS.md`), `presentation/` for figures, `archive/` for superseded. `docs/README.md` indexes them with a currency status — read it before reaching for a doc, since several are partly superseded. **Don't rename `docs/presentation/`:** three `misc/` scripts default their output there.
 
 ### Dependencies
 - **Use the project venv** at `.venv/` — Python 3.10.11.
