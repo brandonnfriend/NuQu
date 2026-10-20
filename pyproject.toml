@@ -13,8 +13,13 @@ dependencies = [
 # Test TIERS (audit 2026-09-05, lower-priority findings). The default run is still
 # EVERYTHING -- markers are opt-OUT, never opt-in, so nothing silently stops running:
 #
-#   python -m pytest -q                     # full suite, ~6.5 min   (release gate)
-#   python -m pytest -q -m "not slow"       # fast tier, ~2 min      (edit/commit loop)
+#   python -m pytest -q                     # full suite            (release gate)
+#   python -m pytest -q -m "not slow"       # "fast" tier            (edit/commit loop)
+#
+# TODO (2026-10-20): the `slow` markers are STALE. The tier was ~2 min when the five tests
+# below were marked; it now runs ~6 min 26 s, because the suite grew 217 -> 330 tests and the
+# new slow tests were never marked. Re-measure with `--durations=30` and re-mark. See
+# tests/README.md. Runtimes quoted below are the original 2026-09-05 measurement.
 #
 # Five tests carry ~70% of the wall time (DMRG area-law onset ~160 s, back-evaluate
 # eps-leak ~56 s, projector-LF variational ~33 s, the pyLIQTR counting-boundary check

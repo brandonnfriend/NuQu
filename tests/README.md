@@ -5,8 +5,14 @@ tiers and the ordering do not.
 
 | command | tests | wall | when |
 |---|--:|--:|---|
-| `python -m pytest -q -m "not slow"` | 217 | **~1 min 40 s** | the edit/commit loop |
-| `python -m pytest -q` | 222 | **~6 min 40 s** | before a commit that touches physics, and before any release |
+| `python -m pytest -q -m "not slow"` | 325 | **~6 min 26 s** (measured 2026-10-20) | the edit/commit loop |
+| `python -m pytest -q` | 330 | not re-measured since 2026-09-05 | before a commit that touches physics, and before any release |
+
+> **TODO — the `slow` markers are stale; fix soon.** The fast tier was ~1 min 40 s when the five
+> tests below were marked. It is now **~6 min 26 s**, i.e. the tier no longer does its job: the
+> suite roughly doubled (217 → 330 tests) and the new slow tests were never marked. Re-measure with
+> `python -m pytest -q --durations=30` and re-mark whatever now dominates. Until then `-m "not slow"`
+> is not a usable edit-loop tier. The five rows below are the *original* measurement, not current.
 
 The default run is **everything** — `slow` is opt-OUT, never opt-in, so nothing
 silently stops running. Five tests carry ~70% of the wall time and are marked

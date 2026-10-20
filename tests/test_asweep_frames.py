@@ -27,6 +27,10 @@ from misc.make_Asweep_figures import binding_rows, collect  # noqa: E402
 
 DPS = (-40.0, -26.0, -17.0, -11.0, -7.0)
 
+# Exact A=0 multimode-Bogoliubov pion vacuum, MeV/site, from
+# classical/trimci/external_bounds.json (kind="exact", frame="*").
+VAC_PS = {2: 304.149, 3: 331.461}
+
 
 def _shard(path, L, A, seed, frame, E_fci, c=0.45, mem=False):
     sites = L ** 3
@@ -53,8 +57,14 @@ def _shard(path, L, A, seed, frame, E_fci, c=0.45, mem=False):
 def _campaign(tmp):
     d = os.path.join(tmp, "2026-10-09", "Asweep_squeeze_nb3_1")
     os.makedirs(d)
-    # planted TOTAL energies: E(A, L) = sites*300 + 100*A - 7*A^2 (so BE grows with A)
-    E = lambda A, L: L ** 3 * 300.0 + 100.0 * A - 7.0 * A * A
+    # Planted TOTAL energies: E(A, L) = sites*base(L) + 100*A - 7*A^2 (so BE grows with A).
+    # base(L) is pinned per L so the GAUSSIAN A=0 sector, which carries the -50/site frame
+    # shift below, lands exactly on the exact untruncated pion vacuum in
+    # classical/trimci/external_bounds.json. The nuqu-2026-10 gate refutes any limit BELOW
+    # that vacuum, so an arbitrary base makes every A=0 sector refuse and silently drops the
+    # whole E_inf branch of binding_rows. The base cancels in BE, so BE = 7 A (A - 1) either
+    # way. Bare A=0 then sits 50/site ABOVE the vacuum, which the gate allows (cutoff error).
+    E = lambda A, L: L ** 3 * (VAC_PS[L] + 50.0) + 100.0 * A - 7.0 * A * A
     for L in (2, 3):
         for A in (0, 1, 2, 4):
             for seed in (0, 1):
@@ -100,8 +110,8 @@ def test_binding_rows_from_planted_energies():
         for r in rows:
             A, L = r["A"], r["L"]
             # the planted E has the -50/site frame shift in every sector: it cancels in BE,
-            # as the pion vacuum does. With E(A) = 300 sites + 100 A - 7 A^2,
-            # BE = A E1 - (A-1) E0 - EA = 7 A (A - 1).
+            # as the pion vacuum does. With E(A) = base(L) sites + 100 A - 7 A^2,
+            # BE = A E1 - (A-1) E0 - EA = 7 A (A - 1), independent of base(L).
             assert abs(r["BE"] - 7.0 * A * (A - 1)) < 0.5, (r, 7.0 * A * (A - 1))
             assert r["source"] == "E_inf" and r["BE_sigma"] is not None and r["BE_sigma"] >= 0
             assert abs(r["BE_per_A"] - r["BE"] / A) < 1e-9
