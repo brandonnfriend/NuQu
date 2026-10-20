@@ -17,6 +17,12 @@ that against the **Trotterized** cost bound from
 Numbers here are *compiler-derived*, not asymptotic scaling arguments: where a row says
 **compiled**, a circuit was actually built and counted.
 
+The project runs two workstreams against **one** Hamiltonian: the quantum resource anchor above,
+and a [classical selected-CI baseline](#classical-baseline--variational-upper-bounds-on-the-same-hamiltonian)
+that returns rigorous variational upper bounds on the identical operator. A resource estimate
+without that reference is unfalsifiable, so the classical side is not a side quest — it is what
+makes the quantum number mean something.
+
 > Started as a final project for Physics 765 (Quantum Algorithms & Error Correction, S26) and has
 > been extended since toward a publication — 375 commits, Feb–Oct 2026. The original course
 > deliverables (joint with a project partner) are included as
@@ -26,7 +32,7 @@ Numbers here are *compiler-derived*, not asymptotic scaling arguments: where a r
 
 ---
 
-## Headline results
+## Quantum resource anchor
 
 At the selected boson cutoff `n_b = 3`, A = 1 nucleon, ΔE = 1 MeV target precision:
 
@@ -68,6 +74,73 @@ runs and resets before the phase register is populated), magic-state factories, 
 L = 8–10 are extrapolated with a quantization-aware padding model (`pyLIQTR` pads PREPARE to
 `2^⌈log₂ terms⌉`), back-tested to **< 1.1 %** on the compiled L = 1…7 points. The `n_b = 3` cutoff
 was selected at L = 2; its adequacy at L = 10 is corroborated but **not established**.
+
+---
+
+## Classical baseline — variational upper bounds on the same Hamiltonian
+
+A quantum resource estimate only means something against a classical reference solving the *same*
+operator. `classical/trimci/hamiltonian.py` imports the quantum side's own
+`build_eft_hamiltonian`, so the selected-CI solver and the block encoder are handed a
+bit-identical truncated Hamiltonian — same lattice, same boson cutoff, same contact convention.
+No separate model, no re-derivation.
+
+The solver is a selected-CI ("TrimCI"-style) expansion–trim cycle over the mixed fermion–boson
+Fock space, with a matrix-free `H_ij` evaluator, an Epstein–Nesbet PT2 correction, and a C++
+sparse-Davidson backend. At every lattice size it returns a **rigorous Ritz variational upper
+bound** — valid whether or not the ladder converged, and independent of any extrapolation or
+error-bar convention.
+
+`n_b = 3`, bare frame, filling 1.0 (A = L³ nucleons), Wick contact convention:
+
+| L | sites | nucleons | deepest core (dets) | E_var bound (MeV) | /site | wall |
+|--:|--:|--:|--:|--:|--:|--:|
+| 2 | 8 | 8 | 1,024,000 | 1,993 | 249.1 | 2.1 h |
+| 3 | 27 | 27 | 512,000 | 8,894 | 329.4 | 4.9 h |
+| 4 | 64 | 64 | 256,000 | 23,636 | 369.3 | 12.1 h |
+| 5 | 125 | 125 | 64,000 | 49,211 | 393.7 | 8.2 h |
+
+![Classical TrimCI baseline](assets/classical_baseline.png)
+
+Panel **a** is the rigorous content: the core ladders, and where each stops descending. The
+extrapolated band in panel **b** is drawn under an error-bar convention that has since been
+superseded (see *Open* below) — read the bounds, not the error bars.
+
+Calibration is anchored on the one point that is **exact**: at A = 0 the Hamiltonian is a free
+pion field, diagonalizable in closed form by a multimode Bogoliubov transformation, giving
+**304.149 MeV/site at L = 2** and **331.461 at L = 3**. Every truncated limit, in any frame or
+cutoff, must lie at or above it — which makes A = 0 a genuine falsification test rather than a
+self-consistency check.
+
+### Cross-validation found a real failure
+
+An independent **block2 DMRG** calculation on the identical truncated Hamiltonian (L = 2, n_b = 3)
+returned a *lower* variational energy than the selected-CI search at every nucleon number tested —
+decisively at **A = 4** (275.573 vs 276.62 MeV/site) and **A = 8** (248.247 vs 249.07), where the
+search had simply missed a better basin while its own seed spread read 0.000.
+
+That is a negative result about our own solver, and it was the most useful thing the classical
+side produced: it established that agreement between two estimators fitted to the same ladder is
+*not* evidence of correctness. The uncertainty convention was replaced with a gated one that
+refuses to report an extrapolated limit sitting above any same-operator variational bound,
+checked against an external registry of DMRG energies
+([`classical/trimci/external_bounds.json`](classical/trimci/external_bounds.json)).
+
+### Frame preconditioning
+
+Solving in a per-mode squeezed (Bogoliubov) frame reaches a fixed reference energy with
+**64–256× fewer selected determinants**, and the advantage grows with L. This is a compaction
+result about the classical workflow — not exact-E₀ recovery, not finite-cutoff isospectrality,
+and not an asymptotic speedup: the bare calculation keeps improving with determinant count.
+
+### Open
+
+The **bounds above are settled**; the extrapolated `E_∞` and its σ are not. That convention is on
+its third revision, several cells currently report a bound only, and the DMRG calibration showed
+the previous error bars were 3.6–396× too small. Treat any extrapolated classical limit in this
+repo as provisional. Cost growth in this solver is likewise an observation about *this*
+implementation — not evidence of classical intractability, which would need controlled
+comparisons against QMC, tensor networks and other selected-CI codes that have not been run.
 
 ---
 
@@ -146,8 +219,7 @@ Every reported number carries a label — *compiled*, *projected*, *variational*
 Claims that did not survive scrutiny are recorded as **withdrawn** rather than quietly dropped.
 Concretely:
 
-- an independent **block2 DMRG** calibration refuted the classical solver's error bars on the
-  identical Hamiltonian, which forced a replacement uncertainty convention with a refusal gate;
+- the DMRG calibration above refuted our own error bars and forced a replacement convention;
 - a missing Wick prescription on the contact terms was found and corrected in closed form;
 - resource runs are tied to data by SHA-256 manifests, re-verifiable from outside the pipeline
   (`misc/verify_accepted_manifests.py`).
@@ -160,7 +232,9 @@ That machinery lives in the gitignored `results/` tree and is summarized in the 
 - **Qubitized walks / QPE compilation** — [pyLIQTR](https://pypi.org/project/pyLIQTR/)
 - **Hamiltonian construction** — [OpenFermion](https://github.com/quantumlib/OpenFermion)
 - **Selected CI** — Zhang & Otten, [arXiv:2511.14734](https://arxiv.org/abs/2511.14734)
+- **DMRG cross-check** — [block2](https://github.com/block-hczhai/block2-preview)
 - **Bosonic cutoff theory** — Tong, Albert, McClean, Preskill & Su, [arXiv:2110.06942](https://arxiv.org/abs/2110.06942)
+- **Prior classical work on dynamical pions** — Madeira, Lovato, Pederiva & Schmidt, [arXiv:1803.10725](https://arxiv.org/abs/1803.10725) (quantum Monte Carlo; this project does not claim priority for a classical treatment of the model)
 
 ## Status
 
