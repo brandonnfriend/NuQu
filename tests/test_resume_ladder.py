@@ -20,11 +20,19 @@ import subprocess
 import sys
 import tempfile
 
-import numpy as np
+# Reproducibility contract = SINGLE-THREADED math: no official TrimCI Davidson (the cluster
+# path, requirements-hpc.txt) and one OpenMP / BLAS thread. Multithreaded OpenBLAS / OpenMP
+# reductions differ in the last bits run to run, which can tip a trim decision on these
+# tiny systems (2026-11-22). Must be set BEFORE numpy is imported.
+for _k in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
+           "VECLIB_MAXIMUM_THREADS", "NUQU_NUM_WORKERS"):
+    os.environ[_k] = "1"
+os.environ["NUQU_NO_OFFICIAL_DAVIDSON"] = "1"
+
+import numpy as np  # noqa: E402
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
-os.environ.setdefault("NUQU_NUM_WORKERS", "1")
 
 from classical.trimci import build_from_eft  # noqa: E402
 from classical.trimci import checkpoint as ck  # noqa: E402
@@ -83,7 +91,7 @@ def _shard(out, extra_env=None, extra_args=()):
            "--phase0-runs", "2", "--phase0-select-core", "200", "--phase0-init", "stratified",
            "--phase0-workers", "1", "--frame-runs", "1", "--orbopt-cycles", "1",
            "--phase0-core", "100", "--resume", "--out", out, *extra_args]
-    env = dict(os.environ, NUQU_NUM_WORKERS="1", MPLBACKEND="Agg")
+    env = dict(os.environ, MPLBACKEND="Agg")         # inherits the pinned threads above
     env.pop("NUQU_TEST_DIE_AFTER_RUNG_INDEX", None)
     env.update(extra_env or {})
     return subprocess.run(cmd, cwd=_ROOT, env=env, capture_output=True, text=True)

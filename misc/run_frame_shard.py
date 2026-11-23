@@ -176,6 +176,11 @@ def main():
                     help="continue from the checkpoint beside --out if one exists and its "
                          "settings match (warm-grow ladder); a finished shard exits 0; a "
                          "mismatch exits 2. Without it a restart overwrites --out.")
+    ap.add_argument("--extend", action="store_true",
+                    help="with --resume: continue a FINISHED shard to a deeper ladder (larger "
+                         "--max-core / --n-rungs / --pt2-max-core) from its saved top core, "
+                         "re-recording that rung under the new PT2 cap -- bit-identical to a "
+                         "fresh run of the deeper ladder (checkpoint.extend_plan)")
     ap.add_argument("--checkpoint-dir", default=None,
                     help="where per-rung core checkpoints go (default: beside --out)")
     ap.add_argument("--no-checkpoint", action="store_true",
@@ -277,6 +282,10 @@ def main():
 
     # RESUME decision (before `out` is built, so a resumed run keeps the original record)
     resume = None
+    extend = None
+    if args.extend and not args.resume:
+        print("[frameshard] --extend needs --resume", file=sys.stderr)
+        sys.exit(2)
     if args.resume and os.path.exists(args.out):
         try:
             prior = json.load(open(args.out))
@@ -285,6 +294,18 @@ def main():
             prior = None
         saved = ckpt.load_checkpoint(args.out, args.checkpoint_dir) if ladder_rungs else None
         action, info = ckpt.resume_plan(prior, saved, ladder_rungs or [], cfg_key)
+        # EXTEND (2026-11-22): a done shard shallower than this ladder, or a checkpoint whose
+        # only differences are ladder depth / PT2 cap, continues from its saved top core.
+        if args.extend and ladder_rungs and prior is not None and saved is not None:
+            top = max([int(r["core"]) for r in prior.get("rungs", [])] or [0])
+            if (action == "done" and top < ladder_rungs[-1]) or action == "refuse":
+                action, info = ckpt.extend_plan(prior, saved, ladder_rungs, cfg_key)
+                if action == "extend":
+                    extend = info
+                    print(f"[frameshard] EXTEND {args.out}: ladder {info['old_rungs']} -> "
+                          f"{ladder_rungs}; re-record rung index {info['rerecord_index']} "
+                          f"(core {info['core'][0].shape[0]}) under pt2_max_core="
+                          f"{args.pt2_max_core}, then grow")
         if action == "done":
             print(f"[frameshard] {args.out} is already done "
                   f"(rungs={[r['core'] for r in prior.get('rungs', [])]}) -> nothing to do")
@@ -297,6 +318,8 @@ def main():
             print(f"[frameshard] RESUME from rung index {info['start_index'] - 1} "
                   f"(core {info['core'][0].shape[0]}, {info['path']}); "
                   f"{len(prior['rungs']) - info['n_rungs_keep']} unfinished rung(s) redone")
+        elif action == "extend":
+            pass                                     # handled below, after `out` is built
         elif ladder_rungs is None:
             print("[frameshard] --resume: only the warm-grow ladder checkpoints; starting fresh")
         else:
@@ -348,7 +371,24 @@ def main():
         }),
     }
     wall_before = 0.0
-    if resume is not None:
+    if extend is not None:
+        # keep the ORIGINAL record (header, manifest, rungs below the saved one); the saved
+        # rung is re-recorded by growing_ladder under the new PT2 cap
+        out = prior
+        out["rungs"] = out["rungs"][:extend["n_rungs_keep"]]
+        out["done"] = False
+        wall_before = float(out.get("wall_s") or 0.0)
+        out.setdefault("extended", []).append({
+            "from_ladder": extend["old_rungs"], "to_ladder": ladder_rungs,
+            "rerecord_index": extend["rerecord_index"], "checkpoint": extend["path"],
+            "max_core": args.max_core, "n_rungs": args.n_rungs,
+            "pt2_max_core": args.pt2_max_core, "wall_s_before": wall_before,
+            "solver": solver_cfg,
+            "restart_manifest": build_manifest(extra={"argv": sys.argv[1:]}),
+        })
+        resume = {"core": extend["core"], "start_index": extend["start_index"],
+                  "rerecord": {"coeffs": extend["coeffs"], "energy": extend["energy"]}}
+    elif resume is not None:
         # keep the ORIGINAL record (header, manifest, finished rungs); only note the restart
         out = prior
         out["rungs"] = out["rungs"][:resume["n_rungs_keep"]]
@@ -374,7 +414,7 @@ def main():
     def on_rung(rung, res):
         r = {k: rung[k] for k in ("core", "E_var", "dE_pt2", "E_pt2", "n_ext", "wall_s", "phase",
                                   "phase0_select", "phase0_select_starts",
-                                  "rung_index", "resumable")
+                                  "rung_index", "resumable", "rerecorded_from_checkpoint")
              if k in rung}
         r["mean_occ"] = _mean_occupation(res, Hbare.n_bos_modes)
         # QPE warm-start overlap p0 = |c_dominant|^2 of this (framed) core — the
@@ -507,7 +547,8 @@ def main():
                 novel_ferm_frac=args.novel_ferm_frac, novel_keep_frac=args.novel_keep_frac,
                 phase0_workers=args.phase0_workers,
                 resume=(None if resume is None else
-                        {"core": resume["core"], "start_index": resume["start_index"]}))
+                        {"core": resume["core"], "start_index": resume["start_index"],
+                         **({"rerecord": resume["rerecord"]} if "rerecord" in resume else {})}))
         else:
             _adaptive_ladder_solve(
                 Hind, A, args.ladder_start, args.n_rungs, solver, pt2_diag,

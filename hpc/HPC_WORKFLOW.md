@@ -95,6 +95,24 @@ the pinned deps → compile the C++ hot path. Key points:
   continues from the next rung, bit-identical to an uninterrupted run; a finished shard exits 0
   at once; a checkpoint from different settings is refused (exit 2). Pull shards with
   `rsync --exclude '*.npz'`; the checkpoints are a few hundred MB each at 512k dets.
+- **Extend (2026-11-22).** `NUQU_EXTEND=1` (python `--resume --extend`) continues a FINISHED
+  shard to a deeper ladder from its saved top core: the saved rung is re-recorded under the new
+  PT2 cap, then growth continues with seed + i -- the same records a fresh run of the deeper
+  ladder writes (`tests/test_extend_ladder.py`). Only `max_core` / `n_rungs` / `pt2_max_core`
+  may differ (`checkpoint.EXTEND_IGNORE`); anything else is refused (exit 2). The shard JSON is
+  rewritten in place and gains an `extended` record. First use: `submit_squeeze_L4_deep.sh`.
+- **Bit-identity needs single-threaded math (found 2026-11-22).** Resume/extend reproduce a
+  fresh run exactly only with one OpenMP/BLAS thread and without the official TrimCI Davidson
+  (whose answer varies run to run). Multithreaded OpenBLAS/OpenMP sums differ in the last bits
+  and can occasionally tip a trim decision. The cluster jobs never use the official Davidson
+  (requirements-hpc.txt omits `trimci`); `NUQU_NO_OFFICIAL_DAVIDSON=1` makes a laptop run match
+  them. Deep-solve jobs run multithreaded, so a resumed or extended shard is a statistically
+  equivalent continuation, not a guaranteed bit-for-bit one.
+- **Analysis jobs (2026-11-22).** `run_analysis.sh <python module> [args]` provisions the same
+  pinned tools and runs one module with BLAS/OpenMP pinned to 1 (the module parallelises
+  itself). Example: `submit_ab_collapse_rule.sh` (one 32-cpu job). `data/` is not in the server
+  checkout, so analyses read a snapshot: `rsync -az --delete data/classical/
+  hep:/nfs_scratch/bfriend3/NuQu/data_snapshot/classical/`.
 
 ---
 

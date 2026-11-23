@@ -188,6 +188,9 @@ P1MAX_ARG=""; [ -n "${NUQU_PHASE1_MAX_DETS:-}" ] && P1MAX_ARG="--phase1-max-dets
 P2MAX_ARG=""; [ -n "${NUQU_PHASE2_MAX_DETS:-}" ] && P2MAX_ARG="--phase2-max-dets ${NUQU_PHASE2_MAX_DETS}"
 # RESUME from the last checkpointed rung beside $OUT (default on; NUQU_RESUME=0 = overwrite).
 RESUME_ARG="--resume"; [ "${NUQU_RESUME:-1}" = "0" ] && RESUME_ARG=""
+# EXTEND (2026-11-22): NUQU_EXTEND=1 continues a finished shard to a deeper ladder from its
+# saved top core (misc/run_frame_shard.py --extend; needs --resume).
+[ "${NUQU_EXTEND:-0}" = "1" ] && [ -n "$RESUME_ARG" ] && RESUME_ARG="--resume --extend"
 # grow: Phase-0 ensemble + Phase-1 co-evolution + warm-start growth (deep/convergence runs).
 # independent: fit the frame ONCE (cheap; NO Phase-1 co-evolution, which is the 60+ min
 # cost) then grow a FROZEN frame -- for cheap frame COMPARISONS at equal footing.

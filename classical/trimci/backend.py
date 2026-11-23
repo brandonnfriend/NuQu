@@ -31,6 +31,8 @@ mixed-mode generalization (or a provider-interface fork). See `00_literature_rev
 
 from __future__ import annotations
 
+import os
+
 import numpy as np
 
 from .hij import build_dense
@@ -59,6 +61,14 @@ def load_backend():
 
 
 def backend_available():
+    # NUQU_NO_OFFICIAL_DAVIDSON=1 (2026-11-22): behave as if the official TrimCI package were
+    # absent, i.e. the scipy / numpy eigensolver paths the cluster jobs run
+    # (requirements-hpc.txt omits `trimci`). Those are reproducible run to run; the official
+    # Davidson is not (a fresh process occasionally lands on a different core at the first
+    # trim -- the flaky tests/test_resume_ladder.py on a laptop with `trimci` installed).
+    # Default unchanged; our own C++ hot path (`mixed_ci`, cpp_available) is unaffected.
+    if os.environ.get("NUQU_NO_OFFICIAL_DAVIDSON", "") not in ("", "0"):
+        return False
     try:
         load_backend()
         return True

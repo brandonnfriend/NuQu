@@ -298,7 +298,10 @@ def core_energy_ladder(rungs):
     return with_pt2 if 0 < len(with_pt2) < len(rungs) else list(rungs)
 
 
-def split_at_collapse(rungs, sites=None):
+COLLAPSE_OUTLIER_RATIO = 3.0   # a collapse must be >= 3x the next-largest single drop
+
+
+def split_at_collapse(rungs, sites=None, outlier_ratio=None):
     """Split a warm-grown ladder at its 'basin collapse' rung.
 
     The greedy selected-CI search sits in a delocalized exploration basin and, once
@@ -319,6 +322,27 @@ def split_at_collapse(rungs, sites=None):
                              "collapse_drop": None, "collapse_drop_per_site": None}
     drops = [(rungs[i - 1]["E_var"] - rungs[i]["E_var"], i) for i in range(1, len(rungs))]
     drop, i_col = max(drops)
+    if outlier_ratio is not None and len(drops) >= 2:
+        # OUTLIER RULE (2026-11-22): a basin collapse is a drop that STANDS OUT -- the bare L=2
+        # collapses are 3-40x the next-largest drop. Most ladders have no such drop (the
+        # largest is 1.04-1.15x the next at L=3-5, both frames), and on the smooth squeezed L=4
+        # ladders the largest-drop rule cut at the peak of the drop curve (64k-128k), leaving
+        # 2-3 PT2 rungs and 8 of 11 cells bound-only (cluster 294246). Below the ratio the
+        # ladder is returned whole; the late fit window then drops the early curvature.
+        second = sorted((d for d, _ in drops), reverse=True)[1]
+        ratio = drop / second if second > 0 else float("inf")
+        if ratio < outlier_ratio:
+            return list(rungs), {"collapse_index": 0, "collapse_core": None,
+                                 "collapse_drop": float(drop),
+                                 "collapse_drop_per_site": (float(drop) / sites) if sites else None,
+                                 "collapse_detected": False, "max_drop_ratio": float(ratio)}
+        return rungs[i_col:], {
+            "collapse_index": i_col,
+            "collapse_core": rungs[i_col]["core"],
+            "collapse_drop": float(drop),
+            "collapse_drop_per_site": (float(drop) / sites) if sites else None,
+            "collapse_detected": True, "max_drop_ratio": float(ratio),
+        }
     return rungs[i_col:], {
         "collapse_index": i_col,
         "collapse_core": rungs[i_col]["core"],
@@ -668,7 +692,8 @@ def _literature_fits(post, E_var_bound, n_scan, n_boot, seed, min_post, min_pt2)
 
 
 def einf_literature(rungs, sites=None, min_post=5, n_scan=5000, n_boot=500, seed=0,
-                    min_pt2=4, window=LITERATURE_FIT_WINDOW):
+                    min_pt2=4, window=LITERATURE_FIT_WINDOW,
+                    outlier_ratio="default"):
     """E_infinity +- sigma on the TrimCI/COO literature convention, for ONE ladder.
 
     Same record shape as `einf_with_uncertainty` (so `combine_seeds`, the aggregators and
@@ -680,7 +705,9 @@ def einf_literature(rungs, sites=None, min_post=5, n_scan=5000, n_boot=500, seed
     E_var_bound = rungs[-1]["E_var"] if rungs else None
     fit_rungs = core_energy_ladder(rungs)
     pool_cores = [r["core"] for r in rungs if r not in fit_rungs]
-    post_all, basin = split_at_collapse(fit_rungs, sites=sites)
+    if outlier_ratio == "default":            # read at call time, so an A/B can switch it
+        outlier_ratio = COLLAPSE_OUTLIER_RATIO  # (None = the largest-drop rule before 2026-11-22)
+    post_all, basin = split_at_collapse(fit_rungs, sites=sites, outlier_ratio=outlier_ratio)
     # LATE WINDOW (2026-10-09): fit only the last `window` post-collapse core-energy rungs,
     # as COO fits a late window and reports its sensitivity. Without it the window began at
     # the largest single drop, so seeds with IDENTICAL top rungs got different windows

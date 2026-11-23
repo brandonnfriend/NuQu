@@ -664,12 +664,49 @@ def growing_ladder(H, A, rungs, phase0_runs=64, seed=0, pt2_diag=None,
                                "partition": sorted(cnt.values(), reverse=True),
                                "sites": sorted(cnt), "occupancy": [cnt[x] for x in sorted(cnt)]})
     core, out = None, []
+
+    def _record(i, res, wall, ph):
+        if pt2_max_core is not None and int(res.n_dets) > pt2_max_core:
+            return {"core": int(res.n_dets), "E_var": float(res.energy),
+                    "dE_pt2": None, "E_pt2": None, "n_ext": None, "wall_s": wall,
+                    "phase": ph}
+        pr = pt2_from_result(H, res, diag_fn=pt2_diag)
+        return {"core": int(res.n_dets), "E_var": float(pr["E_var"]),
+                "dE_pt2": float(pr["dE_pt2"]),
+                "E_pt2": float(pr["E_var"]) + float(pr["dE_pt2"]),
+                "n_ext": pr["n_ext"], "wall_s": wall, "phase": ph}
+
     if resume is not None:
         core = (np.ascontiguousarray(resume["core"][0], dtype=np.uint64),
                 np.ascontiguousarray(resume["core"][1], dtype=np.uint16))
         if verbose:
             print(f"  [resume] rung index {start_index} (core {rungs[start_index]}) from a "
                   f"saved {core[0].shape[0]}-det core; seeds continue at {seed + start_index}")
+        rr = resume.get("rerecord")
+        if rr is not None:
+            # EXTEND (2026-11-22): re-record the saved rung under THIS run's PT2 cap before
+            # growing on. PT2 depends only on the core's determinants, so the record equals
+            # what a fresh run of the deeper ladder writes at this rung.
+            from types import SimpleNamespace
+            k = start_index - 1
+            saved = SimpleNamespace(ferm_arr=core[0], bos_arr=core[1],
+                                    coeffs=np.asarray(rr["coeffs"]),
+                                    energy=float(rr["energy"]), n_dets=int(core[0].shape[0]),
+                                    stats={})
+            t = time.time()
+            rung = _record(k, saved, 0.0, rr.get("phase", "grow"))
+            rung["wall_s"] = time.time() - t
+            rung["rung_index"] = int(k)
+            rung["resumable"] = True
+            rung["rerecorded_from_checkpoint"] = True
+            out.append(rung)
+            if verbose:
+                pt2s = (f"dE_PT2={rung['dE_pt2']:+.4f}" if rung["dE_pt2"] is not None
+                        else "PT2 skipped (core>cap)")
+                print(f"  [{rung['phase']:>10}] core={rung['core']:>7}  E_var="
+                      f"{rung['E_var']:12.5f} MeV  {pt2s}  [re-recorded from checkpoint]")
+            if on_rung is not None:
+                on_rung(rung, saved)
     for i, r in enumerate(rungs):
         if i < start_index:
             continue                                 # finished before the restart
@@ -688,16 +725,7 @@ def growing_ladder(H, A, rungs, phase0_runs=64, seed=0, pt2_diag=None,
         core = (res.ferm_arr, res.bos_arr)
         ph = ("0-select" if trail is not None and i < len(trail)
               else "0-ensemble" if i == 0 else "grow")
-        if pt2_max_core is not None and int(res.n_dets) > pt2_max_core:
-            rung = {"core": int(res.n_dets), "E_var": float(res.energy),
-                    "dE_pt2": None, "E_pt2": None, "n_ext": None, "wall_s": wall,
-                    "phase": ph}
-        else:
-            pr = pt2_from_result(H, res, diag_fn=pt2_diag)
-            rung = {"core": int(res.n_dets), "E_var": float(pr["E_var"]),
-                    "dE_pt2": float(pr["dE_pt2"]),
-                    "E_pt2": float(pr["E_var"]) + float(pr["dE_pt2"]),
-                    "n_ext": pr["n_ext"], "wall_s": wall, "phase": ph}
+        rung = _record(i, res, wall, ph)
         if i == 0 and summary is not None:
             rung["phase0_select"] = summary
             if init_ferms is not None:

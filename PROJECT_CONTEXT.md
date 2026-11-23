@@ -173,6 +173,24 @@ The A-sweep turns ON select-core 16000 plus stratified starts; novel stays OFF. 
   (299.5 at 512k, unfinished)** — the dense L=3 search is still basin-limited by ~5/site between seeds (C9's
   L≥3 reliability was measured at A≤10, not at filling 1.0). L=4/L=5 (8 shards, 384 GB) idle behind the squeeze
   campaign. C2 at L≥3 needs NEW CLAIMS_FROZEN rows; re-seal + retire legacy artifacts once the rest lands.
+- **2026-11-22, branch `classical/squeeze-L4-deep` (prepped, awaiting push + go-ahead):**
+  - **Deeper squeezed L=4 by EXTENSION.** `hpc/detsvsL/submit_squeeze_L4_deep.sh`: the 33 L=4 shards of
+    294246 continue from their saved 512k cores to 1,024,000 dets with PT2 to 512k (`NUQU_EXTEND=1`,
+    `run_frame_shard.py --resume --extend`, `checkpoint.extend_plan`), 32 cpus, 256 GB base auto-growing,
+    written in place (512k JSONs backed up to `shards/pre_extend_512k/`). Equal to a fresh deeper run
+    (`tests/test_extend_ladder.py`, single-threaded). ~1–1.5 days.
+  - **Collapse rule (plan #2):** the literature-based fits (`trimci-coo`, and `nuqu-2026-10`'s per-seed fits)
+    split a ladder only at an OUTLIER drop (≥ `COLLAPSE_OUTLIER_RATIO` = 3× the next-largest), else keep it
+    whole and fit the last 6 rungs. Why: the largest drop is only 1.04–1.15× the next at L=3–5 (both frames),
+    and on the smooth squeezed L=4 ladders the old cut left 2–3 PT2 rungs (8 of 11 cells bound-only). Legacy
+    `nuqu-2026-09` untouched. A/B over all data = one cluster job (`submit_ab_collapse_rule.sh`,
+    `misc/ab_collapse_rule.py`, data snapshot on scratch); results not yet in.
+  - **Squeeze vs nucleon mobility (data):** the squeeze does not change the hopping term (h = 4.29 MeV)
+    or the πN coupling, so it does not free the arrangements. Select-stage trails: types reaching the best
+    state 58% (L=2) / 24% (L=3) / 18% (L=4); winners are packed full-site arrangements (44, 442, 433, 4411).
+  - **Reproducibility finding:** `tests/test_resume_ladder.py` was flaky on a laptop with `trimci`
+    installed (2 of 3 runs). The official Davidson and multithreaded OpenBLAS/OpenMP are not bit-reproducible;
+    tests now pin one thread + `NUQU_NO_OFFICIAL_DAVIDSON=1`. See `hpc/HPC_WORKFLOW.md`.
 - **Gated error convention `nuqu-2026-10` (implemented 2026-10-10; THE DEFAULT since 2026-10-10 after the
   user reviewed the A/B):** `docs/classical/classical_error_convention_2026-10-08.md` §11. Per-seed fits unchanged
   (trimci-coo); the pooled layer (`extrapolation._pool_gated`) sets σ = max(bootstrap, half the extrapolation

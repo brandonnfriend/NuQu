@@ -102,6 +102,31 @@ def test_late_window_and_tie_break():
     assert pooled["best_seed"] == 0
 
 
+def test_collapse_split_needs_an_outlier_drop():
+    """A smooth ladder whose drops peak mid-way (squeezed L=4, cluster 294246) is NOT split
+    -- the late window fits it -- while a genuine collapse (>= 3x the next drop) still is."""
+    from classical.trimci.extrapolation import split_at_collapse
+    cores = [1000 * 2 ** k for k in range(10)]
+    drops = [0.02, 0.04, 0.07, 0.12, 0.20, 0.32, 0.26, 0.10, 0.06]      # per site, smooth hump
+    E, e = [], 400.0
+    for d in [0.0] + drops:
+        e -= d
+        E.append(e)
+    dE = [-(1.0 - 0.08 * k) for k in range(10)]
+    smooth = [{"core": c, "E_var": x * 64, "dE_pt2": d * 64} for c, x, d in zip(cores, E, dE)]
+    post, info = split_at_collapse(smooth, sites=64, outlier_ratio=3.0)
+    assert len(post) == 10 and info["collapse_detected"] is False
+    post_old, _ = split_at_collapse(smooth, sites=64)             # legacy rule: cuts at the hump
+    assert len(post_old) == 4                                  # cut at the 0.32 hump: 4 rungs left
+    v = einf_literature(smooth, sites=64)
+    assert v["post_cores"] == cores[-6:] and v["n_post_all"] == 10
+    jump = [dict(r) for r in smooth]
+    for r in jump[:4]:
+        r["E_var"] += 10.0 * 64                                   # a 10 MeV/site collapse at 16k
+    post, info = split_at_collapse(jump, sites=64, outlier_ratio=3.0)
+    assert info["collapse_detected"] and info["collapse_core"] == 16000 and len(post) == 6
+
+
 def main():
     test_r2scan_recovers_planted_limit()
     test_no_curvature_is_refused()
@@ -109,6 +134,7 @@ def main():
     test_primary_crosscheck_and_pool_rung()
     test_seed_spread_not_in_sigma_and_legacy_switch()
     test_late_window_and_tie_break()
+    test_collapse_split_needs_an_outlier_drop()
     print("test_sigma_literature: PASS  (R2-scan limit + c.i.; no-curvature refusal; PT2 bootstrap; "
           "PT2 primary / power cross-check; pool rung = bound only; legacy switch intact)")
 

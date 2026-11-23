@@ -102,6 +102,53 @@ def drop_previous(out_json, ckpt_dir=None):
         os.remove(prev)
 
 
+# settings an EXTENSION may change (2026-11-22): the ladder's depth and the PT2 cap only.
+# Everything that shapes the rungs already run must match.
+EXTEND_IGNORE = ("max_core", "pt2_max_core", "n_rungs")
+
+
+def _strip(key, drop):
+    d = json.loads(key)
+    for blk in ("physical", "solver"):
+        for k in drop:
+            d.get(blk, {}).pop(k, None)
+    return json.dumps(d, sort_keys=True)
+
+
+def extend_plan(shard, ckpt, rungs, key):
+    """Decide whether a FINISHED (or partly finished) shard can be continued to a deeper
+    ladder from its saved top core, instead of re-running from rung 0.
+
+    Allowed only if the checkpoint's settings equal this run's apart from EXTEND_IGNORE
+    (ladder depth, PT2 cap) and its ladder is a strict PREFIX of the new one. The saved
+    rung is then RE-RECORDED (PT2 recomputed on the saved core if the new cap covers it;
+    PT2 depends on the core's determinants only, so this equals what a fresh deeper run
+    records there) and growth continues with seed + i, so the extended ladder is
+    bit-identical to a fresh run of the deeper ladder (`tests/test_extend_ladder.py`).
+
+    Returns ("extend", info) with info = {"start_index", "rerecord_index", "core",
+    "coeffs", "energy", "n_rungs_keep", "path", "old_rungs"}, or ("refuse", {"reason"})."""
+    if shard is None or ckpt is None:
+        return "refuse", {"reason": "nothing to extend (no shard JSON or no checkpoint)"}
+    if _strip(ckpt.get("config_key", "{}"), EXTEND_IGNORE) != _strip(key, EXTEND_IGNORE):
+        return "refuse", {"reason": "checkpoint settings differ beyond ladder depth / PT2 cap",
+                          "checkpoint_config": ckpt.get("config_key"), "run_config": key}
+    old = [int(r) for r in ckpt.get("rungs", [])]
+    new = [int(r) for r in rungs]
+    if len(new) <= len(old) or new[:len(old)] != old:
+        return "refuse", {"reason": f"new ladder {new} does not extend the checkpoint ladder {old}"}
+    k = int(ckpt["rung_index"])
+    if k != len(old) - 1:
+        return "refuse", {"reason": f"checkpoint is rung index {k}, not the top of its ladder "
+                                    f"({len(old) - 1}); finish it with --resume first"}
+    if len(shard.get("rungs", [])) < k + 1:
+        return "refuse", {"reason": "shard JSON is behind its checkpoint"}
+    return "extend", {"start_index": k + 1, "rerecord_index": k,
+                      "core": (ckpt["ferm_arr"], ckpt["bos_arr"]), "coeffs": ckpt["coeffs"],
+                      "energy": float(ckpt["energy"]), "n_rungs_keep": k, "path": ckpt["path"],
+                      "old_rungs": old}
+
+
 def resume_plan(shard, ckpt, rungs, key):
     """Decide how a restart continues. `shard` = the existing shard JSON (dict) or None,
     `ckpt` = load_checkpoint() or None, `rungs` = the ladder this run would use, `key` =
