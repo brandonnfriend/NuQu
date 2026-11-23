@@ -33,7 +33,6 @@ import os
 
 from src_PI.hamiltonians.core.EFTParameters import get_physical_parameters
 from src_PI.estimation.qpe_cost import qpe_phase_register_qubits_from_nwalk
-from src_PI.estimation.total_t_optimizer import optimize_qpe_fraction
 
 PARAMS = get_physical_parameters()
 C_SELF = PARAMS['C'] / 2.0 + 3.0 * PARAMS['CI'] / 2.0        # -23.3725 MeV
@@ -157,6 +156,9 @@ def correct_lambda(lam_legacy, L, dim=3):
 def recost(lam, fit_a, fit_b, delta_E=1.0):
     """Re-run the total-T optimizer at a corrected lambda, reusing the shard's own
     walk_T(circuit_precision) fit. Returns the full budget dict plus `m`."""
+    # lazy (2026-11-23): this pulls the quantum stack (sparse_oracle -> qualtran), which the
+    # cluster's classical environment deliberately omits; only this quantum conversion needs it
+    from src_PI.estimation.total_t_optimizer import optimize_qpe_fraction
     out = optimize_qpe_fraction(fit_a, fit_b, lam, delta_E=delta_E)
     out['m'] = qpe_phase_register_qubits_from_nwalk(out['walk_queries'])
     return out
