@@ -21,11 +21,11 @@
 # checkpoints are). The 512k JSONs are copied to shards/pre_extend_512k/ first, so the as-run
 # 294246 record survives on the cluster as well as in data/classical/2026-10-08/.
 #
-# PARALLELISM. 32 cpus per job. With no select stage, the work is the 1,024k grow rung (OpenMP
+# PARALLELISM. 24 cpus per job (319703 was launched at 32 and qedited to 24 before matching). With no select stage, the work is the 1,024k grow rung (OpenMP
 # connection sweep + matvec, deep-solve: OMP threads = cpus) and PT2 at 512k (OpenMP). Scaling is
 # sub-linear (293962: 4->16 threads 1.3-1.4x; the candidate-score reduction is serial), but memory,
-# not cores, limits how many run at once: 3 x 256 GB per ~1 TB qis node, 3 x 32 = 96 cores = a
-# whole node. Raise CPUS if fewer jobs fit (memory holds grow the request).
+# not cores, limits how many run at once: 3 x 256 GB per ~1 TB qis node, and qis1 had only 87
+# free cores (3 x 24 fits, 3 x 32 does not). Condor DISK limits it too: see request_disk below.
 #
 # MEMORY. From 294246's per-rung records: the 512k rung peaked at 100-116 GB, PT2 at 256k had
 # 50-65M external dets (~700 B each). So PT2 at 512k is ~85 GB above the solve and the 1,024k
@@ -55,7 +55,7 @@ L=4
 MAXCORE=1024000
 PT2CAP=512000
 MEM="${MEM:-256}"                 # GB, base of the auto-growing request
-CPUS="${CPUS:-32}"
+CPUS="${CPUS:-24}"
 MAXRUNGSEC="${MAXRUNGSEC:-86400}" # the 1,024k rung is the last one; the budget only stops growth
 P0RUNS=64                         # 294246's L=4 start count -- must match the checkpoint
 P0W=8                             # ignored by the checkpoint key; no select stage on extension
@@ -90,7 +90,7 @@ MEMGROW_MB              = (\$(MEM) * 1024 * (1 + \$(NHOLDS)))
 request_memory          = ifThenElse(\$(MEMGROW_MB) < \$(MEMCAP_MB), \$(MEMGROW_MB), \$(MEMCAP_MB))
 periodic_release        = (HoldReasonCode == 34) && (NumHolds < ${MAXHOLDS})
 on_exit_remove          = !((ExitBySignal == False) && (ExitCode == 3) && (NumJobStarts < 3))
-request_disk            = 2560M
+request_disk            = 300M
 JobPrio                 = \$(PRIO)
 Output                  = campaign_${BASE}/logs/${arm}_L\$(L)_A\$(A)_s\$(SEED).out
 Error                   = campaign_${BASE}/logs/${arm}_L\$(L)_A\$(A)_s\$(SEED).err

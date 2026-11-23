@@ -32,7 +32,7 @@ transfer_output_files   = ""
 requirements = (Machine == "qis1.hep.wisc.edu") || (Machine == "qis2.hep.wisc.edu") || (Machine == "qis3.hep.wisc.edu")
 request_cpus            = ${CPUS}
 request_memory          = ${MEM}G
-request_disk            = 2560M
+request_disk            = 300M
 on_exit_remove          = !((ExitBySignal == False) && (ExitCode == 3) && (NumJobStarts < 3))
 JobPrio                 = 100
 Output                  = campaign_${BASE}/logs/ab.out

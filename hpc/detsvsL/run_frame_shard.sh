@@ -64,6 +64,10 @@ else
 fi
 export HOME="$SANDBOX" UV_INSTALL_DIR="$SANDBOX/uvbin" \
        UV_CACHE_DIR="$SANDBOX/uvcache" UV_PYTHON_INSTALL_DIR="$SANDBOX/uvpy"
+# no persistent uv cache in the sandbox (2026-11-22): it was 454 of a job's 632 MB, and the
+# qis nodes advertise very little Condor disk (qis1 ~1.5 GB free, qis3 ~3 GB total), so a
+# 2.5 GB request let only ONE job start (319703). With it off a job needs ~200 MB.
+export UV_NO_CACHE=1
 export PATH="$UV_INSTALL_DIR:$SANDBOX/.local/bin:$PATH"
 
 echo "[shard] host=$(hostname) L=$L seed=$SEED frame=$FRAME A=$A filling=$FILLING max_core=$MAXCORE cpus=$cpus"

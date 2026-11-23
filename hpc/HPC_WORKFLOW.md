@@ -108,6 +108,14 @@ the pinned deps → compile the C++ hot path. Key points:
   (requirements-hpc.txt omits `trimci`); `NUQU_NO_OFFICIAL_DAVIDSON=1` makes a laptop run match
   them. Deep-solve jobs run multithreaded, so a resumed or extended shard is a statistically
   equivalent continuation, not a guaranteed bit-for-bit one.
+- **Condor DISK is the scarce resource on qis (2026-11-22).** The nodes advertise only a few GB
+  of execute disk (qis1 ~1.5 GB free, qis3 ~3 GB total, the rest held by other users' 4 GB
+  slots), so `request_disk = 2560M` let exactly one job of 319703 start while 32 sat idle with
+  "0 slots match, 3 would match if drained". A job really uses ~632 MB, 454 MB of it `uv`'s
+  cache. The wrappers now export `UV_NO_CACHE=1` (~200 MB per job) and new submits request
+  300M; the pool does not enforce disk (no disk hold/remove policy), so a brief install overshoot
+  is harmless. Diagnose with `condor_q -better-analyze <id>`: look for the condition whose
+  "Slots Matched" drops to 0, and at `condor_status -af Machine SlotType Cpus Memory Disk State`.
 - **Analysis jobs (2026-11-22).** `run_analysis.sh <python module> [args]` provisions the same
   pinned tools and runs one module with BLAS/OpenMP pinned to 1 (the module parallelises
   itself). Example: `submit_ab_collapse_rule.sh` (one 32-cpu job). `data/` is not in the server
