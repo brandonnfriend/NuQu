@@ -173,7 +173,17 @@ The A-sweep turns ON select-core 16000 plus stratified starts; novel stays OFF. 
   (299.5 at 512k, unfinished)** — the dense L=3 search is still basin-limited by ~5/site between seeds (C9's
   L≥3 reliability was measured at A≤10, not at filling 1.0). L=4/L=5 (8 shards, 384 GB) idle behind the squeeze
   campaign. C2 at L≥3 needs NEW CLAIMS_FROZEN rows; re-seal + retire legacy artifacts once the rest lands.
-- **2026-11-22, branch `classical/squeeze-L4-deep` (prepped, awaiting push + go-ahead):**
+- **2026-11-24, gate 5 (family calibration) BUILT (user decision after the collapse-rule A/B):**
+  `extrapolation._family_calibration_check` / `FAMILY_CALIBRATION_GATE` (switch) / `FAMILY_CALIBRATION_MIN_L`=4;
+  registry `classical/trimci/family_calibration.json` (built by `misc/build_family_calibration.py`, from the
+  shards or an A/B record; rebuild it whenever new A=0 data lands), read through `external_bounds.lookup(...)["calibration"]`.
+  A (frame, dim, n_b, L) family reports E∞ only if every extrapolated A=0 limit is within σ (+ the exact value's
+  ±0.0005/site quoting precision) of the exact vacuum; no check → bound-only from L=4, not voting below.
+  Old-vs-new (`misc/ab_family_calibration.py` → `docs/classical/ab_collapse_rule_20261123/gate5_family_calibration.md`):
+  29 cells → bound only, ALL bare L≥4 (n_b=3 L=4 fails at 2.4σ; bare L=5 and n_b=2/4 L=4 have no check); every
+  squeezed and bare L≤3 cell unchanged. New CLAIMS_FROZEN rows (2026-11-24): C2 L=4 and L=5 bound only, L=3 unchanged.
+  Squeezed L=4 at 1,024k (319703, 21/33 in): all 11 A extrapolate, σ 0.17–0.28/site, A=0 +0.045 ± 0.168.
+- **2026-11-22, branch `classical/squeeze-L4-deep` (LAUNCHED 2026-11-22 as 319703 + A/B 319705; A/B done 2026-11-23):**
   - **Deeper squeezed L=4 by EXTENSION.** `hpc/detsvsL/submit_squeeze_L4_deep.sh`: the 33 L=4 shards of
     294246 continue from their saved 512k cores to 1,024,000 dets with PT2 to 512k (`NUQU_EXTEND=1`,
     `run_frame_shard.py --resume --extend`, `checkpoint.extend_plan`), 32 cpus, 256 GB base auto-growing,
@@ -184,7 +194,7 @@ The A-sweep turns ON select-core 16000 plus stratified starts; novel stays OFF. 
     whole and fit the last 6 rungs. Why: the largest drop is only 1.04–1.15× the next at L=3–5 (both frames),
     and on the smooth squeezed L=4 ladders the old cut left 2–3 PT2 rungs (8 of 11 cells bound-only). Legacy
     `nuqu-2026-09` untouched. A/B over all data = one cluster job (`submit_ab_collapse_rule.sh`,
-    `misc/ab_collapse_rule.py`, data snapshot on scratch); results not yet in.
+    `misc/ab_collapse_rule.py`, data snapshot on scratch); DONE: 82/206 nuqu-2026-10 cells change, legacy 0.
   - **Squeeze vs nucleon mobility (data):** the squeeze does not change the hopping term (h = 4.29 MeV)
     or the πN coupling, so it does not free the arrangements. Select-stage trails: types reaching the best
     state 58% (L=2) / 24% (L=3) / 18% (L=4); winners are packed full-site arrangements (44, 442, 433, 4411).
@@ -211,8 +221,7 @@ The A-sweep turns ON select-core 16000 plus stratified starts; novel stays OFF. 
   332.728 ± 2.636, |Δ34| ≤ 0.0015/site at every rung — the +1.27/site bare L=3 vacuum miss is fit/search
   bias, not cutoff, and sits at 0.48σ.** A=0 calibration now passes at bare L=2/3 and squeeze L=2/3 (≤ 0.5σ)
   and **FAILS at bare L=4: 356.68 ± 5.77 vs exact 344.596, +12.1/site = 2.1σ** (256k cores on 64 sites; the
-  PT2-linear fit closes half the gap and the exact-floor gate only catches undershoot). Proposed, not
-  implemented: a fifth gate (family calibration — if the A=0 cell of a (frame, n_b, L) family misses the
+  PT2-linear fit closes half the gap and the exact-floor gate only catches undershoot). BUILT 2026-11-24 (see above): a fifth gate (family calibration — if the A=0 cell of a (frame, n_b, L) family misses the
   exact vacuum by > σ, the family is bound-only; would turn every bare L=4 cell bound-only, nothing else),
   or the deeper L=4 ladder (1024k, PT2 512k, ~300 GB). Details: `docs/classical/classical_calibration_results_2026-10-10.md` §5.
   Refused cells quote the bound and keep the refused limit in `gate`. `window_shift` is now

@@ -25,6 +25,7 @@ import json
 import os
 
 REGISTRY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "external_bounds.json")
+CALIBRATION_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "family_calibration.json")
 _C_SELF = None
 
 
@@ -66,13 +67,44 @@ def _in_convention(e, contact_convention):
     return out
 
 
-def lookup(frame, n_b, L, A, dim=3, contact_convention="wick", registry=None):
-    """{'upper': [entries sorted tightest first], 'exact': entry or None} for one cell."""
+def load_calibration(path=None):
+    p = path or CALIBRATION_PATH
+    if not os.path.exists(p):
+        return []
+    with open(p) as f:
+        return json.load(f)["entries"]
+
+
+def family_calibration(frame, dim, n_b, L, registry=None):
+    """Gate-5 status of the (frame, dim, n_b, L) family (2026-11-24): its A=0 limits vs the exact
+    pion vacuum, from `family_calibration.json` (misc/build_family_calibration.py).
+
+      * 'failed'  -- some extrapolated A=0 limit misses the exact vacuum by more than its sigma;
+      * 'passed'  -- at least one is within sigma and none misses;
+      * 'missing' -- no A=0 limit was reported (bound only, or never run) or no exact value.
+    A=0 is the EASIEST point of a family (no nucleons), so a family that misses there cannot be
+    trusted at A>0; one that passes there is calibrated only as far as A=0 reaches."""
+    reg = load_calibration() if registry is None else registry
+    es = [e for e in reg if e["frame"] == frame and int(e["dim"]) == int(dim)
+          and int(e["n_b"]) == int(n_b) and int(e["L"]) == int(L)]
+    checked = [e for e in es if e.get("ok") and e.get("dev_ps") is not None]
+    failed = [e for e in checked if not e.get("passed")]
+    status = "failed" if failed else ("passed" if checked else "missing")
+    return {"status": status, "frame": frame, "dim": int(dim), "n_b": int(n_b), "L": int(L),
+            "entries": es, "failed": failed}
+
+
+def lookup(frame, n_b, L, A, dim=3, contact_convention="wick", registry=None, calibration=True,
+           calibration_registry=None):
+    """{'upper': [entries sorted tightest first], 'exact': entry or None, 'calibration': the
+    family's gate-5 status (or None with calibration=False)} for one cell."""
     reg = load_registry() if registry is None else registry
     hits = [_in_convention(e, contact_convention) for e in reg if _matches(e, frame, n_b, L, A, dim)]
     upper = sorted((e for e in hits if e["kind"] == "variational_upper"), key=lambda e: e["E"])
     exact = next((e for e in hits if e["kind"] == "exact"), None)
-    return {"upper": upper, "exact": exact}
+    cal = (family_calibration(frame, dim, n_b, L, registry=calibration_registry)
+           if calibration else None)
+    return {"upper": upper, "exact": exact, "calibration": cal}
 
 
 def tightest_upper(ext):

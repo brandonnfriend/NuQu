@@ -563,6 +563,16 @@ LEGACY_CONVENTION = "nuqu-2026-09"
 # after which sigma is widened to cover its central value (term `cross_check_gap`).
 # DEFAULT since 2026-10-10 (user decision after the A/B in docs/classical/sigma_convention_ab_2026-10-10.md).
 GATED_CONVENTION = "nuqu-2026-10"
+# Gate 5, FAMILY CALIBRATION (2026-11-24, user decision after the collapse-rule A/B in
+# docs/classical/ab_collapse_rule_20261123/): a (frame, dim, n_b, L) family reports a limit only
+# if its A=0 cell lands within sigma of the exact pion vacuum (`external_bounds.family_calibration`,
+# registry `family_calibration.json`). A family that MISSES (bare n_b=3 L=4: +12.9 MeV/site =
+# 2.4 sigma) is bound-only at every A; a family with NO A=0 check is bound-only from L >= 4 (the
+# only L>=4 check of the bare frame fails) and does not vote below that (every L<=3 family checked
+# passes). Read only when the caller passes an `external` lookup that carries 'calibration'.
+# Switch it off (False) for the old-vs-new record and when building the registry itself.
+FAMILY_CALIBRATION_GATE = True
+FAMILY_CALIBRATION_MIN_L = 4
 SIGMA_CONVENTIONS = (LITERATURE_CONVENTION, LEGACY_CONVENTION, GATED_CONVENTION)
 DEFAULT_SIGMA_CONVENTION = GATED_CONVENTION
 
@@ -968,7 +978,8 @@ def _pool_gated(per_seed, sites=None, external=None):
         cross-check, where it is RESOLVED (its own bootstrap sigma within the extrapolation
         distance), overlaps the limit within one sigma each way, |gap| <= sigma + sigma_cc
         (`_cross_check_gate`), (4) the seed spread is <= sigma (true by construction,
-        asserted). Otherwise the bound alone is quoted and the refused limit is kept in `gate`
+        asserted), (5) the cell's (frame, dim, n_b, L) family is calibrated at A=0 against the
+        exact vacuum (`_family_calibration_check`, 2026-11-24; only when `external` carries it). Otherwise the bound alone is quoted and the refused limit is kept in `gate`
         for the record.
       * a resolved cross-check that passes widens sigma to cover its central value: the fourth
         term `cross_check_gap` = |gap| (model dependence of the extrapolator is a fourth way to
@@ -1074,6 +1085,9 @@ def _pool_gated(per_seed, sites=None, external=None):
                              "E_inf_ps": per(cc.get("E_inf"))}
     checks["seed_spread"] = {"passed": (s_seed is None) or (sigma is not None and s_seed <= sigma + 1e-12),
                              "spread": s_seed, "spread_ps": per(s_seed), "n_matched": len(matched)}
+    fam = _family_calibration_check(ext.get("calibration") if external is not None else None)
+    if fam is not None:
+        checks["family_calibration"] = fam
     refused_by = [k for k, c in checks.items() if not c["passed"]]
     gate = {"passed": not refused_by, "refused_by": refused_by, "checks": checks,
             "E_inf_refused": None if not refused_by else E,
@@ -1101,8 +1115,10 @@ def _pool_gated(per_seed, sites=None, external=None):
                "cross_check": (f"the cross-check ({cc.get('estimator')}, its own sigma "
                                f"{ps(cc_gate['sigma_cc'] or 0.0):.3f}{u}) lands {ps(gap):.3f}{u} away: "
                                f"the two 1-sigma intervals do not overlap (tolerance sigma + sigma_cc "
-                               f"= {ps(cc_gate['tolerance']):.3f}{u})" if gap is not None else ""),
-               "seed_spread": f"seed spread {s_seed} exceeds sigma {sigma}"}
+                               f"= {ps(cc_gate['tolerance']):.3f}{u})"
+                               if "cross_check" in refused_by and gap is not None else ""),
+               "seed_spread": f"seed spread {s_seed} exceeds sigma {sigma}",
+               "family_calibration": (fam or {}).get("reason", "")}
         return refuse("gate refused the limit (" + "; ".join(why[k] for k in refused_by) +
                       "); quote the bound", gate, best)
     pooled["seed_robustness"] = _spread_record(pooled, ok, tops, best, per, source)
@@ -1111,6 +1127,30 @@ def _pool_gated(per_seed, sites=None, external=None):
                          f"extrapolated; sigma = max(bootstrap, half extrapolation distance, "
                          f"seed spread at matched depth) = {source}; gate passed")
     return pooled
+
+
+def _family_calibration_check(cal):
+    """Gate 5 of nuqu-2026-10 (2026-11-24). `cal` is `external_bounds.family_calibration(...)`;
+    None (no lookup, or the switch off) -> the check is not recorded and does not vote."""
+    if not FAMILY_CALIBRATION_GATE or cal is None:
+        return None
+    st, L = cal["status"], int(cal["L"])
+    fam = f"{cal['frame']} n_b={cal['n_b']} L={L}"
+    devs = [f"{e['dev_ps']:+.3f} ± {e['sigma_ps']:.3f}/site ({e['source']})"
+            for e in cal.get("entries") or [] if e.get("dev_ps") is not None]
+    if st == "passed":
+        ok, why = True, f"family {fam} calibrated at A=0: " + "; ".join(devs)
+    elif st == "failed":
+        ok, why = False, (f"family {fam} misses the exact A=0 vacuum by more than sigma ("
+                          + "; ".join(f"{e['dev_ps']:+.3f} ± {e['sigma_ps']:.3f}/site ({e['source']})"
+                                      for e in cal["failed"]) + ")")
+    elif L >= FAMILY_CALIBRATION_MIN_L:
+        ok, why = False, (f"family {fam} has no A=0 calibration (no reported A=0 limit or no exact "
+                          f"vacuum), required from L={FAMILY_CALIBRATION_MIN_L}")
+    else:
+        ok, why = True, f"family {fam} has no A=0 calibration; not required below L={FAMILY_CALIBRATION_MIN_L}"
+    return {"passed": ok, "status": st, "reason": why, "devs": devs,
+            "min_L": FAMILY_CALIBRATION_MIN_L}
 
 
 def _cross_check_gate(gap, sigma_cc, sigma3, extrap_distance):
