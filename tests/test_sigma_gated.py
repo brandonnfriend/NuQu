@@ -58,7 +58,7 @@ def test_registry_loads_and_matches_same_operator_only():
     for frame, nb in (("bare", 3), ("gaussian", 3), ("bare", 4)):
         e = xb.lookup(frame, nb, 3, 0, 3, "wick")
         assert e["upper"] == [] and abs(e["exact"]["E_ps"] - 331.461) < 1e-9
-    assert xb.lookup("bare", 3, 5, 0, 3, "wick")["exact"] is None
+    assert abs(xb.lookup("bare", 3, 5, 0, 3, "wick")["exact"]["E_ps"] - 352.328627) < 1e-6   # 2026-11-24
 
 
 def test_registry_contact_convention_shift():

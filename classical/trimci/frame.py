@@ -340,6 +340,41 @@ def analytic_bogoliubov(H, modes=None, max_ratio=0.98, thresh=1e-12):
     return alpha, beta
 
 
+def boson_vacuum_energy(H):
+    """EXACT ground energy of the boson-only sector of `H` (untruncated: the b are true
+    bosons, no Fock cutoff), for A=0 where the fermion-coupled terms vanish. The A=0 pion
+    Hamiltonian is quadratic, `H = c + Σ A_ij b_i†b_j + ½ Σ (B_ij b_i†b_j† + h.c.)`, so its
+    ground energy is `c + ½ Σ Ω_k − ½ tr A` with Ω_k the positive symplectic eigenvalues
+    of `M = [[A, B], [B*, A*]]` (eig of J M). `c` collects the constant terms plus the
+    δ_ii reordering constants of `b_i b_i†` terms, which `boson_quadratic_matrices` drops.
+
+    Reproduces the registered 304.149 / 331.461 / 344.596 MeV/site at L=2/3/4 (n_b-free);
+    added 2026-11-24 for L=5 (352.328627). Refuses (ValueError) a boson-only term that is
+    not quadratic, or a form that is not positive definite (no stable vacuum)."""
+    A, B, ms = boson_quadratic_matrices(H)
+    const = 0.0
+    for t in H.terms:
+        if t.ferm_ops:
+            continue
+        if not t.bos_ops:
+            const += complex(t.coeff).real
+        elif len(t.bos_ops) == 2:
+            (m0, a0), (m1, a1) = t.bos_ops
+            if (a0, a1) == (0, 1) and m0 == m1:
+                const += complex(t.coeff).real          # b_i b_i† = b_i† b_i + 1
+        else:
+            raise ValueError(f"boson-only term of degree {len(t.bos_ops)}: not a quadratic vacuum")
+    k = len(ms)
+    M = np.block([[A, B], [B.conj(), A.conj()]])
+    M = 0.5 * (M + M.conj().T)
+    if float(np.linalg.eigvalsh(M).min()) <= 0:
+        raise ValueError("boson quadratic form is not positive definite: no stable vacuum")
+    J = np.diag(np.concatenate([np.ones(k), -np.ones(k)]))
+    lam = np.linalg.eigvals(J @ M).real
+    omega = np.sort(lam[lam > 0])
+    return float(const + 0.5 * omega.sum() - 0.5 * np.trace(A).real)
+
+
 def bogoliubov_terms(H, alpha, beta):
     """General multi-mode Bogoliubov frame `Ū = U†HU` via the LINEAR substitution
         b_i  -> Σ_j (α_ij b_j + β_ij b_j†),   b_i† -> Σ_j (α*_ij b_j† + β*_ij b_j)

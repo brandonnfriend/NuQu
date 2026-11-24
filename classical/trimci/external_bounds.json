@@ -144,6 +144,24 @@
    "date": "2026-10-09",
    "note": "A=0 has no contact term, so convention-free; the untruncated answer is a LOWER bound on every truncated (any n_b, any frame) limit, and the reference every A=0 extrapolation is compared against; E_ps is quoted to 3 decimals, so it carries a +-0.0005/site rounding precision (E_ps_precision) that gate 5 adds to sigma",
    "E_ps_precision": 0.0005
+  },
+  {
+   "kind": "exact",
+   "frame": "*",
+   "dim": 3,
+   "n_b": "*",
+   "N_f": "*",
+   "L": 5,
+   "A": 0,
+   "sites": 125,
+   "contact_convention": "wick",
+   "E": 44041.0784,
+   "E_ps": 352.328627,
+   "E_ps_precision": 1e-06,
+   "method": "exact A=0 pion vacuum, quadratic boson form (frame.boson_vacuum_energy), untruncated",
+   "source": "classical/trimci/frame.py::boson_vacuum_energy(build_from_eft(5, 3, 3)), 2026-11-24; the same function reproduces the L=2/3/4 entries (304.149162 / 331.461245 / 344.595992)",
+   "date": "2026-11-24",
+   "note": "A=0 has no contact term, so convention-free; lower bound on every truncated limit at L=5 and the reference the L=5 A=0 calibration runs are compared against"
   }
  ]
 }

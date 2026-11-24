@@ -173,6 +173,12 @@ The A-sweep turns ON select-core 16000 plus stratified starts; novel stays OFF. 
   (299.5 at 512k, unfinished)** — the dense L=3 search is still basin-limited by ~5/site between seeds (C9's
   L≥3 reliability was measured at A≤10, not at filling 1.0). L=4/L=5 (8 shards, 384 GB) idle behind the squeeze
   campaign. C2 at L≥3 needs NEW CLAIMS_FROZEN rows; re-seal + retire legacy artifacts once the rest lands.
+- **2026-11-24, A=0 vacuum calibration runs PREPPED (awaiting push + go-ahead):** `hpc/detsvsL/submit_vacuum_calibration.sh`
+  — bareL4: extend 294246's bare L=4 A=0 (s0,s1) 512k → 2,048k, PT2 to 1,024k (cap 960 GB); bareL5: fresh, 293963's
+  L=5 settings (128k, 3 seeds); sqL5: fresh squeezed L=5 A=0 to 1,024k (2 seeds). Exact vacuum at L=5 = **352.328627 MeV/site**
+  (`frame.boson_vacuum_energy`, registered in `external_bounds.json`; reproduces L=2/3/4). Bare Fock-vacuum overlap with the exact
+  vacuum: 0.57 / 7.3e-2 / 8.4e-4 / 3.5e-7 at L=2–5 — the bare arms are expected to CONFIRM the miss; sqL5 should calibrate.
+  After they land: rebuild `family_calibration.json` with `misc/build_family_calibration.py --data-root`.
 - **2026-11-24, gate 5 (family calibration) BUILT (user decision after the collapse-rule A/B):**
   `extrapolation._family_calibration_check` / `FAMILY_CALIBRATION_GATE` (switch) / `FAMILY_CALIBRATION_MIN_L`=4;
   registry `classical/trimci/family_calibration.json` (built by `misc/build_family_calibration.py`, from the

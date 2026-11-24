@@ -101,7 +101,9 @@ def test_builder_entry_uses_the_exact_value_precision():
     assert e["exact_precision_ps"] == 0.0005 and e["passed"]
     e = entry("bare", "bare", 3, 4, 3, True, 357.5404, 5.3395, 368.2194)
     assert not e["passed"] and abs(e["dev_ps"] - 12.944) < 1e-3
-    e = entry("bare5", "bare", 3, 5, 3, True, 380.0, 4.8, 385.0)
+    e = entry("bare5", "bare", 3, 5, 3, True, 360.0, 4.8, 365.0)     # exact 352.329 since 2026-11-24
+    assert not e["passed"] and abs(e["dev_ps"] - 7.6714) < 1e-3
+    e = entry("bare6", "bare", 3, 6, 3, True, 380.0, 4.8, 385.0)
     assert not e["passed"] and e["exact_ps"] is None and "no exact" in e["reason"]
     e = entry("bo", "bare", 3, 4, 3, False, None, None, 369.07)
     assert not e["passed"] and "not reported" in e["reason"]
@@ -118,6 +120,19 @@ def test_shipped_registry():
     # the lookup carries it; calibration=False leaves it out
     assert xb.lookup("bare", 3, 4, 6, 3, "wick")["calibration"]["status"] == "failed"
     assert xb.lookup("bare", 3, 4, 6, 3, "wick", calibration=False)["calibration"] is None
+
+
+def test_exact_vacuum_function_reproduces_the_registry():
+    """frame.boson_vacuum_energy (2026-11-24) reproduces every registered exact A=0 vacuum to
+    its quoting precision; L=2 and L=5 are run (L=5 is the new entry)."""
+    from classical.trimci.frame import boson_vacuum_energy
+    from classical.trimci.hamiltonian import build_from_eft
+    for L in (2, 5):
+        ex = xb.lookup("bare", 3, L, 0, 3, "wick")["exact"]
+        got = boson_vacuum_energy(build_from_eft(L, 3, 3)) / L ** 3
+        assert abs(got - ex["E_ps"]) <= ex["E_ps_precision"], (L, got, ex["E_ps"])
+    # cutoff-free: the quadratic form does not see the Fock truncation
+    assert abs(boson_vacuum_energy(build_from_eft(2, 3, 2)) / 8 - 304.149162) < 1e-5
 
 
 if __name__ == "__main__":
